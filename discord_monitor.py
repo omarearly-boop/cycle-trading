@@ -41,8 +41,10 @@ from ct_qa_pairing import pair_messages, message_hash
 #  PATHS
 # ══════════════════════════════════════════════════════════════
 BASE_DIR       = Path(__file__).parent
+REPORTS_DIR    = BASE_DIR / 'REPORTS'
+REPORTS_DIR.mkdir(exist_ok=True)
 LESSONS_FILE   = BASE_DIR / 'pending_lessons.json'
-REPORT_FILE    = BASE_DIR / 'discord_lessons_report.html'
+REPORT_FILE    = REPORTS_DIR / 'discord_lessons_report.html'
 LAST_SEEN_FILE = BASE_DIR / '.discord_last_seen.json'
 
 DISCORD_URL = 'https://discord.com/channels/1069278010835992678/1077319951179841667'

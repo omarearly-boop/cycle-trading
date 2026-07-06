@@ -23,7 +23,7 @@ INPUT      = BASE / 'discord_processed.json'
 RAW_INPUT  = BASE / 'discord_may_june_2026.json'   # has real image URLs
 LESSONS    = BASE / 'pending_lessons.json'
 
-REPORT_DIR = BASE / 'REPORT'
+REPORT_DIR = BASE / 'REPORTS'
 REPORT_DIR.mkdir(exist_ok=True)
 
 # Filename: discord_lessons_YYYYMMDD-YYYYMMDD_gen_YYYYMMDD.html
