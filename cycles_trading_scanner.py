@@ -65,6 +65,7 @@ from ct_analysis import (
 )
 from ct_report   import profit_breakdown
 from ct_html     import generate_html, make_pine_for_ticker, save_pine_script
+from ct_watch_manager import auto_add_to_watchlist
 
 # ══════════════════════════════════════════════════════════════
 #  STABLE INTERFACE FOR EXTERNAL CONSUMERS
@@ -257,6 +258,10 @@ def main():
                 print(f"  [{'#'*pct}{'-'*(30-pct)}] {idx:>3}/{total}  {ticker:<14}", end='\r')
                 for s in setups:
                     all_results.append(s)
+                    try:
+                        auto_add_to_watchlist(s)
+                    except Exception:
+                        pass  # never break the scan
 
     scan_group(scan_stocks,    'US Stocks',             is_crypto=False, is_israel=False, is_commodity=False, is_intl=False)
     scan_group(scan_israel,    'Israeli Stocks (TASE)',  is_crypto=False, is_israel=True,  is_commodity=False, is_intl=False)
