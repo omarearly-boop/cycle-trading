@@ -465,127 +465,55 @@ def _fetch_market_data(ticker, is_crypto=False, is_commodity=False,
     }
 
 
-def _detect_long_setup(ticker, portfolio_size, market, is_crypto, asset_type, max_dist,
-                       is_commodity=False, is_israel=False, is_intl=False):
+def _detect_setup(ticker, portfolio_size, market, is_crypto, asset_type, max_dist,
+                  direction: str,
+                  is_commodity=False, is_israel=False, is_intl=False):
     """
-    SetupDetector seam (LONG side) — pure given already-fetched market data.
-    No yfinance calls here. Returns a finished setup dict, or None.
+    SetupDetector seam — pure given already-fetched market data.
+    No yfinance calls here.  direction is 'LONG' or 'SHORT'.
+    Returns a finished setup dict, or None.
+
+    Replaces the former _detect_long_setup / _detect_short_setup pair.
+    Direction-specific logic is confined to clearly-labelled branches.
     """
-    df, price, rsi_val, atr_val   = market['df'], market['price'], market['rsi_val'], market['atr_val']
-    support, resistance           = market['support'], market['resistance']
-    vol_ok, earn_warn             = market['vol_ok'], market['earn_warn']
-    earn_approaching, earn_date   = market['earn_approaching'], market['earn_date']
-    earn_days, atr_pct            = market['earn_days'], market['atr_pct']
-    high_volatility               = market['high_volatility']
-    m_analysis, rs_info           = market['m_analysis'], market['rs_info']
-    macd_data, boll_data          = market['macd_data'], market['boll_data']
-    short_pct, inst_pct           = market['short_pct'], market['inst_pct']
+    is_long = (direction == 'LONG')
 
-    if not (market['trend'] == 'LONG' and rsi_val <= RSI_LONG_MAX):
-        return None
+    df, price, rsi_val, atr_val = market['df'], market['price'], market['rsi_val'], market['atr_val']
+    support, resistance         = market['support'], market['resistance']
+    vol_ok, earn_warn           = market['vol_ok'], market['earn_warn']
+    earn_approaching, earn_date = market['earn_approaching'], market['earn_date']
+    earn_days, atr_pct          = market['earn_days'], market['atr_pct']
+    high_volatility             = market['high_volatility']
+    m_analysis, rs_info         = market['m_analysis'], market['rs_info']
+    macd_data, boll_data        = market['macd_data'], market['boll_data']
+    short_pct, inst_pct         = market['short_pct'], market['inst_pct']
 
-    dist = (price - support) / price
+    # ── Trend + RSI gate ─────────────────────────────────────────
+    if is_long:
+        if not (market['trend'] == 'LONG' and rsi_val <= RSI_LONG_MAX):
+            return None
+    else:
+        if not (market['trend'] == 'SHORT' and rsi_val >= RSI_SHORT_MIN):
+            return None
+
+    # ── Distance to key level ────────────────────────────────────
+    key_level = support if is_long else resistance
+    dist = (price - key_level) / price if is_long else (key_level - price) / price
     if dist > max_dist:
         return None
 
+    # ── Entry / Stop / Target ────────────────────────────────────
     entry  = price
-    stop   = round(support * 0.97, 4)      # 3% cushion below support
-    target = resistance
+    stop   = round(support * 0.97, 4) if is_long else round(resistance * 1.03, 4)
+    target = resistance if is_long else support
 
-    # Make sure target is meaningfully above entry
-    if target <= entry * 1.02:
+    if is_long and target <= entry * 1.02:
         target = round(entry + atr_val * 3, 4)
-
-    risk_u = entry - stop
-    rew_u  = target - entry
-    if not (risk_u > 0 and rew_u > 0):
-        return None
-
-    rratio = round(rew_u / risk_u, 2)
-    if rratio < MIN_RR:
-        return None
-
-    # ── Position Sizing (3 safeguards) ──
-    units, pos_val, risk_amt, pos_pct, was_capped, cap_reason = \
-        calc_position_size(portfolio_size, entry, stop,
-                           atr_pct=atr_pct, high_vol=high_volatility)
-
-    score = rratio
-    if vol_ok:           score *= 1.25
-    if rsi_val < 45:     score *= 1.20
-    if dist < 0.05:      score *= 1.15
-    if not earn_warn:    score *= 1.10
-
-    # Gann quality check (stocks only, not crypto)
-    if not is_crypto:
-        high52 = float(df['High'].tail(52).max())
-        if price < high52 * 0.50:
-            score *= 0.5   # penalise but don't reject
-
-    # High short interest on LONG = squeeze potential (bonus)
-    if short_pct >= 0.15:
-        score *= 1.15   # bonus — squeeze can accelerate the move up
-
-    # Support quality + level reliability + false breakout (N.M.S.) + ambiguity
-    sup_touches, sup_q = get_support_quality(df, support)
-    level_rel, _       = check_level_reliability(df, support)
-    fb, fb_label, _    = check_false_breakout(df, resistance, direction='up')
-    level_amb, level_amb_n, _ = check_level_ambiguity(df, support, atr_val)
-    tr_conf, tr_conf_lbl, _ = check_swing_broken(df, direction='up')
-    # Factor 20 — Fibonacci Retracement Zone
-    fib_zone, fib_pct, fib_sl, fib_sh, fib_lvls = \
-        check_fibonacci_zone(df, 'LONG', price)
-
-    _setup = _build_setup_dict(
-        'LONG', ticker, price, rsi_val, support, resistance,
-        entry, stop, target, rratio, units, pos_val, risk_amt,
-        pos_pct, was_capped, cap_reason, vol_ok, earn_warn,
-        earn_approaching, earn_date, earn_days, asset_type, score,
-        'NONE', short_pct, inst_pct, atr_pct, high_volatility,
-        m_analysis, rs_info, sup_touches, sup_q, macd_data, boll_data,
-        level_rel=level_rel, false_breakout=fb, fb_label=fb_label,
-        level_amb=level_amb, level_amb_n=level_amb_n,
-        trend_confirmed=tr_conf, trend_conf_label=tr_conf_lbl,
-        fib_zone=fib_zone, fib_ret_pct=fib_pct,
-        fib_swing_low=fib_sl, fib_swing_high=fib_sh, fib_levels=fib_lvls)
-    return _finalize_setup(_setup, 'LONG', ticker, atr_val,
-                           m_analysis, is_crypto, is_commodity,
-                           is_israel, is_intl, cached_info=market['cached_info'])
-
-
-def _detect_short_setup(ticker, portfolio_size, market, is_crypto, asset_type, max_dist,
-                        is_commodity=False, is_israel=False, is_intl=False):
-    """
-    SetupDetector seam (SHORT side) — pure given already-fetched market data.
-    No yfinance calls here. Returns a finished setup dict, or None.
-    """
-    df, price, rsi_val, atr_val   = market['df'], market['price'], market['rsi_val'], market['atr_val']
-    support, resistance           = market['support'], market['resistance']
-    vol_ok, earn_warn             = market['vol_ok'], market['earn_warn']
-    earn_approaching, earn_date   = market['earn_approaching'], market['earn_date']
-    earn_days, atr_pct            = market['earn_days'], market['atr_pct']
-    high_volatility               = market['high_volatility']
-    m_analysis, rs_info           = market['m_analysis'], market['rs_info']
-    macd_data, boll_data          = market['macd_data'], market['boll_data']
-    short_pct, inst_pct           = market['short_pct'], market['inst_pct']
-
-    if not (market['trend'] == 'SHORT' and rsi_val >= RSI_SHORT_MIN):
-        return None
-
-    dist = (resistance - price) / price
-    if dist > max_dist:
-        return None
-
-    entry  = price
-    stop   = round(resistance * 1.03, 4)   # 3% cushion above resistance
-    target = support
-
-    # Make sure target is meaningfully below entry
-    if target >= entry * 0.98:
+    elif not is_long and target >= entry * 0.98:
         target = round(entry - atr_val * 3, 4)
 
-    risk_u = stop - entry
-    rew_u  = entry - target
+    risk_u = (entry - stop)   if is_long else (stop - entry)
+    rew_u  = (target - entry) if is_long else (entry - target)
     if not (risk_u > 0 and rew_u > 0):
         return None
 
@@ -593,49 +521,80 @@ def _detect_short_setup(ticker, portfolio_size, market, is_crypto, asset_type, m
     if rratio < MIN_RR:
         return None
 
-    # ── Position Sizing (3 safeguards) ──
+    # ── Position Sizing (3 safeguards) ──────────────────────────
     units, pos_val, risk_amt, pos_pct, was_capped, cap_reason = \
         calc_position_size(portfolio_size, entry, stop,
                            atr_pct=atr_pct, high_vol=high_volatility)
 
+    # ── Scoring ──────────────────────────────────────────────────
     score = rratio
-    if vol_ok:           score *= 1.20   # volume rising on bounce = bearish
-    if rsi_val > 60:     score *= 1.20
-    if dist < 0.05:      score *= 1.15
-    if not earn_warn:    score *= 1.10
+    if vol_ok:                           score *= 1.25 if is_long else 1.20
+    if is_long and rsi_val < 45:         score *= 1.20
+    if not is_long and rsi_val > 60:     score *= 1.20
+    if dist < 0.05:                      score *= 1.15
+    if not earn_warn:                    score *= 1.10
 
-    # ── Squeeze risk penalty ──────────────────
-    sq_lvl = _squeeze_level(short_pct, inst_pct)
-    if sq_lvl == 'HIGH':
-        score *= 0.30   # heavy penalty — near-disqualify
-    elif sq_lvl == 'MEDIUM':
-        score *= 0.65   # moderate penalty
+    if is_long:
+        # Gann quality check (stocks only, not crypto)
+        if not is_crypto:
+            high52 = float(df['High'].tail(52).max())
+            if price < high52 * 0.50:
+                score *= 0.5        # penalise but don't reject
+        # High short interest = squeeze potential (bonus for LONG)
+        if short_pct >= 0.15:
+            score *= 1.15
+        sq_lvl = 'NONE'
+    else:
+        # Squeeze risk penalty (SHORT only)
+        sq_lvl = _squeeze_level(short_pct, inst_pct)
+        if sq_lvl == 'HIGH':
+            score *= 0.30           # heavy penalty — near-disqualify
+        elif sq_lvl == 'MEDIUM':
+            score *= 0.65
 
-    # Resistance quality + level reliability + false breakout (N.M.S.) + ambiguity + trend conf
-    res_touches, res_q = get_support_quality(df, resistance)
-    level_rel, _       = check_level_reliability(df, resistance)
-    fb, fb_label, _    = check_false_breakout(df, support, direction='down')
-    level_amb, level_amb_n, _ = check_level_ambiguity(df, resistance, atr_val)
-    tr_conf, tr_conf_lbl, _ = check_swing_broken(df, direction='down')
+    # ── Level quality checks ─────────────────────────────────────
+    # Primary level = support (LONG) / resistance (SHORT)
+    # False-breakout reference = resistance (LONG) / support (SHORT)
+    lvl_dir = 'up' if is_long else 'down'
+    lev_touches, lev_q = get_support_quality(df, key_level)
+    level_rel, _       = check_level_reliability(df, key_level)
+    fb, fb_label, _    = check_false_breakout(df, resistance if is_long else support,
+                                               direction=lvl_dir)
+    level_amb, level_amb_n, _ = check_level_ambiguity(df, key_level, atr_val)
+    tr_conf, tr_conf_lbl, _   = check_swing_broken(df, direction=lvl_dir)
+
     # Factor 20 — Fibonacci Retracement Zone
     fib_zone, fib_pct, fib_sl, fib_sh, fib_lvls = \
-        check_fibonacci_zone(df, 'SHORT', price)
+        check_fibonacci_zone(df, direction, price)
 
     _setup = _build_setup_dict(
-        'SHORT', ticker, price, rsi_val, support, resistance,
+        direction, ticker, price, rsi_val, support, resistance,
         entry, stop, target, rratio, units, pos_val, risk_amt,
         pos_pct, was_capped, cap_reason, vol_ok, earn_warn,
         earn_approaching, earn_date, earn_days, asset_type, score,
         sq_lvl, short_pct, inst_pct, atr_pct, high_volatility,
-        m_analysis, rs_info, res_touches, res_q, macd_data, boll_data,
+        m_analysis, rs_info, lev_touches, lev_q, macd_data, boll_data,
         level_rel=level_rel, false_breakout=fb, fb_label=fb_label,
         level_amb=level_amb, level_amb_n=level_amb_n,
         trend_confirmed=tr_conf, trend_conf_label=tr_conf_lbl,
         fib_zone=fib_zone, fib_ret_pct=fib_pct,
         fib_swing_low=fib_sl, fib_swing_high=fib_sh, fib_levels=fib_lvls)
-    return _finalize_setup(_setup, 'SHORT', ticker, atr_val,
+    return _finalize_setup(_setup, direction, ticker, atr_val,
                            m_analysis, is_crypto, is_commodity,
                            is_israel, is_intl, cached_info=market['cached_info'])
+
+
+# ── Backward-compatible shims ────────────────────────────────────────────────
+def _detect_long_setup(ticker, portfolio_size, market, is_crypto, asset_type, max_dist,
+                       is_commodity=False, is_israel=False, is_intl=False):
+    return _detect_setup(ticker, portfolio_size, market, is_crypto, asset_type, max_dist,
+                         'LONG', is_commodity, is_israel, is_intl)
+
+
+def _detect_short_setup(ticker, portfolio_size, market, is_crypto, asset_type, max_dist,
+                        is_commodity=False, is_israel=False, is_intl=False):
+    return _detect_setup(ticker, portfolio_size, market, is_crypto, asset_type, max_dist,
+                         'SHORT', is_commodity, is_israel, is_intl)
 
 
 def analyze(ticker, portfolio_size, is_crypto=False, is_israel=False,
@@ -665,15 +624,12 @@ def analyze(ticker, portfolio_size, is_crypto=False, is_israel=False,
         else:
             max_dist, asset_type = MAX_DIST_STOCK, 'STOCK'
 
-        long_setup = _detect_long_setup(ticker, portfolio_size, market, is_crypto,
-                                        asset_type, max_dist, is_commodity, is_israel, is_intl)
-        if long_setup:
-            setups.append(long_setup)
-
-        short_setup = _detect_short_setup(ticker, portfolio_size, market, is_crypto,
-                                          asset_type, max_dist, is_commodity, is_israel, is_intl)
-        if short_setup:
-            setups.append(short_setup)
+        for direction in ('LONG', 'SHORT'):
+            setup = _detect_setup(ticker, portfolio_size, market, is_crypto,
+                                  asset_type, max_dist, direction,
+                                  is_commodity, is_israel, is_intl)
+            if setup:
+                setups.append(setup)
 
     except Exception:
         pass
