@@ -383,7 +383,7 @@ Short Interest: <b>{short_int}%</b> — If price moves up, forced short covering
         card_idx += 1
 
         html += f'''
-<div class="card {'long-card' if is_long else 'short-card'}" data-horizon="{horizon_v}">
+<div class="card {'long-card' if is_long else 'short-card'}" data-horizon="{horizon_v}" data-tl="{tl_color}">
   <div class="card-header">
 <div class="card-title">
   <span class="ticker">{ticker}</span>
@@ -875,6 +875,15 @@ def generate_html(results, script_d, ts, portfolio, risk_trade, iv_label,
   .htab.tab-medium  {{ }}
   .htab.tab-long    {{ }}
 
+  .tltab {{
+    padding: 6px 18px; border-radius: 20px; font-size: 13px; font-weight: 600;
+    cursor: pointer; border: 1px solid #30363d;
+    background: #161b22; color: #8b949e;
+    transition: all 0.15s;
+  }}
+  .tltab:hover {{ border-color: #3fb950; color: #e6edf3; }}
+  .tltab.active {{ background: #0d2b0d; border-color: #3fb950; color: #3fb950; }}
+
   .tv-link {{ background: #1c2d4a; color: #58a6ff; padding: 4px 12px; border-radius: 6px; font-size: 12px; border: 1px solid #1f6feb; }}
   .pine-btn {{ background: #2d2a1f; color: #d29922; padding: 4px 12px; border-radius: 6px; font-size: 12px; border: 1px solid #6e511e; cursor: pointer; }}
   .pine-btn:hover {{ background: #3a3010; }}
@@ -1153,6 +1162,17 @@ def generate_html(results, script_d, ts, portfolio, risk_trade, iv_label,
         style="color:#8b949e;border-color:#8b949e55;">🎯 ארוך (3m+)</span>
 </div>
 
+<!-- ── Traffic Light Filter ── -->
+<div class="horizon-tabs" style="margin-top:6px;">
+  <span class="tltab active" onclick="filterTL('ALL', this)">⬜ כל הסטאפים</span>
+  <span class="tltab" onclick="filterTL('GREEN', this)"
+        style="color:#3fb950;border-color:#3fb95055;font-weight:600;">🟢 אור ירוק — כנס עכשיו</span>
+  <span class="tltab" onclick="filterTL('YELLOW', this)"
+        style="color:#d29922;border-color:#d2992255;">🟡 המתן לאישור</span>
+  <span class="tltab" onclick="filterTL('RED', this)"
+        style="color:#f85149;border-color:#f8514955;">🔴 אל תיכנס</span>
+</div>
+
 <div class="section">
   <div class="section-title long">▲ LONG SETUPS &nbsp;
     <span style="font-size:13px;font-weight:400;color:#8b949e">{len(longs_main)} קח / {len(longs_watch)} Watchlist</span>
@@ -1177,19 +1197,30 @@ def generate_html(results, script_d, ts, portfolio, risk_trade, iv_label,
 </div>
 
 <script>
-/* ── Time Horizon filter ── */
+/* ── Combined filter state ── */
+var _activeHorizon = 'ALL';
+var _activeTL      = 'ALL';
+
+function _applyFilters() {{
+  document.querySelectorAll('.card').forEach(function(card) {{
+    var horizonOk = (_activeHorizon === 'ALL' || card.dataset.horizon === _activeHorizon);
+    var tlOk      = (_activeTL      === 'ALL' || card.dataset.tl      === _activeTL);
+    card.style.display = (horizonOk && tlOk) ? '' : 'none';
+  }});
+}}
+
 function filterHorizon(horizon, tabEl) {{
-  // Update active tab
   document.querySelectorAll('.htab').forEach(function(t) {{ t.classList.remove('active'); }});
   tabEl.classList.add('active');
-  // Show/hide cards
-  document.querySelectorAll('.card').forEach(function(card) {{
-    if (horizon === 'ALL') {{
-      card.style.display = '';
-    }} else {{
-      card.style.display = (card.dataset.horizon === horizon) ? '' : 'none';
-    }}
-  }});
+  _activeHorizon = horizon;
+  _applyFilters();
+}}
+
+function filterTL(tl, tabEl) {{
+  document.querySelectorAll('.tltab').forEach(function(t) {{ t.classList.remove('active'); }});
+  tabEl.classList.add('active');
+  _activeTL = tl;
+  _applyFilters();
 }}
 
 function showPine(id) {{
