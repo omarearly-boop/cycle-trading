@@ -15,17 +15,19 @@ if errorlevel 1 (
     exit /b 1
 )
 
-rem Usage:
-rem   run_discord_monitor.bat                              (report only, default range)
-rem   run_discord_monitor.bat messages.json                 (process file, default range)
-rem   run_discord_monitor.bat messages.json 01-04-26 01-07-26  (process file, custom range)
-rem   run_discord_monitor.bat "" 01-04-26 01-07-26           (report only, custom range)
+rem ── Compute today's date (DD-MM-YY) via Python ───────────────────────────────
+for /f "tokens=*" %%D in ('python -c "import datetime; print(datetime.date.today().strftime('%%d-%%m-%%y'))"') do set TODAY=%%D
 
+rem ── Args: optional  <messages.json>  <from-date>  <to-date>  ─────────────────
+rem    If no dates are given, default to TODAY for both.
 set MSGFILE=%~1
 set FROMDATE=%~2
 set TODATE=%~3
-if "%FROMDATE%"=="" set FROMDATE=01-04-26
-if "%TODATE%"=="" set TODATE=01-07-26
+if "%FROMDATE%"=="" set FROMDATE=%TODAY%
+if "%TODATE%"=="" set TODATE=%TODAY%
+
+echo    Today:  %TODAY%
+echo    Range:  %FROMDATE%  -->  %TODATE%
 
 if not "%MSGFILE%"=="" (
     echo.
@@ -33,7 +35,7 @@ if not "%MSGFILE%"=="" (
     python discord_monitor.py process "%MSGFILE%"
 ) else (
     echo.
-    echo [2/3] No messages file given - skipping process step, using existing pending_lessons.json
+    echo [2/3] No messages file given - using existing pending_lessons.json
 )
 
 echo.
