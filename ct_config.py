@@ -87,21 +87,44 @@ _watchlists_loaded: bool = False
 
 def get_watchlists():
     """
-    Lazy-load watchlists.json on first call.  Safe to call multiple times.
-    Mutates the module-level list/dict objects in place so callers that did
-    `from ct_config import STOCK_WATCHLIST` already hold a reference to the
-    same objects and see the populated data without any re-import.
+    Lazy-load full market universe on first call.  Safe to call multiple times.
+    Mutates module-level list/dict objects in place so callers that did
+    `from ct_config import STOCK_WATCHLIST` see populated data without re-import.
+
+    Priority (highest → lowest):
+      1. ct_universe — live S&P 500 + NASDAQ 100 + S&P 400 Mid-Cap (24h cache)
+      2. _STOCK_FALLBACK / _INTL_FALLBACK — embedded curated lists (always included)
+      3. watchlists.json — custom overrides / additions
     """
     global _watchlists_loaded
     if not _watchlists_loaded:
+        # ── Step 1: custom additions from watchlists.json ─────────
         stocks, israel, intl, crypto, commodity, sector_etf = _load_watchlists()
-        STOCK_WATCHLIST.extend(stocks)
-        ISRAEL_WATCHLIST.extend(israel)
-        INTL_WATCHLIST.extend(intl)
+
+        # ── Step 2: live universe (S&P 500 + NASDAQ 100 + S&P 400) ─
+        # force_refresh=True → always fetch fresh on every scanner run
+        base_us, base_israel = _STOCK_FALLBACK, []
+        try:
+            from ct_universe import get_universe
+            u           = get_universe(force_refresh=True)
+            base_us     = u.get('us',     _STOCK_FALLBACK)
+            base_israel = u.get('israel', [])
+        except Exception as _e:
+            print(f"  ⚠ ct_universe unavailable ({_e}) — using built-in fallback list")
+
+        # ── Step 3: merge, deduplicate, preserve order ────────────
+        def _merge(*lists):
+            seen = set()
+            return [x for lst in lists for x in lst if not (x in seen or seen.add(x))]
+
+        STOCK_WATCHLIST.extend(_merge(base_us,     stocks))
+        ISRAEL_WATCHLIST.extend(_merge(base_israel, israel))
+        INTL_WATCHLIST.extend(_merge(_INTL_FALLBACK, intl))
         CRYPTO_WATCHLIST.extend(crypto)
         COMMODITY_WATCHLIST.extend(commodity)
         SECTOR_ETF.update(sector_etf)
         _watchlists_loaded = True
+
     return (STOCK_WATCHLIST, ISRAEL_WATCHLIST, INTL_WATCHLIST,
             CRYPTO_WATCHLIST, COMMODITY_WATCHLIST, SECTOR_ETF)
 
