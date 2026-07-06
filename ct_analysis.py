@@ -29,10 +29,10 @@ from ct_indicators import (
     rsi, atr, get_trend, swing_lows, swing_highs, get_levels,
     vol_declining, get_support_quality, check_level_reliability,
     check_false_breakout, check_level_ambiguity, check_swing_broken,
-    calc_macd, calc_bollinger, estimate_time_horizon, check_fibonacci_zone,
+    calc_macd, calc_bollinger, estimate_time_horizon,
 )
 from ct_market_data import get_earnings, get_monthly_analysis, get_sector_rs
-from ct_factors import calc_probability
+from ct_factors import calc_probability, check_fibonacci_zone
 from ct_learnings import load_learnings
 
 # ══════════════════════════════════════════════════════════════

@@ -22,7 +22,10 @@ from ct_config import (
     RSI_LONG_MAX, RSI_SHORT_MIN, MIN_RR, EARNINGS_WARN_DAYS,
     MAX_DIST_STOCK, FUNDAMENTAL_TIMEOUT,
 )
-from ct_indicators import check_fibonacci_zone
+# check_fibonacci_zone is defined later in this file (see below) — it used to
+# be imported from ct_indicators, but it never actually lived there, which
+# broke every module that imports it transitively (ct_analysis.py,
+# cycles_trading_scanner.py) as soon as they tried to import this module.
 
 # ══════════════════════════════════════════════════════════════
 

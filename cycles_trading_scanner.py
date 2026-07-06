@@ -42,12 +42,12 @@ import json
 # ── Module imports ──────────────────────────────────────────
 from ct_config    import *
 from ct_config    import get_watchlists
-from ct_learnings import load_learnings, save_case_study
+from ct_learnings import load_learnings, save_case_study, LEARNINGS
 from ct_indicators import (
     rsi, atr, get_trend, get_levels, get_support_quality,
     check_level_reliability, check_false_breakout, check_level_ambiguity,
     check_swing_broken, calc_macd, calc_bollinger, estimate_time_horizon,
-    check_fibonacci_zone, vol_declining, swing_lows, swing_highs,
+    vol_declining, swing_lows, swing_highs,
     _pm_pivot_lows, _pm_pivot_highs,
 )
 from ct_market_data import get_earnings, get_monthly_analysis, get_sector_rs
@@ -56,7 +56,7 @@ from ct_positions import (
     pm_rule1_swing, pm_rule2_momentum, pm_check_hits,
     manage_positions, list_positions,
 )
-from ct_factors  import calc_probability
+from ct_factors  import calc_probability, check_fibonacci_zone
 from ct_analysis import (
     clean_ticker, send_email_summary, get_fundamental_analysis,
     is_hard_blocked, get_traffic_light, calc_position_size,
