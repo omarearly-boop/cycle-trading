@@ -1,18 +1,6 @@
-# Discord raw data
-discord_may_june_*.json
-discord_processed.json
-pending_lessons.json
-
-# Generated reports
-REPORT/*.html
-discord_lessons_report.html
-
-# Python cache
+*.json
+!watchlists.json
 __pycache__/
 *.pyc
-*.pyo
 .env
-
-# OS
-.DS_Store
-Thumbs.db
+REPORT/*.html
