@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""ct_factors.py — 20-factor registry + calc_probability()."""
+"""ct_factors.py — 21-factor registry + calc_probability()."""
 import sys, time, warnings, os, logging
 from datetime import datetime
 import json
@@ -72,8 +72,30 @@ def _factor_rr(r):
 
 @factor
 def _factor_volume(r):
-    if r['Vol'] == 'OK': return +10, "Volume", "Volume declining near level — accumulation signal"
-    else:                return -6,  "Volume", "Volume not declining — less conviction"
+    """
+    Factor 3 — Volume on Retest (quantitative).
+
+    vol_ratio = recent 3-bar avg / 20-bar avg of volume.
+    Low volume on a pullback = smart money NOT distributing = bullish.
+    High volume on a pullback = distribution / selling pressure = bearish.
+
+    Cycles Trading principle: "מחזורי מסחר נמוכים בריטסט = אין מכירה של כסף חכם"
+    """
+    vol_ratio = r.get('_vol_ratio', 1.0)
+    vol_ok    = r.get('Vol') == 'OK'
+
+    if vol_ok and vol_ratio <= 0.55:
+        return (+16, "Volume", f"Vol {vol_ratio:.2f}× baseline — very light (strong no-distribution signal)")
+    elif vol_ok and vol_ratio <= 0.75:
+        return (+10, "Volume", f"Vol {vol_ratio:.2f}× baseline — declining (accumulation zone)")
+    elif vol_ok:
+        return (+5,  "Volume", f"Vol {vol_ratio:.2f}× baseline — below avg (mild retest confirmation)")
+    elif vol_ratio > 1.6:
+        return (-14, "Volume", f"Vol {vol_ratio:.2f}× baseline — heavy selling (distribution on retest)")
+    elif vol_ratio > 1.2:
+        return (-6,  "Volume", f"Vol {vol_ratio:.2f}× baseline — above avg (caution, possible distribution)")
+    else:
+        return (-3,  "Volume", f"Vol {vol_ratio:.2f}× baseline — not clearly declining (weak confirmation)")
 
 @factor
 def _factor_entry_distance(r):
@@ -408,31 +430,67 @@ def _factor_fibonacci(r):
 
 
 @factor
+def _factor_market_regime(r):
+    """Factor 21 - Market Regime (SPY + QQQ weekly vs 20-week MA).
+
+    BULL  (both above 20W MA): LONG +12, SHORT -15
+    BEAR  (both below 20W MA): SHORT +12, LONG -15
+    NEUTRAL (mixed): +3 both directions
+
+    Principle: trade with the macro regime, not against it.
+    """
+    from ct_market_data import get_market_regime
+    try:
+        regime_data = get_market_regime()
+        regime      = regime_data.get('regime', 'NEUTRAL')
+    except Exception:
+        return None
+
+    is_long = 'LONG' in r['Dir']
+
+    if regime == 'BULL':
+        if is_long:
+            return (+12, 'Market Regime',
+                    'BULL regime: SPY+QQQ above 20W MA -- LONG aligned with macro trend')
+        else:
+            return (-15, 'Market Regime',
+                    'BULL regime: SPY+QQQ above 20W MA -- SHORT is counter-trend, higher risk')
+    elif regime == 'BEAR':
+        if not is_long:
+            return (+12, 'Market Regime',
+                    'BEAR regime: SPY+QQQ below 20W MA -- SHORT aligned with macro trend')
+        else:
+            return (-15, 'Market Regime',
+                    'BEAR regime: SPY+QQQ below 20W MA -- LONG is counter-trend, higher risk')
+    else:  # NEUTRAL
+        return (+3, 'Market Regime',
+                'NEUTRAL regime: mixed SPY/QQQ signals -- range market, both directions possible')
+
+
+@factor
 def _factor_trend_confirmation(r):
+    """Factor 19 - Trend Confirmation (the MELI lesson).
+
+    The last confirmed weekly swing low (SHORT) or swing high (LONG) must
+    have been CLOSED through, not merely wicked. If the swing level holds,
+    the move is a correction inside the prior trend, not a confirmed new trend.
+
+    Expert rule: wait for the weekly close before entering.
+
+      CONFIRMED   -> +10  (swing level closed through -- real trend)
+      UNCONFIRMED -> -18  (swing level holds -- likely correction, wait)
     """
-    Factor 19 — Trend Confirmation (the MELI lesson).
-
-    Cycles Trading principle: the last confirmed weekly swing low (SHORT) or
-    swing high (LONG) must have been CLOSED through — not merely wicked.
-    If the swing level still holds, the move is a CORRECTION inside the prior
-    trend, not a new confirmed trend. Wait for the close; don't anticipate.
-
-    Expert rule: "כל עוד השפל האחרון מחזיק, אין אינדקציה ראשונית לשינוי מגמה"
-
-      CONFIRMED   → +10  (swing level was closed through — real trend)
-      UNCONFIRMED → -18  (swing level holds — likely correction, wait)
-    """
-    confirmed = r.get('_trend_confirmed', True)
-    label     = r.get('_trend_conf_label', 'CONFIRMED')
-    direction = r.get('Direction', 'LONG')
+    confirmed  = r.get('_trend_confirmed', True)
+    label      = r.get('_trend_conf_label', 'CONFIRMED')
+    direction  = r.get('Direction', 'LONG')
     swing_word = 'low' if direction == 'SHORT' else 'high'
 
     if confirmed:
         return (+10, f'TrendConf: {label}',
-                f'Trend structure confirmed — last swing {swing_word} closed through')
+                f'Trend structure confirmed -- last swing {swing_word} closed through')
     else:
         return (-18, f'TrendConf: {label}',
-                f'Last swing {swing_word} not closed through — may be a correction; '
+                f'Last swing {swing_word} not closed through -- may be a correction; '
                 f'wait for weekly close confirmation before entering')
 
 
@@ -452,5 +510,3 @@ def calc_probability(r):
         factors.append((label, d, explain))
     probability = max(15, min(92, round(score)))
     return probability, factors
-
-

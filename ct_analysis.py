@@ -423,6 +423,14 @@ def _fetch_market_data(ticker, is_crypto=False, is_commodity=False,
     support, resistance = get_levels(df, price, atr_val)
     vol_ok = vol_declining(df)
 
+    # Volume ratio — recent 3-bar avg vs 20-bar avg (quantitative retest signal)
+    try:
+        _vol_recent   = float(df['Volume'].iloc[-3:].mean())
+        _vol_baseline = float(df['Volume'].iloc[-20:].mean())
+        _vol_ratio    = round(_vol_recent / _vol_baseline, 2) if _vol_baseline > 0 else 1.0
+    except Exception:
+        _vol_ratio = 1.0
+
     # ── Earnings (stocks only) ────────────────────────────
     skip_fundamentals = is_crypto or is_commodity
     earn_date, earn_days = (None, None) if skip_fundamentals else get_earnings(asset)
@@ -456,7 +464,8 @@ def _fetch_market_data(ticker, is_crypto=False, is_commodity=False,
     return {
         'df': df, 'price': price, 'rsi_val': rsi_val, 'atr_val': atr_val,
         'macd_data': macd_data, 'boll_data': boll_data, 'trend': trend,
-        'support': support, 'resistance': resistance, 'vol_ok': vol_ok,
+        'support': support, 'resistance': resistance,
+        'vol_ok': vol_ok, '_vol_ratio': _vol_ratio,
         'earn_date': earn_date, 'earn_days': earn_days, 'earn_warn': earn_warn,
         'earn_approaching': earn_approaching, 'atr_pct': atr_pct,
         'high_volatility': high_volatility, 'm_analysis': m_analysis,
@@ -579,6 +588,8 @@ def _detect_setup(ticker, portfolio_size, market, is_crypto, asset_type, max_dis
         trend_confirmed=tr_conf, trend_conf_label=tr_conf_lbl,
         fib_zone=fib_zone, fib_ret_pct=fib_pct,
         fib_swing_low=fib_sl, fib_swing_high=fib_sh, fib_levels=fib_lvls)
+    # Pass quantitative volume ratio to factors (Factor 3 enhancement)
+    _setup['_vol_ratio'] = market.get('_vol_ratio', 1.0)
     return _finalize_setup(_setup, direction, ticker, atr_val,
                            m_analysis, is_crypto, is_commodity,
                            is_israel, is_intl, cached_info=market['cached_info'])
