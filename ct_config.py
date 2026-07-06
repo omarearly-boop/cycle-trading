@@ -67,18 +67,46 @@ def _load_watchlists():
     path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'watchlists.json')
     if not os.path.exists(path):
         print('  ⚠ watchlists.json not found — using empty lists')
-        return {}, {}, {}, {}, {}, {}
+        return [], [], [], [], [], {}
     with open(path, 'r', encoding='utf-8') as f:
         d = json.load(f)
     return (d.get('stocks', []), d.get('israel', []), d.get('intl', []),
             d.get('crypto', []), d.get('commodity', []), d.get('sector_etf', {}))
 
-STOCK_WATCHLIST, ISRAEL_WATCHLIST, INTL_WATCHLIST, CRYPTO_WATCHLIST, COMMODITY_WATCHLIST, SECTOR_ETF = _load_watchlists()
+# ── Watchlist containers (populated lazily on first get_watchlists() call) ─
+# Using mutable containers so `from ct_config import STOCK_WATCHLIST` callers
+# automatically see the data after get_watchlists() is called — no rebinding needed.
+STOCK_WATCHLIST:     list = []
+ISRAEL_WATCHLIST:    list = []
+INTL_WATCHLIST:      list = []
+CRYPTO_WATCHLIST:    list = []
+COMMODITY_WATCHLIST: list = []
+SECTOR_ETF:          dict = {}
+
+_watchlists_loaded: bool = False
+
+def get_watchlists():
+    """
+    Lazy-load watchlists.json on first call.  Safe to call multiple times.
+    Mutates the module-level list/dict objects in place so callers that did
+    `from ct_config import STOCK_WATCHLIST` already hold a reference to the
+    same objects and see the populated data without any re-import.
+    """
+    global _watchlists_loaded
+    if not _watchlists_loaded:
+        stocks, israel, intl, crypto, commodity, sector_etf = _load_watchlists()
+        STOCK_WATCHLIST.extend(stocks)
+        ISRAEL_WATCHLIST.extend(israel)
+        INTL_WATCHLIST.extend(intl)
+        CRYPTO_WATCHLIST.extend(crypto)
+        COMMODITY_WATCHLIST.extend(commodity)
+        SECTOR_ETF.update(sector_etf)
+        _watchlists_loaded = True
+    return (STOCK_WATCHLIST, ISRAEL_WATCHLIST, INTL_WATCHLIST,
+            CRYPTO_WATCHLIST, COMMODITY_WATCHLIST, SECTOR_ETF)
 
 # Perf: sector ETF weekly data is fetched once per scan, not once per stock
 _SECTOR_CACHE: dict = {}  # sector_etf → sec_df
-
-# (watchlists loaded from watchlists.json above)
 _STOCK_FALLBACK = [
     # ── Mega Cap Tech ──────────────────────────────────────────
     'AAPL','MSFT','NVDA','GOOGL','GOOG','META','AMZN','TSLA','AVGO',

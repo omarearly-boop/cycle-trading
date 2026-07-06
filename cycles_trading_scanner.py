@@ -41,6 +41,7 @@ import json
 
 # ── Module imports ──────────────────────────────────────────
 from ct_config    import *
+from ct_config    import get_watchlists
 from ct_learnings import load_learnings, save_case_study
 from ct_indicators import (
     rsi, atr, get_trend, get_levels, get_support_quality,
@@ -70,6 +71,7 @@ from ct_html     import generate_html, make_pine_for_ticker, save_pine_script
 # ══════════════════════════════════════════════════════════════
 
 def main():
+    get_watchlists()   # lazy-load watchlists.json (no-op on subsequent calls)
     print()
     print("=" * 62)
     n_cases = len(LEARNINGS.get('case_studies',[])) if LEARNINGS else 0

@@ -25,11 +25,26 @@ from ct_config import (
 from ct_indicators import check_fibonacci_zone
 
 # ══════════════════════════════════════════════════════════════
+
+# ── Factor decorator — auto-registers functions into FACTORS on definition ──
+FACTORS: list = []   # populated by @factor as module loads
+
+def factor(fn):
+    """
+    Decorator that registers a factor function in FACTORS.
+    To add a new factor: write the function with @factor — one step.
+    To disable a factor: comment out @factor — one step.
+    """
+    FACTORS.append(fn)
+    return fn
+
+
 #  FACTOR REGISTRY — each factor is a pure function (r) → (delta, label, explanation)
 #  To add Factor 17: write a _factor_xxx function, append to FACTORS list below.
 #  To disable a factor: remove it from FACTORS (no other change needed).
 # ══════════════════════════════════════════════════════════════
 
+@factor
 def _factor_rsi(r):
     is_long = 'LONG' in r['Dir']
     v = r['RSI']
@@ -44,6 +59,7 @@ def _factor_rsi(r):
         elif v > 72:        return +5,  "RSI", f"RSI {v} — overbought, reversal likely"
         else:               return -8,  "RSI", f"RSI {v} — low, bearish case weaker"
 
+@factor
 def _factor_rr(r):
     v = r['R:R']
     if v >= 4.0:   return +14, "R:R Ratio", f"R:R 1:{v} — excellent room to target"
@@ -51,10 +67,12 @@ def _factor_rr(r):
     elif v >= 2.5: return +6,  "R:R Ratio", f"R:R 1:{v} — solid"
     else:          return +2,  "R:R Ratio", f"R:R 1:{v} — minimum threshold"
 
+@factor
 def _factor_volume(r):
     if r['Vol'] == 'OK': return +10, "Volume", "Volume declining near level — accumulation signal"
     else:                return -6,  "Volume", "Volume not declining — less conviction"
 
+@factor
 def _factor_entry_distance(r):
     is_long = 'LONG' in r['Dir']
     key_level = r['Support'] if is_long else r['Resist']
@@ -65,12 +83,14 @@ def _factor_entry_distance(r):
     elif dist_pct <= 12:return  0,  "Entry Distance", f"{dist_pct:.1f}% from key level — stretched"
     else:               return -8,  "Entry Distance", f"{dist_pct:.1f}% from key level — too far"
 
+@factor
 def _factor_earnings(r):
     earn = r['Earn']
     if earn == 'SOON!':        return -14, "Earnings Risk", "Earnings report soon — high volatility risk"
     elif earn and earn != '-': return +3,  "Earnings Risk", f"Next earnings: {earn} — safe window"
     else:                      return +5,  "Earnings Risk", "No earnings concern"
 
+@factor
 def _factor_setup_quality(r):
     v = r.get('_score', 2.0)
     if v >= 6.0:   return +8,  "Setup Quality", f"Setup score {v:.1f} — high-quality signal"
@@ -78,6 +98,7 @@ def _factor_setup_quality(r):
     elif v >= 2.5: return +1,  "Setup Quality", f"Setup score {v:.1f} — average"
     else:          return -3,  "Setup Quality", f"Setup score {v:.1f} — weak signal"
 
+@factor
 def _factor_stop_distance(r):
     stop_pct = abs(r['Entry'] - r['Stop']) / r['Entry'] * 100
     if stop_pct <= 4:   return +6, "Stop Distance", f"Stop {stop_pct:.1f}% away — tight, controlled risk"
@@ -85,6 +106,7 @@ def _factor_stop_distance(r):
     elif stop_pct <= 12:return  0, "Stop Distance", f"Stop {stop_pct:.1f}% away — wide"
     else:               return -5, "Stop Distance", f"Stop {stop_pct:.1f}% away — very wide stop"
 
+@factor
 def _factor_monthly_trend(r):
     is_long  = 'LONG' in r['Dir']
     m_trend  = r.get('MonthlyTrend')
@@ -110,6 +132,7 @@ def _factor_monthly_trend(r):
         else:
             return 0,   "Monthly Trend", "Monthly neutral — no directional confirmation"
 
+@factor
 def _factor_sector_rs(r):
     is_long   = 'LONG' in r['Dir']
     rs_label  = r.get('SectorRS')
@@ -132,6 +155,7 @@ def _factor_sector_rs(r):
         if sec_trend == 'UP': d -= 8; ex += " | sector in uptrend"
     return d, "Sector RS", ex
 
+@factor
 def _factor_support_quality(r):
     sup_q = r.get('SupportQ')
     if not sup_q:
@@ -141,6 +165,7 @@ def _factor_support_quality(r):
     elif sup_q == 'MEDIUM': return +4,  "Support Quality", f"Support tested {touches}x — reasonable level"
     else:                   return -8,  "Support Quality", "Support tested once — unproven"
 
+@factor
 def _factor_atr_volatility(r):
     v = r.get('ATR_pct', 0)
     if v <= 0: return None
@@ -149,11 +174,13 @@ def _factor_atr_volatility(r):
     elif v > 5:  return  0,  "Volatility (ATR)", f"ATR {v:.1f}% — normal volatility"
     else:        return +4,  "Volatility (ATR)", f"ATR {v:.1f}% — low volatility, easy stop"
 
+@factor
 def _factor_earnings_zone(r):
     if r.get('Earn') == 'APPROACHING' and r.get('EarnDays'):
         return -8, "Earnings Zone", f"Earnings in {r['EarnDays']} days — event risk (15–30d zone)"
     return None
 
+@factor
 def _factor_late_entry(r):
     if 'LONG' not in r['Dir']: return None
     v = r.get('LateEntry', 0)
@@ -161,6 +188,7 @@ def _factor_late_entry(r):
     elif v > 5: return -8,  "Late Entry", f"Price {v:.1f}% above support — entry less optimal"
     return None
 
+@factor
 def _factor_fundamentals(r):
     fund = r.get('_fundamental')
     if not fund: return None
@@ -174,6 +202,7 @@ def _factor_fundamentals(r):
     else:
         return 0,   "Fundamentals", f"Analyst HOLD — {cons}"
 
+@factor
 def _factor_macd(r):
     macd = r.get('_macd')
     if not macd: return None
@@ -193,6 +222,7 @@ def _factor_macd(r):
         d += 8; ex += ' + Bullish divergence'
     return d, "MACD", ex
 
+@factor
 def _factor_bollinger(r):
     boll = r.get('_boll')
     if not boll: return None
@@ -208,6 +238,7 @@ def _factor_bollinger(r):
     else:                                     return  0,  "Bollinger Bands", f'Mid-band (%B={pct_b:.2f}) — neutral'
 
 
+@factor
 def _factor_level_reliability(r):
     """
     Factor 17 — Level Reliability + False Breakout (N.M.S.).
@@ -245,6 +276,7 @@ def _factor_level_reliability(r):
     return None   # UNKNOWN — no opinion
 
 
+@factor
 def _factor_level_ambiguity(r):
     """
     Factor 18 — Level Ambiguity (the ALB lesson).
@@ -333,6 +365,7 @@ def check_fibonacci_zone(df, direction: str, price: float):
         return 'UNKNOWN', 0, 0, 0, {}
 
 
+@factor
 def _factor_fibonacci(r):
     """
     Factor 20 — Fibonacci Retracement Zone.
@@ -371,6 +404,7 @@ def _factor_fibonacci(r):
     return None
 
 
+@factor
 def _factor_trend_confirmation(r):
     """
     Factor 19 — Trend Confirmation (the MELI lesson).
@@ -399,34 +433,10 @@ def _factor_trend_confirmation(r):
                 f'wait for weekly close confirmation before entering')
 
 
-# ── Registry: add / remove / reorder factors here ────────────
-FACTORS = [
-    _factor_rsi,
-    _factor_rr,
-    _factor_volume,
-    _factor_entry_distance,
-    _factor_earnings,
-    _factor_setup_quality,
-    _factor_stop_distance,
-    _factor_monthly_trend,
-    _factor_sector_rs,
-    _factor_support_quality,
-    _factor_atr_volatility,
-    _factor_earnings_zone,
-    _factor_late_entry,
-    _factor_fundamentals,
-    _factor_macd,
-    _factor_bollinger,
-    _factor_level_reliability,   # Factor 17 — Level Reliability + N.M.S.
-    _factor_level_ambiguity,     # Factor 18 — Level Ambiguity (crowded zone)
-    _factor_trend_confirmation,  # Factor 19 — Trend Confirmation (swing broken by weekly close)
-    _factor_fibonacci,           # Factor 20 — Fibonacci Retracement Zone (Discord lessons May–Jun 2026)
-]
-
 def calc_probability(r):
     """
     Iterate FACTORS registry. Each factor returns (delta, label, explanation) or None to skip.
-    Base 50, capped [15, 92]. To add Factor 17: write _factor_xxx, append to FACTORS.
+    Base 50, capped [15, 92]. To add a factor: write @factor def _factor_xxx(r) -> tuple.
     """
     score   = 50.0
     factors = []
