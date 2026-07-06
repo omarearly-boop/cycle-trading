@@ -19,7 +19,7 @@ except: _install("yfinance"); import yfinance as yf
 try:    import pandas as pd
 except: _install("pandas"); import pandas as pd
 import webbrowser
-from ct_config import PORTFOLIO_SIZE, RISK_PCT, MIN_PROBABILITY
+from ct_config import PORTFOLIO_SIZE, RISK_PCT, MIN_PROBABILITY, MAX_OPEN_POSITIONS
 from ct_analysis import get_traffic_light
 
 # ══════════════════════════════════════════════════════════════
@@ -97,11 +97,581 @@ def _render_fund_box(r):
   </div>'''
 
 
+def _render_setup_cards(rows, direction, portfolio):
+    """Render setup cards for a list of results. Module-level — independently testable."""
+    if not rows:
+        return f'<p class="none">No {direction} setups found today.</p>'
+    html = ''
+    card_idx = 0
+    for r in rows:
+        ticker  = r['Ticker']
+        entry   = r['Entry']
+        stop    = r['Stop']
+        target  = r['Target']
+        rr      = r['R:R']
+        price   = r['Price']
+        rsi_v   = r['RSI']
+        pos     = r['Pos$']
+        units   = r['Units']
+        vol     = r['Vol']
+        earn    = r['Earn']
+        typ     = r['Type']
+
+        is_long = direction == 'LONG'
+        risk_u  = abs(entry - stop)
+        rew_t1  = abs(target - entry)
+        t2 = round(entry + rew_t1 * 1.618, 2) if is_long else round(entry - rew_t1 * 1.618, 2)
+        t3 = round(entry + rew_t1 * 2.618, 2) if is_long else round(entry - rew_t1 * 2.618, 2)
+
+        loss_d   = round(risk_u * units, 2)
+        prof_t1  = round(rew_t1 * units, 2)
+        prof_t2  = round(abs(t2 - entry) * units, 2)
+        prof_t3  = round(abs(t3 - entry) * units, 2)
+        pct_loss = round(loss_d / portfolio * 100, 2)
+        pct_t1   = round(prof_t1 / portfolio * 100, 2)
+        pct_t2   = round(prof_t2 / portfolio * 100, 2)
+        pct_t3   = round(prof_t3 / portfolio * 100, 2)
+
+        # 4-week compounding
+        port_w = portfolio
+        comp_rows = ''
+        for w in range(1, 5):
+            gain = port_w * 0.10 * rr
+            port_w = round(port_w + gain, 2)
+            total_gain = round(port_w - portfolio, 2)
+            comp_rows += f'''
+            <tr>
+              <td>Week {w}</td>
+              <td>${port_w:,.2f}</td>
+              <td class="green">+${total_gain:,.2f}</td>
+            </tr>'''
+
+        earn_badge = (
+            f'<span class="badge warn">⚠ SOON! Earnings</span>'  if earn == 'SOON!'        else
+            f'<span class="badge earn-approaching">📅 {earn}</span>' if earn == 'APPROACHING' else
+            f'<span class="badge ok">{earn}</span>'
+        )
+        # ATR / High Volatility badge
+        atr_pct_v = r.get('ATR_pct', 0)
+        high_vol  = r.get('HighVol', False)
+        atr_badge = (f'<span class="badge atr-high">🔥 ATR {atr_pct_v}%</span>' if high_vol
+                     else f'<span class="badge ok">ATR {atr_pct_v}%</span>')
+        # Late Entry badge
+        late_pct_v = r.get('LateEntry', 0)
+        late_badge = (f'<span class="badge late-entry">⚡ LATE +{late_pct_v}% from level</span>' if late_pct_v > 5 else '')
+
+        # MACD badge
+        macd_d = r.get('_macd') or {}
+        _cross = macd_d.get('cross'); _mtrend = macd_d.get('trend'); _mdiv = macd_d.get('divergence')
+        if _cross == 'GOLDEN':
+            macd_badge = '<span class="badge macd-bull">⚡ MACD Golden Cross</span>'
+        elif _cross == 'DEATH':
+            macd_badge = '<span class="badge macd-bear">💀 MACD Death Cross</span>'
+        elif _mdiv == 'BULL_DIV':
+            macd_badge = '<span class="badge macd-bull">📈 MACD Bull Divergence</span>'
+        elif _mtrend == 'BULL':
+            macd_badge = '<span class="badge ok">MACD ▲</span>'
+        elif _mtrend == 'BEAR':
+            macd_badge = '<span class="badge warn">MACD ▼</span>'
+        else:
+            macd_badge = ''
+
+        # Bollinger badge
+        boll_d = r.get('_boll') or {}
+        _bpos = boll_d.get('position'); _bpct = boll_d.get('pct_b', 0.5)
+        if _bpos == 'NEAR_LOWER':
+            boll_badge = f'<span class="badge boll-low">🎯 Lower Band ({_bpct:.2f})</span>'
+        elif _bpos == 'NEAR_UPPER':
+            boll_badge = f'<span class="badge boll-high">⚠ Upper Band ({_bpct:.2f})</span>'
+        elif _bpos == 'SQUEEZE':
+            boll_badge = '<span class="badge boll-squeeze">🔥 BB Squeeze</span>'
+        else:
+            boll_badge = ''
+
+        # ── Position Sizing ──────────────────────────────────
+        pos_pct_v    = r.get('PosPct', 0)
+        was_capped_v = r.get('WasCapped', False)
+        cap_reason_v = r.get('CapReason', '')
+        high_vol_v   = r.get('HighVol', False)
+        # Position size color: green < 10%, yellow 10-15%, red > 15%
+        if pos_pct_v <= 10:
+            pos_pct_color = '#3fb950'
+            pos_pct_label = 'SAFE'
+        elif pos_pct_v <= 15:
+            pos_pct_color = '#d29922'
+            pos_pct_label = 'OK'
+        else:
+            pos_pct_color = '#f85149'
+            pos_pct_label = 'OVERSIZE'
+
+        pos_size_badge = (
+            f'<span class="badge pos-capped">✂ {cap_reason_v}</span>'
+            if was_capped_v else ''
+        )
+        vol_halved_note = ' (×0.5 — High Vol)' if high_vol_v else ''
+
+        # ── Time Horizon badge ───────────────────────────────
+        horizon_v    = r.get('TimeHorizon', 'MEDIUM')
+        h_label_v    = r.get('HorizonLabel', '📈 Medium')
+        h_color_v    = r.get('HorizonColor', '#d29922')
+        h_range_v    = r.get('HorizonRange', '')
+        est_weeks_v  = r.get('EstWeeks', '?')
+
+        # Squeeze risk badge (SHORT only)
+        sq_lvl   = r.get('SqueezeRisk', 'NONE')
+        short_int = r.get('ShortInt', 0)
+        inst_own  = r.get('InstOwn', 0)
+        if not is_long and sq_lvl == 'HIGH':
+            squeeze_badge = (
+                f'<span class="badge squeeze-high">'
+                f'🚨 SQUEEZE RISK HIGH — Short {short_int}% / Inst {inst_own}%</span>'
+            )
+            squeeze_box = f'''
+  <div class="squeeze-box high">
+<strong>🚨 SHORT SQUEEZE WARNING — HIGH RISK</strong><br>
+Short Interest: <b>{short_int}%</b> &nbsp;|&nbsp; Institutional Ownership: <b>{inst_own}%</b><br>
+<span style="color:#f0f6fc">
+  {short_int}% of the float is already shorted. Institutional ownership at {inst_own}% means
+  very few shares are available. Any positive news can trigger a violent squeeze upward.
+  <b>Consider skipping this SHORT.</b>
+</span>
+  </div>'''
+        elif not is_long and sq_lvl == 'MEDIUM':
+            squeeze_badge = (
+                f'<span class="badge squeeze-med">'
+                f'⚠ Squeeze Risk — Short {short_int}% / Inst {inst_own}%</span>'
+            )
+            squeeze_box = f'''
+  <div class="squeeze-box medium">
+<strong>⚠ Squeeze Risk — MEDIUM</strong><br>
+Short Interest: <b>{short_int}%</b> &nbsp;|&nbsp; Institutional Ownership: <b>{inst_own}%</b><br>
+<span style="color:#e6edf3">Elevated short interest. Manage position size carefully.</span>
+  </div>'''
+        elif is_long and short_int >= 15:
+            squeeze_badge = (
+                f'<span class="badge squeeze-long">'
+                f'🚀 Squeeze Potential — Short {short_int}%</span>'
+            )
+            squeeze_box = f'''
+  <div class="squeeze-box long-squeeze">
+<strong>🚀 Short Squeeze Potential (LONG advantage)</strong><br>
+Short Interest: <b>{short_int}%</b> — If price moves up, forced short covering will amplify the move.
+  </div>'''
+        else:
+            squeeze_badge = ''
+            squeeze_box   = ''
+        vol_badge  = (f'<span class="badge ok">✓ Vol OK</span>'
+                      if vol == 'OK' else
+                      f'<span class="badge warn">⚠ Vol</span>')
+
+        # Probability + Traffic Light
+        prob       = r.get('Prob', 50)
+        pfacts     = r.get('_pfacts', [])
+        if prob >= 70:
+            prob_color = '#3fb950'   # green
+            prob_label = 'HIGH'
+        elif prob >= 55:
+            prob_color = '#d29922'   # yellow
+            prob_label = 'MEDIUM'
+        else:
+            prob_color = '#f85149'   # red
+            prob_label = 'LOW'
+
+        tl_color, tl_label, tl_green, tl_red = get_traffic_light(prob, r)
+        tl_bg = {'GREEN': '#0d2b0d', 'YELLOW': '#2b1f0d', 'RED': '#2b0d0d'}[tl_color]
+        tl_border = {'GREEN': '#3fb950', 'YELLOW': '#d29922', 'RED': '#f85149'}[tl_color]
+        tl_green_html = ''.join(f'<li>✅ {g}</li>' for g in tl_green) if tl_green else ''
+        tl_red_html   = ''.join(f'<li>⚠ {g}</li>' for g in tl_red)   if tl_red   else ''
+
+        factor_html = ''
+        for fname, fdelta, fexplain in pfacts:
+            sign = '+' if fdelta >= 0 else ''
+            clr  = '#3fb950' if fdelta > 0 else ('#f85149' if fdelta < 0 else '#8b949e')
+            factor_html += (
+                f'<div class="prob-factor" title="{fexplain}">'
+                f'<span class="fname">{fname}</span>'
+                f'<span class="fdelta" style="color:{clr}">{sign}{fdelta}%</span>'
+                f'</div>'
+            )
+
+        # ── Top-Down Filter badges ──────────────────────────
+        m_trend_v   = r.get('MonthlyTrend')
+        m_candle_v  = r.get('MonthlyCandle')
+        m_pct_v     = r.get('MonthlyPct')
+        sec_rs_v    = r.get('SectorRS')
+        sec_etf_v   = r.get('SectorETF')
+        sec_trend_v = r.get('SectorTrend')
+        rs_pct_v    = r.get('RS_pct')
+        sup_q_v     = r.get('SupportQ', 'WEAK')
+        sup_tch_v   = r.get('SupportTouches', 0)
+
+        # Monthly trend badge
+        if m_trend_v == 'LONG':
+            mt_cls = 'bull'; mt_txt = '▲ LONG'
+        elif m_trend_v == 'SHORT':
+            mt_cls = 'bear'; mt_txt = '▼ SHORT'
+        else:
+            mt_cls = 'neut'; mt_txt = 'N/A'
+        if m_candle_v and m_pct_v is not None:
+            mc_sign = '+' if m_pct_v >= 0 else ''
+            mc_sub = f'{m_candle_v.replace("_"," ")} ({mc_sign}{m_pct_v}%)'
+        elif m_candle_v:
+            mc_sub = m_candle_v.replace('_', ' ')
+        else:
+            mc_sub = '—'
+
+        # Sector RS badge
+        _rs_map = {
+            'STRONG+': ('bull','STRONG+'), 'ABOVE': ('ok','ABOVE'),
+            'NEUTRAL': ('neut','NEUTRAL'), 'BELOW': ('warn','BELOW'),
+            'WEAK-':   ('bear','WEAK−'),
+        }
+        if sec_rs_v:
+            rs_cls, rs_disp = _rs_map.get(sec_rs_v, ('neut', sec_rs_v))
+            rs_txt = f'{rs_disp} ({rs_pct_v:+.1f}%)' if rs_pct_v is not None else rs_disp
+            sec_sub = f'vs {sec_etf_v} · {sec_trend_v}' if sec_etf_v else '—'
+        else:
+            rs_cls = 'neut'; rs_txt = '—'; sec_sub = 'N/A'
+
+        # Support quality badge
+        _sq_map = {
+            'STRONG': ('bull','STRONG'), 'MEDIUM': ('ok','MEDIUM'), 'WEAK': ('warn','WEAK'),
+        }
+        sq_cls, sq_disp = _sq_map.get(sup_q_v, ('neut', str(sup_q_v or '—')))
+        sq_sub = f'{sup_tch_v} touch{"es" if sup_tch_v != 1 else ""} at level'
+
+        # ── ColmexPro symbol mapping ──────────────────────
+        COLMEX_MAP = {
+            # Precious Metals
+            'GC':'XAUUSD','SI':'XAGUSD','PL':'XPTUSD','PA':'XPDUSD',
+            # Energy
+            'CL':'USOIL','BZ':'BRENT','NG':'NATGAS','RB':'GASOLINE',
+            'HO':'HEATINGOIL',
+            # Industrial Metals
+            'HG':'COPPER','ALI':'ALUMINUM',
+            # Agriculture
+            'ZW':'WHEAT','ZC':'CORN','ZS':'SOYBEANS',
+            'KC':'COFFEE','CC':'COCOA','SB':'SUGAR','CT':'COTTON',
+            # Livestock
+            'LE':'LIVECATTLE','GF':'FEEDERCATTLE',
+        }
+        if typ == 'CRYPTO':
+            cmx_sym = ticker + 'USD'          # BTC → BTCUSD
+        elif typ == 'COMMODITY':
+            cmx_sym = COLMEX_MAP.get(ticker, ticker)
+        elif typ == 'TASE':
+            cmx_sym = ticker + '.TA'
+        elif typ == 'INTL':
+            raw_tick = r.get('_raw', ticker)
+            cmx_sym  = raw_tick                # e.g. SAP.DE as-is
+        else:
+            cmx_sym = ticker                   # US stock: AAPL as-is
+
+        cmx_side   = 'BUY'  if is_long else 'SELL'
+        cmx_action = 'Long' if is_long else 'Short'
+        cmx_note   = (
+            'Note: International stocks traded as CFDs. '
+            'Verify symbol name in Colmex search.' if typ == 'INTL'
+            else 'Note: Crypto traded as CFD (no actual coin ownership).' if typ == 'CRYPTO'
+            else ''
+        )
+
+        # Pine Script for this ticker (escape for JS string)
+        pine_code = make_pine_for_ticker(r)
+        pine_js   = pine_code.replace('\\', '\\\\').replace('`', '\\`').replace('${', '\\${')
+        modal_id  = f"pine_{direction}_{card_idx}"
+        card_idx += 1
+
+        html += f'''
+<div class="card {'long-card' if is_long else 'short-card'}" data-horizon="{horizon_v}">
+  <div class="card-header">
+<div class="card-title">
+  <span class="ticker">{ticker}</span>
+  <span class="dir-badge {'long-badge' if is_long else 'short-badge'}">
+    {'▲ LONG' if is_long else '▼ SHORT'}
+  </span>
+  <span class="horizon-badge" style="background:{h_color_v}22;color:{h_color_v};border:1px solid {h_color_v}66;"
+        title="~{est_weeks_v} weeks to T1 · {h_range_v}">
+    {h_label_v}
+  </span>
+  <span class="type-badge">{typ}</span>
+</div>
+<div class="card-meta">
+  {vol_badge} {earn_badge} {atr_badge} {late_badge} {macd_badge} {boll_badge} {squeeze_badge}
+  <a href="{_render_tv_url(r)}" target="_blank" class="tv-link">📊 TradingView</a>
+  <button class="pine-btn" onclick="showPine('{modal_id}')">📋 Pine Script</button>
+  <button class="colmex-btn" onclick="showColmex('{modal_id}_cmx')">💹 Trade on Colmex</button>
+</div>
+  </div>
+  {squeeze_box}
+  <!-- Position Sizing Box -->
+  <div class="pos-size-box">
+<div class="pos-size-title">💼 Position Sizing</div>
+<div class="pos-size-grid">
+  <div class="ps-cell">
+    <div class="ps-label">סיכון לעסקה</div>
+    <div class="ps-val">${r.get("Risk$",0):,}</div>
+    <div class="ps-sub">{int(RISK_PCT*100)}% של התיק{vol_halved_note}</div>
+  </div>
+  <div class="ps-cell">
+    <div class="ps-label">גודל פוזיציה</div>
+    <div class="ps-val" style="color:{pos_pct_color}">${r.get("Pos$",0):,}</div>
+    <div class="ps-sub" style="color:{pos_pct_color}">{pos_pct_v}% מהתיק — {pos_pct_label} {pos_size_badge}</div>
+  </div>
+  <div class="ps-cell">
+    <div class="ps-label">כמות מניות</div>
+    <div class="ps-val">{units}</div>
+    <div class="ps-sub">@ ${entry}</div>
+  </div>
+  <div class="ps-cell">
+    <div class="ps-label">מקסימום פוזיציות</div>
+    <div class="ps-val">{MAX_OPEN_POSITIONS}</div>
+    <div class="ps-sub">סה"כ בו זמנית</div>
+  </div>
+</div>
+<div class="ps-rule">📏 כלל: 1% סיכון × {MAX_OPEN_POSITIONS} פוזיציות = {int(RISK_PCT*MAX_OPEN_POSITIONS*100)}% חשיפה מקסימלית</div>
+  </div>
+  <!-- Fundamental Analysis Box (stock-analysis skill) -->
+  {_render_fund_box(r)}
+  <!-- Traffic Light Decision Box -->
+  <div class="tl-box" style="background:{tl_bg};border:1px solid {tl_border};">
+<div class="tl-signal">{tl_label}</div>
+<div class="tl-lists">
+  {'<ul class="tl-green">' + tl_green_html + '</ul>' if tl_green_html else ''}
+  {'<ul class="tl-red">'   + tl_red_html   + '</ul>' if tl_red_html   else ''}
+</div>
+  </div>
+  <!-- Colmex Trade Modal for {ticker} -->
+  <div id="{modal_id}_cmx" class="pine-modal" onclick="if(event.target===this)this.style.display='none'">
+<div class="pine-box cmx-box">
+  <div class="pine-header cmx-header">
+    <span>💹 ColmexPro Order — {ticker} ({cmx_action})</span>
+    <button class="pine-close" onclick="document.getElementById('{modal_id}_cmx').style.display='none'">✕</button>
+  </div>
+  <div class="cmx-instructions">
+    <div class="cmx-tip">💡 פתח ColmexPro בטאב נפרד והתחבר → חפש <b>{cmx_sym}</b> → מלא לפי הטופס למטה</div>
+    {f'<div class="cmx-note">⚠ {cmx_note}</div>' if cmx_note else ''}
+  </div>
+
+  <!-- ColmexPro-style order form -->
+  <div class="cmx-form">
+    <div class="cmx-form-title">Order entry {cmx_sym}</div>
+
+    <div class="cmx-field-row">
+      <span class="cmx-field-label">Symbol</span>
+      <div class="cmx-field-val">
+        <span class="cmx-eq-badge">EQ</span>
+        <b>{cmx_sym}</b>
+      </div>
+      <button class="cmx-copy" onclick="copyText('{cmx_sym}',this)">Copy</button>
+    </div>
+
+    <div class="cmx-field-row">
+      <span class="cmx-field-label">Side</span>
+      <div class="cmx-side-btns">
+        <span class="cmx-side-active {'cmx-side-buy' if is_long else 'cmx-side-sell'}">{cmx_side}</span>
+        <span class="cmx-side-inactive">{'Sell' if is_long else 'Buy'}</span>
+      </div>
+      <button class="cmx-copy" onclick="copyText('{cmx_side}',this)">Copy</button>
+    </div>
+
+    <div class="cmx-field-row">
+      <span class="cmx-field-label">Quantity</span>
+      <div class="cmx-field-input">{units}</div>
+      <button class="cmx-copy" onclick="copyText('{units}',this)">Copy</button>
+    </div>
+
+    <div class="cmx-field-row">
+      <span class="cmx-field-label">Order type</span>
+      <div class="cmx-field-val">Limit</div>
+    </div>
+
+    <div class="cmx-field-row">
+      <span class="cmx-field-label">Validity</span>
+      <div class="cmx-field-val">GTC</div>
+    </div>
+
+    <div class="cmx-field-row">
+      <span class="cmx-field-label">Limit price</span>
+      <div class="cmx-field-input cmx-price-blue">{entry}</div>
+      <button class="cmx-copy" onclick="copyText('{entry}',this)">Copy</button>
+    </div>
+
+    <div class="cmx-field-row">
+      <span class="cmx-field-label">SL price</span>
+      <div class="cmx-field-input cmx-price-red">{stop}</div>
+      <button class="cmx-copy" onclick="copyText('{stop}',this)">Copy</button>
+    </div>
+
+    <div class="cmx-field-row">
+      <span class="cmx-field-label">TP price <small>(T1)</small></span>
+      <div class="cmx-field-input cmx-price-green">{target}</div>
+      <button class="cmx-copy" onclick="copyText('{target}',this)">Copy</button>
+    </div>
+
+    <div class="cmx-field-row cmx-fib-row">
+      <span class="cmx-field-label">TP <small>(T2 Fib)</small></span>
+      <div class="cmx-field-input cmx-price-green">{t2}</div>
+      <button class="cmx-copy" onclick="copyText('{t2}',this)">Copy</button>
+    </div>
+
+    <div class="cmx-field-row cmx-fib-row">
+      <span class="cmx-field-label">TP <small>(T3 Fib)</small></span>
+      <div class="cmx-field-input cmx-price-green">{t3}</div>
+      <button class="cmx-copy" onclick="copyText('{t3}',this)">Copy</button>
+    </div>
+
+    <div class="cmx-price-bar">
+      <span class="cmx-price-blue">{entry}</span>
+      <span class="cmx-bar-mid">{units} units · ${pos:,} · R:R 1:{rr}</span>
+      <span class="cmx-price-{'green' if is_long else 'red'}">{target}</span>
+    </div>
+
+    <a href="https://webplatform.colmex.com/" target="_blank" class="cmx-place-btn">
+      {'🟢 Place BUY Order' if is_long else '🔴 Place SELL Order'}
+    </a>
+  </div>
+</div>
+  </div>
+
+  <!-- Pine Script modal for {ticker} -->
+  <div id="{modal_id}" class="pine-modal" onclick="if(event.target===this)this.style.display='none'">
+<div class="pine-box">
+  <div class="pine-header">
+    <span>📋 Pine Script — {ticker} {'LONG ▲' if is_long else 'SHORT ▼'}</span>
+    <button class="pine-close" onclick="document.getElementById('{modal_id}').style.display='none'">✕</button>
+  </div>
+  <div class="pine-instructions">
+    <b>How to use:</b>&nbsp; 1. Open TradingView &nbsp;→&nbsp;
+    2. Open <b>{ticker}</b> chart, Weekly (1W) &nbsp;→&nbsp;
+    3. Click <b>Pine Editor</b> at the bottom &nbsp;→&nbsp;
+    4. Paste the code below &nbsp;→&nbsp; Click <b>"Add to chart"</b><br>
+    → Entry (blue), Stop (red), T1/T2/T3 (green) lines appear automatically.
+  </div>
+  <textarea id="{modal_id}_code" class="pine-code" readonly>{pine_code}</textarea>
+  <button class="pine-copy-btn" onclick="copyPine('{modal_id}')">📋 Copy to Clipboard</button>
+  <span id="{modal_id}_copied" class="copied-msg" style="display:none">✓ Copied!</span>
+</div>
+  </div>
+
+  <div class="levels-grid">
+<div class="level-box">
+  <div class="level-label">Current Price</div>
+  <div class="level-value neutral">${price}</div>
+</div>
+<div class="level-box">
+  <div class="level-label">Entry</div>
+  <div class="level-value blue">${entry}</div>
+</div>
+<div class="level-box">
+  <div class="level-label">Stop Loss</div>
+  <div class="level-value red">${stop}</div>
+</div>
+<div class="level-box">
+  <div class="level-label">Target T1</div>
+  <div class="level-value green">${target}</div>
+</div>
+<div class="level-box">
+  <div class="level-label">T2 (Fib 161.8%)</div>
+  <div class="level-value green">${t2}</div>
+</div>
+<div class="level-box">
+  <div class="level-label">T3 (Fib 261.8%)</div>
+  <div class="level-value green">${t3}</div>
+</div>
+<div class="level-box">
+  <div class="level-label">R:R Ratio</div>
+  <div class="level-value {'green' if rr >= 2.5 else 'neutral'}">1:{rr}</div>
+</div>
+<div class="level-box">
+  <div class="level-label">RSI</div>
+  <div class="level-value {'red' if rsi_v > 65 else 'green' if rsi_v < 40 else 'neutral'}">{rsi_v}</div>
+</div>
+<div class="level-box">
+  <div class="level-label">Position $</div>
+  <div class="level-value neutral">${pos:,}</div>
+</div>
+  </div>
+
+  <div class="two-col">
+<div>
+  <h4>Profit / Loss Scenarios</h4>
+  <table class="scenario-table">
+    <tr><th>Scenario</th><th>Price</th><th>P&L</th><th>% Portfolio</th></tr>
+    <tr class="loss-row">
+      <td>Stop hit</td><td>${stop}</td>
+      <td>-${loss_d}</td><td class="red">-{pct_loss}%</td>
+    </tr>
+    <tr>
+      <td>Target T1</td><td>${target}</td>
+      <td>+${prof_t1}</td><td class="green">+{pct_t1}%</td>
+    </tr>
+    <tr>
+      <td>Target T2</td><td>${t2}</td>
+      <td>+${prof_t2}</td><td class="green">+{pct_t2}%</td>
+    </tr>
+    <tr>
+      <td>Target T3</td><td>${t3}</td>
+      <td>+${prof_t3}</td><td class="green">+{pct_t3}%</td>
+    </tr>
+  </table>
+</div>
+<div>
+  <h4>4-Week Compounding</h4>
+  <table class="scenario-table">
+    <tr><th>Week</th><th>Portfolio</th><th>Total Gain</th></tr>
+    {comp_rows}
+  </table>
+</div>
+  </div>
+
+  <!-- Top-Down Filter Analysis -->
+  <div class="topdown-section">
+<div class="topdown-title">📊 Top-Down Filter Analysis (Cycles Trading)</div>
+<div class="topdown-grid">
+  <div class="td-box">
+    <div class="td-label">Monthly Trend</div>
+    <div class="td-badge td-{mt_cls}">{mt_txt}</div>
+    <div class="td-sub">{mc_sub}</div>
+  </div>
+  <div class="td-box">
+    <div class="td-label">Sector Relative Strength</div>
+    <div class="td-badge td-{rs_cls}">{rs_txt}</div>
+    <div class="td-sub">{sec_sub}</div>
+  </div>
+  <div class="td-box">
+    <div class="td-label">Support Quality</div>
+    <div class="td-badge td-{sq_cls}">{sq_disp}</div>
+    <div class="td-sub">{sq_sub}</div>
+  </div>
+</div>
+  </div>
+
+  <!-- Probability of Success -->
+  <div class="prob-section">
+<div class="prob-header">
+  <span class="prob-title">Estimated Success Probability (reach T1)</span>
+  <span class="prob-value" style="color:{prob_color}">{prob}% &nbsp;<small style="font-size:13px;font-weight:500">{prob_label}</small></span>
+</div>
+<div class="prob-bar-bg">
+  <div class="prob-bar-fill" style="width:{prob}%;background:{prob_color}"></div>
+</div>
+<div class="prob-factors">
+  {factor_html}
+</div>
+<div style="font-size:10px;color:#484f58;margin-top:8px">
+  * Algorithmic estimate based on 10 technical factors (incl. Monthly Trend, Sector RS, Support Quality). Not a guarantee. Always manage your risk.
+</div>
+  </div>
+
+</div>'''
+    return html
+
+
 def generate_html(results, script_d, ts, portfolio, risk_trade, iv_label,
                   n_stocks=0, n_israel=0, n_intl=0, n_crypto=0, n_commodity=0):
-    """Generate a beautiful dark-theme HTML report of all scan results.
-    Coordinator: calls _render_tv_url, _render_fund_box, setup_cards.
-    Card-level HTML lives in those renderers — not here.
+    """Thin coordinator — sorts results, assembles page, writes file.
+    Card-level HTML lives in _render_setup_cards(), _render_tv_url(), _render_fund_box().
     """
     if not results:
         return None
@@ -116,578 +686,9 @@ def generate_html(results, script_d, ts, portfolio, risk_trade, iv_label,
         _tz = timezone(timedelta(hours=3))
     scan_date  = datetime.now(_tz).strftime('%B %d, %Y  %H:%M') + ' (IL)'
 
-    # Aliases so setup_cards() can call them without change
-    tv_url       = _render_tv_url
-    _build_fund_html = _render_fund_box
 
-    def setup_cards(rows, color, direction):
-        if not rows:
-            return f'<p class="none">No {direction} setups found today.</p>'
-        html = ''
-        card_idx = 0
-        for r in rows:
-            ticker  = r['Ticker']
-            entry   = r['Entry']
-            stop    = r['Stop']
-            target  = r['Target']
-            rr      = r['R:R']
-            price   = r['Price']
-            rsi_v   = r['RSI']
-            pos     = r['Pos$']
-            units   = r['Units']
-            vol     = r['Vol']
-            earn    = r['Earn']
-            typ     = r['Type']
-
-            is_long = direction == 'LONG'
-            risk_u  = abs(entry - stop)
-            rew_t1  = abs(target - entry)
-            t2 = round(entry + rew_t1 * 1.618, 2) if is_long else round(entry - rew_t1 * 1.618, 2)
-            t3 = round(entry + rew_t1 * 2.618, 2) if is_long else round(entry - rew_t1 * 2.618, 2)
-
-            loss_d   = round(risk_u * units, 2)
-            prof_t1  = round(rew_t1 * units, 2)
-            prof_t2  = round(abs(t2 - entry) * units, 2)
-            prof_t3  = round(abs(t3 - entry) * units, 2)
-            pct_loss = round(loss_d / portfolio * 100, 2)
-            pct_t1   = round(prof_t1 / portfolio * 100, 2)
-            pct_t2   = round(prof_t2 / portfolio * 100, 2)
-            pct_t3   = round(prof_t3 / portfolio * 100, 2)
-
-            # 4-week compounding
-            port_w = portfolio
-            comp_rows = ''
-            for w in range(1, 5):
-                gain = port_w * 0.10 * rr
-                port_w = round(port_w + gain, 2)
-                total_gain = round(port_w - portfolio, 2)
-                comp_rows += f'''
-                <tr>
-                  <td>Week {w}</td>
-                  <td>${port_w:,.2f}</td>
-                  <td class="green">+${total_gain:,.2f}</td>
-                </tr>'''
-
-            earn_badge = (
-                f'<span class="badge warn">⚠ SOON! Earnings</span>'  if earn == 'SOON!'        else
-                f'<span class="badge earn-approaching">📅 {earn}</span>' if earn == 'APPROACHING' else
-                f'<span class="badge ok">{earn}</span>'
-            )
-            # ATR / High Volatility badge
-            atr_pct_v = r.get('ATR_pct', 0)
-            high_vol  = r.get('HighVol', False)
-            atr_badge = (f'<span class="badge atr-high">🔥 ATR {atr_pct_v}%</span>' if high_vol
-                         else f'<span class="badge ok">ATR {atr_pct_v}%</span>')
-            # Late Entry badge
-            late_pct_v = r.get('LateEntry', 0)
-            late_badge = (f'<span class="badge late-entry">⚡ LATE +{late_pct_v}% from level</span>' if late_pct_v > 5 else '')
-
-            # MACD badge
-            macd_d = r.get('_macd') or {}
-            _cross = macd_d.get('cross'); _mtrend = macd_d.get('trend'); _mdiv = macd_d.get('divergence')
-            if _cross == 'GOLDEN':
-                macd_badge = '<span class="badge macd-bull">⚡ MACD Golden Cross</span>'
-            elif _cross == 'DEATH':
-                macd_badge = '<span class="badge macd-bear">💀 MACD Death Cross</span>'
-            elif _mdiv == 'BULL_DIV':
-                macd_badge = '<span class="badge macd-bull">📈 MACD Bull Divergence</span>'
-            elif _mtrend == 'BULL':
-                macd_badge = '<span class="badge ok">MACD ▲</span>'
-            elif _mtrend == 'BEAR':
-                macd_badge = '<span class="badge warn">MACD ▼</span>'
-            else:
-                macd_badge = ''
-
-            # Bollinger badge
-            boll_d = r.get('_boll') or {}
-            _bpos = boll_d.get('position'); _bpct = boll_d.get('pct_b', 0.5)
-            if _bpos == 'NEAR_LOWER':
-                boll_badge = f'<span class="badge boll-low">🎯 Lower Band ({_bpct:.2f})</span>'
-            elif _bpos == 'NEAR_UPPER':
-                boll_badge = f'<span class="badge boll-high">⚠ Upper Band ({_bpct:.2f})</span>'
-            elif _bpos == 'SQUEEZE':
-                boll_badge = '<span class="badge boll-squeeze">🔥 BB Squeeze</span>'
-            else:
-                boll_badge = ''
-
-            # ── Position Sizing ──────────────────────────────────
-            pos_pct_v    = r.get('PosPct', 0)
-            was_capped_v = r.get('WasCapped', False)
-            cap_reason_v = r.get('CapReason', '')
-            high_vol_v   = r.get('HighVol', False)
-            # Position size color: green < 10%, yellow 10-15%, red > 15%
-            if pos_pct_v <= 10:
-                pos_pct_color = '#3fb950'
-                pos_pct_label = 'SAFE'
-            elif pos_pct_v <= 15:
-                pos_pct_color = '#d29922'
-                pos_pct_label = 'OK'
-            else:
-                pos_pct_color = '#f85149'
-                pos_pct_label = 'OVERSIZE'
-
-            pos_size_badge = (
-                f'<span class="badge pos-capped">✂ {cap_reason_v}</span>'
-                if was_capped_v else ''
-            )
-            vol_halved_note = ' (×0.5 — High Vol)' if high_vol_v else ''
-
-            # ── Time Horizon badge ───────────────────────────────
-            horizon_v    = r.get('TimeHorizon', 'MEDIUM')
-            h_label_v    = r.get('HorizonLabel', '📈 Medium')
-            h_color_v    = r.get('HorizonColor', '#d29922')
-            h_range_v    = r.get('HorizonRange', '')
-            est_weeks_v  = r.get('EstWeeks', '?')
-
-            # Squeeze risk badge (SHORT only)
-            sq_lvl   = r.get('SqueezeRisk', 'NONE')
-            short_int = r.get('ShortInt', 0)
-            inst_own  = r.get('InstOwn', 0)
-            if not is_long and sq_lvl == 'HIGH':
-                squeeze_badge = (
-                    f'<span class="badge squeeze-high">'
-                    f'🚨 SQUEEZE RISK HIGH — Short {short_int}% / Inst {inst_own}%</span>'
-                )
-                squeeze_box = f'''
-  <div class="squeeze-box high">
-    <strong>🚨 SHORT SQUEEZE WARNING — HIGH RISK</strong><br>
-    Short Interest: <b>{short_int}%</b> &nbsp;|&nbsp; Institutional Ownership: <b>{inst_own}%</b><br>
-    <span style="color:#f0f6fc">
-      {short_int}% of the float is already shorted. Institutional ownership at {inst_own}% means
-      very few shares are available. Any positive news can trigger a violent squeeze upward.
-      <b>Consider skipping this SHORT.</b>
-    </span>
-  </div>'''
-            elif not is_long and sq_lvl == 'MEDIUM':
-                squeeze_badge = (
-                    f'<span class="badge squeeze-med">'
-                    f'⚠ Squeeze Risk — Short {short_int}% / Inst {inst_own}%</span>'
-                )
-                squeeze_box = f'''
-  <div class="squeeze-box medium">
-    <strong>⚠ Squeeze Risk — MEDIUM</strong><br>
-    Short Interest: <b>{short_int}%</b> &nbsp;|&nbsp; Institutional Ownership: <b>{inst_own}%</b><br>
-    <span style="color:#e6edf3">Elevated short interest. Manage position size carefully.</span>
-  </div>'''
-            elif is_long and short_int >= 15:
-                squeeze_badge = (
-                    f'<span class="badge squeeze-long">'
-                    f'🚀 Squeeze Potential — Short {short_int}%</span>'
-                )
-                squeeze_box = f'''
-  <div class="squeeze-box long-squeeze">
-    <strong>🚀 Short Squeeze Potential (LONG advantage)</strong><br>
-    Short Interest: <b>{short_int}%</b> — If price moves up, forced short covering will amplify the move.
-  </div>'''
-            else:
-                squeeze_badge = ''
-                squeeze_box   = ''
-            vol_badge  = (f'<span class="badge ok">✓ Vol OK</span>'
-                          if vol == 'OK' else
-                          f'<span class="badge warn">⚠ Vol</span>')
-
-            # Probability + Traffic Light
-            prob       = r.get('Prob', 50)
-            pfacts     = r.get('_pfacts', [])
-            if prob >= 70:
-                prob_color = '#3fb950'   # green
-                prob_label = 'HIGH'
-            elif prob >= 55:
-                prob_color = '#d29922'   # yellow
-                prob_label = 'MEDIUM'
-            else:
-                prob_color = '#f85149'   # red
-                prob_label = 'LOW'
-
-            tl_color, tl_label, tl_green, tl_red = get_traffic_light(prob, r)
-            tl_bg = {'GREEN': '#0d2b0d', 'YELLOW': '#2b1f0d', 'RED': '#2b0d0d'}[tl_color]
-            tl_border = {'GREEN': '#3fb950', 'YELLOW': '#d29922', 'RED': '#f85149'}[tl_color]
-            tl_green_html = ''.join(f'<li>✅ {g}</li>' for g in tl_green) if tl_green else ''
-            tl_red_html   = ''.join(f'<li>⚠ {g}</li>' for g in tl_red)   if tl_red   else ''
-
-            factor_html = ''
-            for fname, fdelta, fexplain in pfacts:
-                sign = '+' if fdelta >= 0 else ''
-                clr  = '#3fb950' if fdelta > 0 else ('#f85149' if fdelta < 0 else '#8b949e')
-                factor_html += (
-                    f'<div class="prob-factor" title="{fexplain}">'
-                    f'<span class="fname">{fname}</span>'
-                    f'<span class="fdelta" style="color:{clr}">{sign}{fdelta}%</span>'
-                    f'</div>'
-                )
-
-            # ── Top-Down Filter badges ──────────────────────────
-            m_trend_v   = r.get('MonthlyTrend')
-            m_candle_v  = r.get('MonthlyCandle')
-            m_pct_v     = r.get('MonthlyPct')
-            sec_rs_v    = r.get('SectorRS')
-            sec_etf_v   = r.get('SectorETF')
-            sec_trend_v = r.get('SectorTrend')
-            rs_pct_v    = r.get('RS_pct')
-            sup_q_v     = r.get('SupportQ', 'WEAK')
-            sup_tch_v   = r.get('SupportTouches', 0)
-
-            # Monthly trend badge
-            if m_trend_v == 'LONG':
-                mt_cls = 'bull'; mt_txt = '▲ LONG'
-            elif m_trend_v == 'SHORT':
-                mt_cls = 'bear'; mt_txt = '▼ SHORT'
-            else:
-                mt_cls = 'neut'; mt_txt = 'N/A'
-            if m_candle_v and m_pct_v is not None:
-                mc_sign = '+' if m_pct_v >= 0 else ''
-                mc_sub = f'{m_candle_v.replace("_"," ")} ({mc_sign}{m_pct_v}%)'
-            elif m_candle_v:
-                mc_sub = m_candle_v.replace('_', ' ')
-            else:
-                mc_sub = '—'
-
-            # Sector RS badge
-            _rs_map = {
-                'STRONG+': ('bull','STRONG+'), 'ABOVE': ('ok','ABOVE'),
-                'NEUTRAL': ('neut','NEUTRAL'), 'BELOW': ('warn','BELOW'),
-                'WEAK-':   ('bear','WEAK−'),
-            }
-            if sec_rs_v:
-                rs_cls, rs_disp = _rs_map.get(sec_rs_v, ('neut', sec_rs_v))
-                rs_txt = f'{rs_disp} ({rs_pct_v:+.1f}%)' if rs_pct_v is not None else rs_disp
-                sec_sub = f'vs {sec_etf_v} · {sec_trend_v}' if sec_etf_v else '—'
-            else:
-                rs_cls = 'neut'; rs_txt = '—'; sec_sub = 'N/A'
-
-            # Support quality badge
-            _sq_map = {
-                'STRONG': ('bull','STRONG'), 'MEDIUM': ('ok','MEDIUM'), 'WEAK': ('warn','WEAK'),
-            }
-            sq_cls, sq_disp = _sq_map.get(sup_q_v, ('neut', str(sup_q_v or '—')))
-            sq_sub = f'{sup_tch_v} touch{"es" if sup_tch_v != 1 else ""} at level'
-
-            # ── ColmexPro symbol mapping ──────────────────────
-            COLMEX_MAP = {
-                # Precious Metals
-                'GC':'XAUUSD','SI':'XAGUSD','PL':'XPTUSD','PA':'XPDUSD',
-                # Energy
-                'CL':'USOIL','BZ':'BRENT','NG':'NATGAS','RB':'GASOLINE',
-                'HO':'HEATINGOIL',
-                # Industrial Metals
-                'HG':'COPPER','ALI':'ALUMINUM',
-                # Agriculture
-                'ZW':'WHEAT','ZC':'CORN','ZS':'SOYBEANS',
-                'KC':'COFFEE','CC':'COCOA','SB':'SUGAR','CT':'COTTON',
-                # Livestock
-                'LE':'LIVECATTLE','GF':'FEEDERCATTLE',
-            }
-            if typ == 'CRYPTO':
-                cmx_sym = ticker + 'USD'          # BTC → BTCUSD
-            elif typ == 'COMMODITY':
-                cmx_sym = COLMEX_MAP.get(ticker, ticker)
-            elif typ == 'TASE':
-                cmx_sym = ticker + '.TA'
-            elif typ == 'INTL':
-                raw_tick = r.get('_raw', ticker)
-                cmx_sym  = raw_tick                # e.g. SAP.DE as-is
-            else:
-                cmx_sym = ticker                   # US stock: AAPL as-is
-
-            cmx_side   = 'BUY'  if is_long else 'SELL'
-            cmx_action = 'Long' if is_long else 'Short'
-            cmx_note   = (
-                'Note: International stocks traded as CFDs. '
-                'Verify symbol name in Colmex search.' if typ == 'INTL'
-                else 'Note: Crypto traded as CFD (no actual coin ownership).' if typ == 'CRYPTO'
-                else ''
-            )
-
-            # Pine Script for this ticker (escape for JS string)
-            pine_code = make_pine_for_ticker(r)
-            pine_js   = pine_code.replace('\\', '\\\\').replace('`', '\\`').replace('${', '\\${')
-            modal_id  = f"pine_{direction}_{card_idx}"
-            card_idx += 1
-
-            html += f'''
-<div class="card {'long-card' if is_long else 'short-card'}" data-horizon="{horizon_v}">
-  <div class="card-header">
-    <div class="card-title">
-      <span class="ticker">{ticker}</span>
-      <span class="dir-badge {'long-badge' if is_long else 'short-badge'}">
-        {'▲ LONG' if is_long else '▼ SHORT'}
-      </span>
-      <span class="horizon-badge" style="background:{h_color_v}22;color:{h_color_v};border:1px solid {h_color_v}66;"
-            title="~{est_weeks_v} weeks to T1 · {h_range_v}">
-        {h_label_v}
-      </span>
-      <span class="type-badge">{typ}</span>
-    </div>
-    <div class="card-meta">
-      {vol_badge} {earn_badge} {atr_badge} {late_badge} {macd_badge} {boll_badge} {squeeze_badge}
-      <a href="{tv_url(r)}" target="_blank" class="tv-link">📊 TradingView</a>
-      <button class="pine-btn" onclick="showPine('{modal_id}')">📋 Pine Script</button>
-      <button class="colmex-btn" onclick="showColmex('{modal_id}_cmx')">💹 Trade on Colmex</button>
-    </div>
-  </div>
-  {squeeze_box}
-  <!-- Position Sizing Box -->
-  <div class="pos-size-box">
-    <div class="pos-size-title">💼 Position Sizing</div>
-    <div class="pos-size-grid">
-      <div class="ps-cell">
-        <div class="ps-label">סיכון לעסקה</div>
-        <div class="ps-val">${r.get("Risk$",0):,}</div>
-        <div class="ps-sub">{int(RISK_PCT*100)}% של התיק{vol_halved_note}</div>
-      </div>
-      <div class="ps-cell">
-        <div class="ps-label">גודל פוזיציה</div>
-        <div class="ps-val" style="color:{pos_pct_color}">${r.get("Pos$",0):,}</div>
-        <div class="ps-sub" style="color:{pos_pct_color}">{pos_pct_v}% מהתיק — {pos_pct_label} {pos_size_badge}</div>
-      </div>
-      <div class="ps-cell">
-        <div class="ps-label">כמות מניות</div>
-        <div class="ps-val">{units}</div>
-        <div class="ps-sub">@ ${entry}</div>
-      </div>
-      <div class="ps-cell">
-        <div class="ps-label">מקסימום פוזיציות</div>
-        <div class="ps-val">{MAX_OPEN_POSITIONS}</div>
-        <div class="ps-sub">סה"כ בו זמנית</div>
-      </div>
-    </div>
-    <div class="ps-rule">📏 כלל: 1% סיכון × {MAX_OPEN_POSITIONS} פוזיציות = {int(RISK_PCT*MAX_OPEN_POSITIONS*100)}% חשיפה מקסימלית</div>
-  </div>
-  <!-- Fundamental Analysis Box (stock-analysis skill) -->
-  {_build_fund_html(r)}
-  <!-- Traffic Light Decision Box -->
-  <div class="tl-box" style="background:{tl_bg};border:1px solid {tl_border};">
-    <div class="tl-signal">{tl_label}</div>
-    <div class="tl-lists">
-      {'<ul class="tl-green">' + tl_green_html + '</ul>' if tl_green_html else ''}
-      {'<ul class="tl-red">'   + tl_red_html   + '</ul>' if tl_red_html   else ''}
-    </div>
-  </div>
-  <!-- Colmex Trade Modal for {ticker} -->
-  <div id="{modal_id}_cmx" class="pine-modal" onclick="if(event.target===this)this.style.display='none'">
-    <div class="pine-box cmx-box">
-      <div class="pine-header cmx-header">
-        <span>💹 ColmexPro Order — {ticker} ({cmx_action})</span>
-        <button class="pine-close" onclick="document.getElementById('{modal_id}_cmx').style.display='none'">✕</button>
-      </div>
-      <div class="cmx-instructions">
-        <div class="cmx-tip">💡 פתח ColmexPro בטאב נפרד והתחבר → חפש <b>{cmx_sym}</b> → מלא לפי הטופס למטה</div>
-        {f'<div class="cmx-note">⚠ {cmx_note}</div>' if cmx_note else ''}
-      </div>
-
-      <!-- ColmexPro-style order form -->
-      <div class="cmx-form">
-        <div class="cmx-form-title">Order entry {cmx_sym}</div>
-
-        <div class="cmx-field-row">
-          <span class="cmx-field-label">Symbol</span>
-          <div class="cmx-field-val">
-            <span class="cmx-eq-badge">EQ</span>
-            <b>{cmx_sym}</b>
-          </div>
-          <button class="cmx-copy" onclick="copyText('{cmx_sym}',this)">Copy</button>
-        </div>
-
-        <div class="cmx-field-row">
-          <span class="cmx-field-label">Side</span>
-          <div class="cmx-side-btns">
-            <span class="cmx-side-active {'cmx-side-buy' if is_long else 'cmx-side-sell'}">{cmx_side}</span>
-            <span class="cmx-side-inactive">{'Sell' if is_long else 'Buy'}</span>
-          </div>
-          <button class="cmx-copy" onclick="copyText('{cmx_side}',this)">Copy</button>
-        </div>
-
-        <div class="cmx-field-row">
-          <span class="cmx-field-label">Quantity</span>
-          <div class="cmx-field-input">{units}</div>
-          <button class="cmx-copy" onclick="copyText('{units}',this)">Copy</button>
-        </div>
-
-        <div class="cmx-field-row">
-          <span class="cmx-field-label">Order type</span>
-          <div class="cmx-field-val">Limit</div>
-        </div>
-
-        <div class="cmx-field-row">
-          <span class="cmx-field-label">Validity</span>
-          <div class="cmx-field-val">GTC</div>
-        </div>
-
-        <div class="cmx-field-row">
-          <span class="cmx-field-label">Limit price</span>
-          <div class="cmx-field-input cmx-price-blue">{entry}</div>
-          <button class="cmx-copy" onclick="copyText('{entry}',this)">Copy</button>
-        </div>
-
-        <div class="cmx-field-row">
-          <span class="cmx-field-label">SL price</span>
-          <div class="cmx-field-input cmx-price-red">{stop}</div>
-          <button class="cmx-copy" onclick="copyText('{stop}',this)">Copy</button>
-        </div>
-
-        <div class="cmx-field-row">
-          <span class="cmx-field-label">TP price <small>(T1)</small></span>
-          <div class="cmx-field-input cmx-price-green">{target}</div>
-          <button class="cmx-copy" onclick="copyText('{target}',this)">Copy</button>
-        </div>
-
-        <div class="cmx-field-row cmx-fib-row">
-          <span class="cmx-field-label">TP <small>(T2 Fib)</small></span>
-          <div class="cmx-field-input cmx-price-green">{t2}</div>
-          <button class="cmx-copy" onclick="copyText('{t2}',this)">Copy</button>
-        </div>
-
-        <div class="cmx-field-row cmx-fib-row">
-          <span class="cmx-field-label">TP <small>(T3 Fib)</small></span>
-          <div class="cmx-field-input cmx-price-green">{t3}</div>
-          <button class="cmx-copy" onclick="copyText('{t3}',this)">Copy</button>
-        </div>
-
-        <div class="cmx-price-bar">
-          <span class="cmx-price-blue">{entry}</span>
-          <span class="cmx-bar-mid">{units} units · ${pos:,} · R:R 1:{rr}</span>
-          <span class="cmx-price-{'green' if is_long else 'red'}">{target}</span>
-        </div>
-
-        <a href="https://webplatform.colmex.com/" target="_blank" class="cmx-place-btn">
-          {'🟢 Place BUY Order' if is_long else '🔴 Place SELL Order'}
-        </a>
-      </div>
-    </div>
-  </div>
-
-  <!-- Pine Script modal for {ticker} -->
-  <div id="{modal_id}" class="pine-modal" onclick="if(event.target===this)this.style.display='none'">
-    <div class="pine-box">
-      <div class="pine-header">
-        <span>📋 Pine Script — {ticker} {'LONG ▲' if is_long else 'SHORT ▼'}</span>
-        <button class="pine-close" onclick="document.getElementById('{modal_id}').style.display='none'">✕</button>
-      </div>
-      <div class="pine-instructions">
-        <b>How to use:</b>&nbsp; 1. Open TradingView &nbsp;→&nbsp;
-        2. Open <b>{ticker}</b> chart, Weekly (1W) &nbsp;→&nbsp;
-        3. Click <b>Pine Editor</b> at the bottom &nbsp;→&nbsp;
-        4. Paste the code below &nbsp;→&nbsp; Click <b>"Add to chart"</b><br>
-        → Entry (blue), Stop (red), T1/T2/T3 (green) lines appear automatically.
-      </div>
-      <textarea id="{modal_id}_code" class="pine-code" readonly>{pine_code}</textarea>
-      <button class="pine-copy-btn" onclick="copyPine('{modal_id}')">📋 Copy to Clipboard</button>
-      <span id="{modal_id}_copied" class="copied-msg" style="display:none">✓ Copied!</span>
-    </div>
-  </div>
-
-  <div class="levels-grid">
-    <div class="level-box">
-      <div class="level-label">Current Price</div>
-      <div class="level-value neutral">${price}</div>
-    </div>
-    <div class="level-box">
-      <div class="level-label">Entry</div>
-      <div class="level-value blue">${entry}</div>
-    </div>
-    <div class="level-box">
-      <div class="level-label">Stop Loss</div>
-      <div class="level-value red">${stop}</div>
-    </div>
-    <div class="level-box">
-      <div class="level-label">Target T1</div>
-      <div class="level-value green">${target}</div>
-    </div>
-    <div class="level-box">
-      <div class="level-label">T2 (Fib 161.8%)</div>
-      <div class="level-value green">${t2}</div>
-    </div>
-    <div class="level-box">
-      <div class="level-label">T3 (Fib 261.8%)</div>
-      <div class="level-value green">${t3}</div>
-    </div>
-    <div class="level-box">
-      <div class="level-label">R:R Ratio</div>
-      <div class="level-value {'green' if rr >= 2.5 else 'neutral'}">1:{rr}</div>
-    </div>
-    <div class="level-box">
-      <div class="level-label">RSI</div>
-      <div class="level-value {'red' if rsi_v > 65 else 'green' if rsi_v < 40 else 'neutral'}">{rsi_v}</div>
-    </div>
-    <div class="level-box">
-      <div class="level-label">Position $</div>
-      <div class="level-value neutral">${pos:,}</div>
-    </div>
-  </div>
-
-  <div class="two-col">
-    <div>
-      <h4>Profit / Loss Scenarios</h4>
-      <table class="scenario-table">
-        <tr><th>Scenario</th><th>Price</th><th>P&L</th><th>% Portfolio</th></tr>
-        <tr class="loss-row">
-          <td>Stop hit</td><td>${stop}</td>
-          <td>-${loss_d}</td><td class="red">-{pct_loss}%</td>
-        </tr>
-        <tr>
-          <td>Target T1</td><td>${target}</td>
-          <td>+${prof_t1}</td><td class="green">+{pct_t1}%</td>
-        </tr>
-        <tr>
-          <td>Target T2</td><td>${t2}</td>
-          <td>+${prof_t2}</td><td class="green">+{pct_t2}%</td>
-        </tr>
-        <tr>
-          <td>Target T3</td><td>${t3}</td>
-          <td>+${prof_t3}</td><td class="green">+{pct_t3}%</td>
-        </tr>
-      </table>
-    </div>
-    <div>
-      <h4>4-Week Compounding</h4>
-      <table class="scenario-table">
-        <tr><th>Week</th><th>Portfolio</th><th>Total Gain</th></tr>
-        {comp_rows}
-      </table>
-    </div>
-  </div>
-
-  <!-- Top-Down Filter Analysis -->
-  <div class="topdown-section">
-    <div class="topdown-title">📊 Top-Down Filter Analysis (Cycles Trading)</div>
-    <div class="topdown-grid">
-      <div class="td-box">
-        <div class="td-label">Monthly Trend</div>
-        <div class="td-badge td-{mt_cls}">{mt_txt}</div>
-        <div class="td-sub">{mc_sub}</div>
-      </div>
-      <div class="td-box">
-        <div class="td-label">Sector Relative Strength</div>
-        <div class="td-badge td-{rs_cls}">{rs_txt}</div>
-        <div class="td-sub">{sec_sub}</div>
-      </div>
-      <div class="td-box">
-        <div class="td-label">Support Quality</div>
-        <div class="td-badge td-{sq_cls}">{sq_disp}</div>
-        <div class="td-sub">{sq_sub}</div>
-      </div>
-    </div>
-  </div>
-
-  <!-- Probability of Success -->
-  <div class="prob-section">
-    <div class="prob-header">
-      <span class="prob-title">Estimated Success Probability (reach T1)</span>
-      <span class="prob-value" style="color:{prob_color}">{prob}% &nbsp;<small style="font-size:13px;font-weight:500">{prob_label}</small></span>
-    </div>
-    <div class="prob-bar-bg">
-      <div class="prob-bar-fill" style="width:{prob}%;background:{prob_color}"></div>
-    </div>
-    <div class="prob-factors">
-      {factor_html}
-    </div>
-    <div style="font-size:10px;color:#484f58;margin-top:8px">
-      * Algorithmic estimate based on 10 technical factors (incl. Monthly Trend, Sector RS, Support Quality). Not a guarantee. Always manage your risk.
-    </div>
-  </div>
-
-</div>'''
-        return html
+    # Card renderer is now module-level: see _render_setup_cards() above
+    # (lifted from generate_html for independent testability)
 
     # Sort by probability descending (best setups first)
     longs.sort(key=lambda x: x.get('Prob', 0),  reverse=True)
@@ -699,10 +700,10 @@ def generate_html(results, script_d, ts, portfolio, risk_trade, iv_label,
     shorts_main = [r for r in shorts if not r.get('IsWatchlist')]
     shorts_watch= [r for r in shorts if r.get('IsWatchlist')]
 
-    long_cards        = setup_cards(longs_main,  '#00c851', 'LONG')
-    long_watch_cards  = setup_cards(longs_watch, '#00c851', 'LONG')
-    short_cards       = setup_cards(shorts_main, '#ff4444', 'SHORT')
-    short_watch_cards = setup_cards(shorts_watch,'#ff4444', 'SHORT')
+    long_cards        = _render_setup_cards(longs_main,  'LONG',  portfolio)
+    long_watch_cards  = _render_setup_cards(longs_watch, 'LONG',  portfolio)
+    short_cards       = _render_setup_cards(shorts_main, 'SHORT', portfolio)
+    short_watch_cards = _render_setup_cards(shorts_watch,'SHORT', portfolio)
 
     html = f'''<!DOCTYPE html>
 <html lang="en">
