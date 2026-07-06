@@ -1,27 +1,37 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""ct_indicators.py — Technical indicators, level analysis, MACD/BB/Fibonacci."""
-import sys, time, warnings, os, logging
+"""
+ct_indicators.py — Pure technical indicators and level-analysis helpers.
+
+All functions here are pure: they operate on DataFrames / scalars already
+in memory and make NO network calls.  Network I/O (yfinance fetches) lives
+in ct_market_data.py.  The three names below are re-exported for backward
+compatibility so existing callers don't need to change their imports.
+"""
+import sys, warnings, logging
 from datetime import datetime
-import json
+
 warnings.filterwarnings('ignore')
 logging.getLogger('yfinance').setLevel(logging.CRITICAL)
 logging.getLogger('peewee').setLevel(logging.CRITICAL)
 
-def _install(pkg):
-    import subprocess
-    print(f"  Installing {pkg}...")
-    subprocess.check_call([sys.executable, "-m", "pip", "install", pkg, "--quiet"])
-
-try:    import yfinance as yf
-except: _install("yfinance"); import yfinance as yf
-
 try:    import pandas as pd
-except: _install("pandas"); import pandas as pd
+except:
+    import subprocess
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "pandas", "--quiet"])
+    import pandas as pd
+
+import numpy as np
+
 from ct_config import (
-    EARNINGS_WARN_DAYS, PM_SWING_LOOKBACK, SECTOR_ETF,
+    EARNINGS_WARN_DAYS, PM_SWING_LOOKBACK,
     MAX_DIST_STOCK, MAX_DIST_CRYPTO, MAX_DIST_COMMODITY, MAX_DIST_INTL,
 )
+
+# ── I/O adapter re-exports (backward compat) ────────────────────────────────
+# Network calls live in ct_market_data; importing them here keeps all
+# existing `from ct_indicators import get_earnings, ...` lines working.
+from ct_market_data import get_earnings, get_monthly_analysis, get_sector_rs
 
 # ══════════════════════════════════════════════════════════════
 #  INDICATOR FUNCTIONS
@@ -144,117 +154,6 @@ def vol_declining(df, n=3):
     if avg == 0:
         return False
     return recent < avg * 0.85
-
-def get_earnings(tkr):
-    try:
-        cal = tkr.calendar
-        if cal is None: return None, None
-        dates = cal.get('Earnings Date', []) if isinstance(cal, dict) else (
-            cal.loc['Earnings Date'] if hasattr(cal,'loc') and 'Earnings Date' in cal.index else []
-        )
-        if hasattr(dates,'__iter__') and not isinstance(dates, str):
-            dates = list(dates)
-            date  = dates[0] if dates else None
-        else:
-            date = dates
-        if date is None: return None, None
-        ed   = pd.to_datetime(date).date()
-        days = (ed - datetime.now().date()).days
-        return str(ed), days
-    except:
-        return None, None
-
-
-# ══════════════════════════════════════════════════════════════
-#  NEW FILTER FUNCTIONS
-# ══════════════════════════════════════════════════════════════
-
-def get_monthly_analysis(ticker, asset=None):
-    """
-    Monthly chart — top-down trend confirmation.
-    Returns dict: trend, candle_pct, candle_q
-    Pass asset if you already have a yf.Ticker(ticker) to avoid a duplicate HTTP object.
-    """
-    try:
-        if asset is None:
-            asset = yf.Ticker(ticker)
-        mdf = asset.history(period='4y', interval='1mo', auto_adjust=True, raise_errors=False)
-        if mdf is None or len(mdf) < 8:
-            return None
-        mdf.columns = [c.capitalize() for c in mdf.columns]
-        close = mdf['Close']
-        opens = mdf['Open']
-
-        sma6  = float(close.rolling(6).mean().iloc[-1])
-        sma12 = float(close.rolling(12).mean().iloc[-1])
-        price = float(close.iloc[-1])
-
-        if sma6 > sma12 and price > sma12 * 0.97:
-            m_trend = 'LONG'
-        elif sma6 < sma12 and price < sma12 * 1.03:
-            m_trend = 'SHORT'
-        else:
-            m_trend = None
-
-        # Last completed monthly candle (index -2 = last closed month)
-        last_open  = float(opens.iloc[-2])
-        last_close = float(close.iloc[-2])
-        last_pct   = round((last_close - last_open) / last_open * 100, 1) if last_open else 0
-
-        if   last_pct <= -8:  candle_q = 'STRONG_BEAR'
-        elif last_pct <= -3:  candle_q = 'BEAR'
-        elif last_pct >=  8:  candle_q = 'STRONG_BULL'
-        elif last_pct >=  3:  candle_q = 'BULL'
-        else:                 candle_q = 'NEUTRAL'
-
-        return {'trend': m_trend, 'candle_pct': last_pct, 'candle_q': candle_q}
-    except Exception:
-        return None
-
-
-def get_sector_rs(ticker, df_weekly):
-    """
-    Relative Strength of stock vs its sector ETF (4-week return).
-    Returns dict: etf, stock_ret, sector_ret, rs, rs_label, sector_trend
-    """
-    sector_etf = SECTOR_ETF.get(ticker.upper())
-    if not sector_etf or df_weekly is None or len(df_weekly) < 5:
-        return None
-    try:
-        stock_ret = float(
-            (df_weekly['Close'].iloc[-1] / df_weekly['Close'].iloc[-5] - 1) * 100
-        )
-        sec_df = _SECTOR_CACHE.get(sector_etf)
-        if sec_df is None:
-            sec_asset = yf.Ticker(sector_etf)
-            sec_df = sec_asset.history(period='3mo', interval='1wk',
-                                       auto_adjust=True, raise_errors=False)
-            if sec_df is None or len(sec_df) < 5:
-                return None
-            sec_df.columns = [c.capitalize() for c in sec_df.columns]
-            _SECTOR_CACHE[sector_etf] = sec_df
-        sector_ret = float(
-            (sec_df['Close'].iloc[-1] / sec_df['Close'].iloc[-5] - 1) * 100
-        )
-        rs = round(stock_ret - sector_ret, 1)
-
-        if   rs >=  5:  rs_label = 'STRONG+'
-        elif rs >=  2:  rs_label = 'ABOVE'
-        elif rs >= -2:  rs_label = 'NEUTRAL'
-        elif rs >= -5:  rs_label = 'BELOW'
-        else:           rs_label = 'WEAK-'
-
-        return {
-            'etf':          sector_etf,
-            'stock_ret':    round(stock_ret, 1),
-            'sector_ret':   round(sector_ret, 1),
-            'rs':           rs,
-            'rs_label':     rs_label,
-            'sector_trend': 'UP' if sector_ret > 0 else 'DOWN',
-        }
-    except Exception:
-        return None
-
 
 def get_support_quality(df, support_level, tolerance=0.03):
     """
