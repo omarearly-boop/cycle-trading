@@ -1,10 +1,22 @@
 #!/usr/bin/env python3
 """
 generate_discord_report.py — Cycles Discord Learning Report v4
+
+Trading keywords, the concept→Factor map, and mentor identification now
+live in ct_taxonomy.py; Q&A pairing (matching a mentor's reply to the
+student question it answers) lives in ct_qa_pairing.py. Both are shared
+with discord_monitor.py — see the 2026-07-06 architecture review for why
+(this file's copies of those tables had already drifted from
+discord_monitor.py's).
 """
 import json, re, datetime, webbrowser
 from pathlib import Path
 from collections import Counter
+
+from ct_taxonomy import (
+    keyword_hits, detect_concept, SCANNER_STATUS, FIX_CODE,
+)
+from ct_qa_pairing import pair_messages
 
 BASE       = Path(__file__).parent
 INPUT      = BASE / 'discord_processed.json'
@@ -39,129 +51,10 @@ def discord_jump(image_urls, timestamp=None):
             return f'https://discord.com/channels/{GUILD_ID}/{CHANNEL_ID}/{sf}'
     return DISCORD_CHANNEL
 
-KW_HE = ['מגמה','תמיכה','התנגדות','סטופ','כניסה','שבירה','סגירה',
-          'רמה','שפל','שיא','ריטסט','פיבו','פיבונאצ','שבועי','חודשי',
-          'יומי','פריצה','מומנטום','אישור','עסקה','לונג','שורט','תיקון',
-          'N.M.S','נמס','סיכון','הארכה','ATR','RSI','MACD','ממוצע נע',
-          '38.2','61.8','0.786']
-KW_EN = ['support','resistance','stop','entry','breakout','retest',
-         'weekly','monthly','trend','swing','pivot','close','wick',
-         'momentum','confirmation','level','target','fibonacci','atr']
-ALL_KW = KW_HE + KW_EN
-
-CONCEPT_MAP = [
-    (r'פיבו|fibonacci|fib|הרחבה|retracement|38\.2|61\.8|0\.786',
-     ('fibonacci',         'Factor 20 — Fibonacci')),
-    (r'N\.M\.S|נמ"ס|נמס|סגירה מעל|סגירה מתחת|weekly close',
-     ('nms_breakout',      'Factor 17 — NMS')),
-    (r'RSI|רסי',
-     ('rsi',               'Factor 1 — RSI')),
-    (r'MACD|מקד',
-     ('macd',              'Factor 15 — MACD')),
-    (r'ATR|תנודתיות',
-     ('volatility',        'Factor 11 — ATR')),
-    (r'ריטסט|retest',
-     ('retest',            'Factor 4 — Entry Distance')),
-    (r'מגמה.*חודש|monthly trend',
-     ('monthly_trend',     'Factor 8 — Monthly Trend')),
-    (r'רמות מתחרות|שתי רמות',
-     ('level_ambiguity',   'Factor 18 — Level Ambiguity')),
-    (r'רמה לא אמינה|unreliable',
-     ('level_reliability', 'Factor 17 — Level Reliability')),
-    (r'late entry|כניסה מאוחרת',
-     ('late_entry',        'Factor 9 — Late Entry')),
-    (r'שפל.*מחזיק|לא נשבר|swing low',
-     ('trend_confirmation','Factor 19 — Trend Confirmation')),
-    (r'דוחות|earnings|רווחים|דיבידנד',
-     ('earnings',          'Factor 5 — Earnings')),
-    (r'נזילות|liquidity|10 מיליון|מחזור נמוך',
-     ('liquidity',         'Factor 3 — Liquidity')),
-    (r'ממוצע נע|moving average',
-     ('moving_avg',        'Factor 8 — Monthly Trend')),
-    (r'יחס|ratio|1:2|1:3|TP|target',
-     ('risk_reward',       'Factor 2 — Risk:Reward')),
-    (r'סטופ.*נמוך|סטופ.*נר|stop.*candle',
-     ('stop_candle',       'Factor 6 — Stop Logic')),
-    (r'מגמה|trend',
-     ('trend',             'Factor 8 — Trend Analysis')),
-    (r'תמיכה|support',
-     ('support_stop',      'Factor 6 — Support/Stop')),
-]
-
-SCANNER_STATUS = {
-    'fibonacci':          ('✅ תוקן',  'OK',   '#22c55e', 'Factor 20 — Fibonacci נוסף עכשיו'),
-    'nms_breakout':       ('✅ קיים',  'OK',   '#22c55e', 'Factor 17 — check_false_breakout()'),
-    'rsi':                ('✅ קיים',  'OK',   '#22c55e', 'Factor 1 — _factor_rsi()'),
-    'macd':               ('✅ קיים',  'OK',   '#22c55e', 'Factor 15 — calc_macd()'),
-    'volatility':         ('✅ קיים',  'OK',   '#22c55e', 'Factor 11 — ATR filter'),
-    'retest':             ('✅ קיים',  'OK',   '#22c55e', 'Factor 4 — entry distance check'),
-    'monthly_trend':      ('✅ קיים',  'OK',   '#22c55e', 'Factor 8 — get_monthly_analysis()'),
-    'level_ambiguity':    ('✅ קיים',  'OK',   '#22c55e', 'Factor 18 — check_level_ambiguity()'),
-    'level_reliability':  ('✅ קיים',  'OK',   '#22c55e', 'Factor 17 — check_level_reliability()'),
-    'late_entry':         ('✅ קיים',  'OK',   '#22c55e', 'Factor 9 — LateEntry calc'),
-    'trend_confirmation': ('✅ קיים',  'OK',   '#22c55e', 'Factor 19 — check_swing_broken()'),
-    'earnings':           ('✅ קיים',  'OK',   '#22c55e', 'Factor 5 — get_earnings()'),
-    'liquidity':          ('✅ קיים',  'OK',   '#22c55e', 'Factor 3 — Volume > 10M'),
-    'moving_avg':         ('✅ קיים',  'OK',   '#22c55e', 'Factor 8 — monthly SMA'),
-    'risk_reward':        ('🔧 חסר',  'GAP',  '#f59e0b', 'אין TP חלקי / ניהול יציאה מדורג'),
-    'stop_candle':        ('🔧 חסר',  'GAP',  '#f59e0b', 'סטופ = min(תמיכה, נמוך נר) — לא מיושם'),
-    'trend':              ('✅ קיים',  'OK',   '#22c55e', 'get_trend() + monthly trend'),
-    'support_stop':       ('✅ קיים',  'OK',   '#22c55e', 'Factor 6 — stop distance check'),
-    'general':            ('ℹ️ כללי', 'INFO', '#64748b', 'שיעור כללי'),
-}
-
-FIX_CODE = {
-    'risk_reward': '''\
-# 🔧 תצוגה מקדימה — שינוי זה לא מתבצע אוטומטית. לעדכון הסורק:
-# ערוך את cycles_trading_scanner.py → _build_setup_dict()
-
-def get_tp_levels(entry, resistance, atr_val):
-    t1 = resistance
-    t2 = resistance + atr_val * 1.5     # יעד מורחב
-    t3 = entry + (resistance - entry) * 2  # הרחבה 2:1
-    return round(t1,4), round(t2,4), round(t3,4)
-
-# ב-analyze(), לפני _build_setup_dict():
-# t1, t2, t3 = get_tp_levels(entry, resistance, atr_val)
-# הוסף ל-_setup: 'T2': t2, 'T3': t3''',
-
-    'stop_candle': '''\
-# 🔧 תצוגה מקדימה — שינוי זה לא מתבצע אוטומטית. לעדכון הסורק:
-# ערוך את cycles_trading_scanner.py → קטע LONG ב-analyze()
-
-# לפני:  stop = round(support * 0.97, 4)
-# אחרי:
-entry_candle_low = float(df["Low"].iloc[-1])
-stop = round(min(support * 0.97,
-                 entry_candle_low * 0.99), 4)
-# → סטופ = min(מתחת לתמיכה, מתחת לנמוך הנר)''',
-
-    'fibonacci': '''\
-# ✅ כבר נוסף — check_fibonacci_zone() + _factor_fibonacci()
-# cycles_trading_scanner.py → Factor 20
-# GOLDEN_ZONE (38-61%) → +8 | SHALLOW → 0 | DEEP → -5 | TOO_DEEP → -12''',
-}
-
-MENTOR_NAMES = {
-    'eliravid.','razshlomian','itamarku','ymbp13','shalevb.g_34506',
-    'meni6282','yairmish','_shayh','sagioscar','avigailalmog',
-    'cyclestrading','royben10',
-}
-
-def kw_hits(text):
-    t = text.lower()
-    return sum(1 for kw in ALL_KW if kw.lower() in t)
-
-def detect_concept(text):
-    for pat, (c, f) in CONCEPT_MAP:
-        if re.search(pat, text, re.IGNORECASE):
-            return c, f
-    return 'general', 'General'
-
 def extract_insight(q_text):
     sentences = re.split(r'[?\n]', q_text)
-    for s in sorted(sentences, key=lambda x: kw_hits(x), reverse=True):
-        if kw_hits(s) >= 1 and 10 < len(s.strip()) < 200:
+    for s in sorted(sentences, key=lambda x: keyword_hits(x), reverse=True):
+        if keyword_hits(s) >= 1 and 10 < len(s.strip()) < 200:
             return s.strip()
     return ''
 
@@ -198,37 +91,14 @@ REPORT = REPORT_DIR / f'discord_lessons_{_data_start}-{_data_end}_gen_{_today}.h
 print(f'📄 קובץ פלט: {REPORT.name}')
 
 # ── Pair questions with ALL their mentor answers ──────────────────
-# For each mentor reply (type-18), find its question; collect all
-# replies per question and pick the best (highest keyword score).
-
-# Step 1: map every mentor reply → its question index
-reply_to_q = {}   # reply_idx → question_idx
-for i, m in enumerate(msgs):
-    reply_to = m.get('is_reply_to')
-    if not reply_to: continue
-    for j in range(i-1, max(-1, i-30), -1):
-        if msgs[j].get('author') == reply_to:
-            reply_to_q[i] = j
-            break
-
-# Step 2: group by question_idx → [reply_idx, ...]
-from collections import defaultdict
-q_to_replies = defaultdict(list)
-for ri, qj in reply_to_q.items():
-    q_to_replies[qj].append(ri)
-
-# Step 3: build pairs — merged text for concept detection, best reply for display
-pairs = []
-for qj, reply_idxs in sorted(q_to_replies.items()):
-    q = msgs[qj]
-    replies = [msgs[ri] for ri in reply_idxs]
-    merged_a = ' '.join(r.get('content','') for r in replies)
-    combined = q.get('content','') + ' ' + merged_a
-    if kw_hits(combined) < 2:
-        continue
-    # Pick the reply with the most keyword hits as the "main" answer
-    best = max(replies, key=lambda r: kw_hits(r.get('content','')))
-    pairs.append({'q': q, 'a': best, 'all_answers': replies, 'merged_a': merged_a})
+# Reply-chain matching + multi-answer grouping now lives in
+# ct_qa_pairing.pair_messages(), shared with discord_monitor.py.
+raw_pairs = pair_messages(msgs)
+pairs = [
+    {'q': rp['question'], 'a': rp['best_answer'],
+     'all_answers': rp['answers'], 'merged_a': rp['merged_answer_text']}
+    for rp in raw_pairs
+]
 
 print(f'🔗 {len(pairs)} זוגות ({sum(len(p["all_answers"]) for p in pairs)} תשובות סה״כ)')
 
@@ -240,7 +110,7 @@ for idx, p in enumerate(pairs):
     merged_a    = p.get('merged_a', a_text)   # all mentor answers merged
     answer_count= len(p.get('all_answers', [a]))
     combined    = q_text + ' ' + merged_a     # use ALL answers for concept detection
-    hits        = kw_hits(combined)
+    hits        = keyword_hits(combined)
     concept, factor = detect_concept(combined)
     conf     = 'HIGH' if hits >= 5 else ('MEDIUM' if hits >= 3 else 'LOW')
     insight  = extract_insight(q_text)
@@ -442,6 +312,18 @@ def card(lesson, card_idx):
             f'font-family:sans-serif">📋 העתק לחיפוש</button>'
             f'</div></div></div>')
 
+    # Insight callout (was previously a broken f-string that rendered its
+    # own Python source as literal text instead of HTML, and only compiled
+    # on Python 3.12+ because of backslashes inside an f-string expression)
+    insight_html = ''
+    if insight:
+        insight_html = (
+            '<div style="background:#0f172a;border-radius:8px;padding:8px 12px;'
+            'margin-bottom:10px;border-right:3px solid #22c55e">'
+            '<span style="color:#475569;font-size:10px">💡 תובנה: </span>'
+            f'<span style="color:#86efac;font-size:12px">{insight}</span></div>'
+        )
+
     # Scanner status tag
     scanner_tag = (
         f'<span style="background:{_color}22;color:{_color};border:1px solid {_color}44;'
@@ -484,17 +366,18 @@ def card(lesson, card_idx):
             f' onclick="reviewLesson({card_idx},\'approved\')"'
             f' style="background:#14532d;color:#86efac;border:1px solid #22c55e;'
             f'padding:4px 14px;border-radius:6px;font-size:12px;cursor:pointer;'
-            f'font-family:sans-serif">✅ אשר שיעור</button>')
+            f'font-family:sans-serif">✅ סמן לאישור</button>')
         review_note = (
             f'<span style="color:#475569;font-size:10px">'
-            f'אישור = שיעור יתווסף ל-learnings.json | דחייה = לא רלוונטי'
+            f'הסימון מקומי בדפדפן בלבד — לחיצה מעתיקה מיד את פקודת ה-CLI ללוח;'
+            f' רק הרצתה בטרמינל שומרת בפועל ל-pending_lessons.json'
             f'</span>')
     reject_btn = (
         f'<button type="button" id="reject_{card_idx}"'
         f' onclick="reviewLesson({card_idx},\'rejected\')"'
         f' style="background:#450a0a;color:#fca5a5;border:1px solid #b91c1c;'
         f'padding:4px 14px;border-radius:6px;font-size:12px;cursor:pointer;'
-        f'font-family:sans-serif">❌ דחה</button>')
+        f'font-family:sans-serif">❌ סמן לדחייה</button>')
 
     return f'''
     <div id="{aid}" data-conf="{conf}" data-lid="{lid}"
@@ -555,7 +438,7 @@ def card(lesson, card_idx):
       </div>
 
       <!-- Insight -->
-      {"f'<div style=\"background:#0f172a;border-radius:8px;padding:8px 12px;margin-bottom:10px;border-right:3px solid #22c55e\"><span style=\"color:#475569;font-size:10px\">💡 תובנה: </span><span style=\"color:#86efac;font-size:12px\">' + insight + '</span></div>'" if insight else ""}
+      {insight_html}
 
       <!-- Scanner tag + fix code -->
       <div style="margin-bottom:10px">
@@ -667,6 +550,15 @@ function saveReviews(r) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(r));
 }
 
+// IMPORTANT: clicking approve/reject only stages the decision in this
+// browser's localStorage. Nothing reaches pending_lessons.json until the
+// copied CLI command is actually pasted and run in a terminal. Before this
+// fix, the button said "אשר שיעור" (approve) and looked identical to a
+// real, saved approval — reviewers who stopped after clicking had approved
+// nothing. The button now says "סמן לאישור" (stage for approval), the
+// command is copied immediately on click instead of only via a separate
+// export step, and a sticky banner keeps counting staged-but-unsynced
+// items until you tell it you ran the command.
 function reviewLesson(idx, action) {
   var reviews = getReviews();
   var lid = document.querySelector('[data-lid]#card_' + idx) &&
@@ -675,6 +567,19 @@ function reviewLesson(idx, action) {
   saveReviews(reviews);
   applyReviewUI(idx, action);
   updateCounters();
+  updateUnsyncedBanner();
+
+  // Copy the single-lesson CLI command right away — this is the only
+  // thing that actually persists the decision to pending_lessons.json.
+  if (lid) {
+    var cmd = 'python discord_monitor.py ' + (action === 'approved' ? 'approve ' : 'reject ') + lid;
+    navigator.clipboard.writeText(cmd).then(function() {
+      var el = document.getElementById('review_status_' + idx);
+      if (el) {
+        el.innerHTML += '<br>📋 פקודה הועתקה ללוח: <code style="color:#38bdf8">' + cmd + '</code>';
+      }
+    }).catch(function() {});
+  }
 }
 
 function applyReviewUI(idx, action) {
@@ -685,13 +590,13 @@ function applyReviewUI(idx, action) {
     card.style.background = '#052e16';
     document.getElementById('review_status_' + idx).style.display = 'block';
     document.getElementById('review_status_' + idx).innerHTML =
-      '✅ <b style="color:#4ade80">אושר</b> — יתווסף ל-learnings.json בהרצה הבאה';
+      '✅ <b style="color:#4ade80">סומן לאישור</b> — <span style="color:#f59e0b">טרם נשמר בפועל</span>, הרץ את הפקודה שהועתקה';
   } else {
     card.style.borderColor = '#b91c1c';
     card.style.background = '#1a0a0a';
     document.getElementById('review_status_' + idx).style.display = 'block';
     document.getElementById('review_status_' + idx).innerHTML =
-      '❌ <b style="color:#f87171">נדחה</b> — מסומן כלא רלוונטי';
+      '❌ <b style="color:#f87171">סומן לדחייה</b> — <span style="color:#f59e0b">טרם נשמר בפועל</span>, הרץ את הפקודה שהועתקה';
   }
   var approve_btn = document.getElementById('approve_' + idx);
   var reject_btn  = document.getElementById('reject_' + idx);
@@ -704,7 +609,32 @@ function updateCounters() {
   var approved = Object.values(reviews).filter(function(r){return r.action==='approved';}).length;
   var rejected = Object.values(reviews).filter(function(r){return r.action==='rejected';}).length;
   var el = document.getElementById('review_counter');
-  if (el) el.innerHTML = '✅ ' + approved + ' אושרו &nbsp;|&nbsp; ❌ ' + rejected + ' נדחו';
+  if (el) el.innerHTML = '✅ ' + approved + ' סומנו &nbsp;|&nbsp; ❌ ' + rejected + ' סומנו';
+}
+
+// Sticky reminder — stays visible until the reviewer confirms they ran
+// the copied commands. This is the honest fix for the fact that a static
+// HTML report has no way to actually write back to pending_lessons.json.
+function updateUnsyncedBanner() {
+  var reviews  = getReviews();
+  var unsynced = Object.values(reviews).filter(function(r){
+    return r.action === 'approved' || r.action === 'rejected';
+  }).length;
+  var banner = document.getElementById('unsynced_banner');
+  var count  = document.getElementById('unsynced_count');
+  if (!banner) return;
+  if (unsynced > 0) {
+    banner.style.display = 'flex';
+    if (count) count.textContent = unsynced;
+  } else {
+    banner.style.display = 'none';
+  }
+}
+
+function confirmSynced() {
+  if (!confirm('לאשר שהרצת בטרמינל את כל הפקודות שהועתקו? הפעולה תנקה את הסימונים המקומיים.')) return;
+  localStorage.removeItem(STORAGE_KEY);
+  location.reload();
 }
 
 function exportReviewed() {
@@ -712,13 +642,19 @@ function exportReviewed() {
   var approved = Object.entries(reviews)
     .filter(function(kv){return kv[1].action==='approved';})
     .map(function(kv){ return kv[1].lid || 'lesson_'+kv[0]; });
-  if (approved.length === 0) {
-    alert('לא אושר שום שיעור עדיין');
+  var rejected = Object.entries(reviews)
+    .filter(function(kv){return kv[1].action==='rejected';})
+    .map(function(kv){ return kv[1].lid || 'lesson_'+kv[0]; });
+  if (approved.length === 0 && rejected.length === 0) {
+    alert('שום שיעור לא סומן עדיין');
     return;
   }
-  var txt = 'python discord_monitor.py approve ' + approved.join(' ');
+  var lines = [];
+  if (approved.length) lines.push('python discord_monitor.py approve ' + approved.join(' '));
+  if (rejected.length) lines.push('python discord_monitor.py reject ' + rejected.join(' '));
+  var txt = lines.join('\\n');
   navigator.clipboard.writeText(txt).then(function(){
-    alert('הועתק ללוח! הדבק בטרמינל לשמירה ב-learnings.json:\\n\\n' + txt);
+    alert('הועתק ללוח! הדבק בטרמינל כדי לשמור בפועל ב-pending_lessons.json:\\n\\n' + txt);
   });
 }
 
@@ -729,8 +665,29 @@ window.addEventListener('DOMContentLoaded', function() {
     applyReviewUI(parseInt(kv[0]), kv[1].action);
   });
   updateCounters();
+  updateUnsyncedBanner();
 });
 """
+
+# ── Sticky "not actually saved yet" banner ────────────────────────
+# Static HTML can't write back to pending_lessons.json — this banner is
+# the honest substitute: it stays visible and counts staged-but-unsynced
+# approve/reject clicks until the reviewer confirms they ran the copied
+# CLI command(s) in a terminal.
+unsynced_banner = '''
+<div id="unsynced_banner" style="display:none;align-items:center;gap:10px;flex-wrap:wrap;
+            position:sticky;top:0;z-index:50;background:#451a03;border:1px solid #92400e;
+            border-radius:8px;padding:10px 16px;margin-bottom:14px;font-size:12px;color:#fde68a">
+  <span>⚠ <b id="unsynced_count">0</b> שיעורים סומנו אך <b>טרם נשמרו</b> ב-pending_lessons.json</span>
+  <button type="button" onclick="exportReviewed()"
+    style="background:#78350f;color:#fde68a;border:1px solid #b45309;padding:3px 10px;
+           border-radius:6px;font-size:11px;cursor:pointer;font-family:sans-serif">
+    📋 העתק את כל הפקודות</button>
+  <button type="button" onclick="confirmSynced()"
+    style="background:#1e293b;color:#94a3b8;border:1px solid #334155;padding:3px 10px;
+           border-radius:6px;font-size:11px;cursor:pointer;font-family:sans-serif">
+    ✔ הרצתי — נקה סימונים</button>
+</div>'''
 
 # ── Single combined toolbar (stats + filter in one row) ──────────
 def stat_pill(n, label, color, ftype=None, fval=None):
@@ -809,6 +766,8 @@ html = f'''<!DOCTYPE html>
 <body>
   <script>{SCRIPT}</script>
 
+  {unsynced_banner}
+
   <!-- Title -->
   <div style="display:flex;align-items:baseline;gap:12px;margin-bottom:4px;flex-wrap:wrap">
     <h1 style="color:#38bdf8;font-size:20px;margin:0">🎓 Cycles Discord Lessons</h1>
@@ -821,7 +780,8 @@ html = f'''<!DOCTYPE html>
   <p style="color:#475569;font-size:11px;margin:0 0 16px">
     Discord threads: כל שאלה נפתחת כ-Thread. הדוח מציג שאלה + נושא ה-Thread + קישור.
     אין message IDs — לחיפוש גרף ספציפי השתמש בתאריך שמוצג בכל כרטיס.
-    <b style="color:#f59e0b">אישור/דחייה</b> שומר בדפדפן; לשמירה ב-learnings.json לחץ "ייצוא אושרים".
+    <b style="color:#f59e0b">סימון אישור/דחייה</b> הוא מקומי בדפדפן בלבד ואינו שומר כלום —
+    כל לחיצה מעתיקה מיד פקודת CLI, ורק הרצתה בטרמינל שומרת בפועל ב-pending_lessons.json.
   </p>
 
   <!-- Toolbar: filter + stats in one row -->

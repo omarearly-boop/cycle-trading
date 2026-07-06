@@ -67,6 +67,72 @@ from ct_report   import profit_breakdown
 from ct_html     import generate_html, make_pine_for_ticker, save_pine_script
 
 # ══════════════════════════════════════════════════════════════
+#  STABLE INTERFACE FOR EXTERNAL CONSUMERS
+#  (e.g. discord_monitor.py's Discord-learning gap detection)
+# ══════════════════════════════════════════════════════════════
+def get_scanner_snapshot(ticker: str, portfolio_size=None,
+                          interval: str = '1wk', period: str = '2y') -> dict:
+    """
+    Documented, stable contract for external tools that want a scanner
+    read on a ticker without reaching into analyze()'s internal setup-dict
+    keys directly.
+
+    Before this function existed, discord_monitor.py's run_scanner() read
+    s.get('Direction', ...), s.get('Probability', ...) and
+    s.get('_factor_breakdown', ...) directly off analyze()'s result — none
+    of which are real keys (the actual keys are 'Dir', 'Prob', and
+    '_pfacts'; they drifted during the ct_analysis.py module split and the
+    bare `except Exception` around the call swallowed the failure
+    silently). This function is the one place external callers should
+    read from, so a future rename inside analyze()/_build_setup_dict()
+    only needs to be reconciled here.
+
+    Always returns a plain dict with these keys:
+      ticker              str
+      setups              int    — how many directional setups were found
+      direction           str    — 'LONG' / 'SHORT' / '' if no setup
+      probability         float  — 0-100, blended probability score
+      trend_confirmed     bool
+      level_ambiguity     str    — 'CLEAR' / 'CROWDED' / 'AMBIGUOUS'
+      level_reliability   str    — 'CLEAN' / 'TESTED' / 'UNRELIABLE'
+      false_breakout      bool
+      factor_notes        list   — per-factor probability breakdown (_pfacts)
+      summary             str    — human-readable one-liner
+      error               str | None
+    """
+    result = {
+        'ticker': ticker, 'setups': 0, 'direction': '', 'probability': 0,
+        'trend_confirmed': True, 'level_ambiguity': 'CLEAR',
+        'level_reliability': 'UNKNOWN', 'false_breakout': False,
+        'factor_notes': [], 'summary': '', 'error': None,
+    }
+    if not ticker:
+        result['error'] = 'no ticker'
+        return result
+    try:
+        size = portfolio_size if portfolio_size is not None else PORTFOLIO_SIZE
+        setups = analyze(ticker, size, interval=interval, period=period)
+        result['setups'] = len(setups)
+        if not setups:
+            result['summary'] = 'no setup'
+            return result
+        s = setups[0]
+        result.update({
+            'direction':         s.get('Dir', ''),
+            'probability':       s.get('Prob', 0),
+            'trend_confirmed':   s.get('_trend_confirmed', True),
+            'level_ambiguity':   s.get('_level_amb', 'CLEAR'),
+            'level_reliability': s.get('_level_rel', 'UNKNOWN'),
+            'false_breakout':    s.get('_false_breakout', False),
+            'factor_notes':      s.get('_pfacts', []),
+            'summary':           f"{s.get('Dir', '')} P={s.get('Prob', 0)}%",
+        })
+    except Exception as e:
+        result['error'] = str(e)
+    return result
+
+
+# ══════════════════════════════════════════════════════════════
 #  MAIN
 # ══════════════════════════════════════════════════════════════
 

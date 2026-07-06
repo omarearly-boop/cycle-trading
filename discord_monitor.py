@@ -12,6 +12,16 @@ Usage:
   python discord_monitor.py approve <id>         # אישור שיעור
   python discord_monitor.py reject  <id> [note]  # דחיית שיעור
   python discord_monitor.py stats                # סטטיסטיקות
+
+Note on shared modules
+-----------------------
+Trading keywords, mentor identification, and the concept→Factor mapping
+live in ct_taxonomy.py. Q&A pairing (matching a mentor's answer to a
+student's question) lives in ct_qa_pairing.py. Both are shared with
+generate_discord_report.py so the two scripts can no longer classify the
+same message differently — see the architecture review from 2026-07-06
+for why (they had drifted, and a duplicated time-proximity pairing
+heuristic here had already mispaired messages in production).
 """
 
 import os
@@ -19,8 +29,13 @@ import json
 import sys
 import re
 import datetime
-import hashlib
 from pathlib import Path
+
+from ct_taxonomy import (
+    detect_role, detect_concept, detect_gaps, alignment_label, keyword_hits,
+    ALL_KEYWORDS,
+)
+from ct_qa_pairing import pair_messages, message_hash
 
 # ══════════════════════════════════════════════════════════════
 #  PATHS
@@ -32,55 +47,18 @@ LAST_SEEN_FILE = BASE_DIR / '.discord_last_seen.json'
 
 DISCORD_URL = 'https://discord.com/channels/1069278010835992678/1077319951179841667'
 
-# ══════════════════════════════════════════════════════════════
-#  TRADING KEYWORDS
-# ══════════════════════════════════════════════════════════════
-KEYWORDS_HE = [
-    'מגמה', 'תמיכה', 'התנגדות', 'סטופ', 'כניסה', 'שבירה', 'סגירה',
-    'אמין', 'תקף', 'רמה', 'שפל', 'שיא', 'ריטסט', 'פיבונאצ\'י', 'פיבו',
-    'שבועי', 'חודשי', 'יומי', 'ויק', 'פריצה', 'מומנטום', 'אישור',
-    'לחכות', 'עסקה', 'לונג', 'שורט', 'ATR', 'RSI', 'N.M.S',
-    'מגמת עלייה', 'מגמת ירידה', 'ממוצע נע', 'הארכה', 'תיקון',
-]
-KEYWORDS_EN = [
-    'support', 'resistance', 'stop', 'entry', 'breakout', 'retest',
-    'weekly', 'monthly', 'trend', 'swing', 'pivot', 'close', 'wick',
-    'momentum', 'confirmation', 'level', 'target', 'setup', 'fibonacci',
-    'extension', 'retracement', 'correction',
-]
-ALL_KEYWORDS = KEYWORDS_HE + KEYWORDS_EN
-
-# ══════════════════════════════════════════════════════════════
-#  MENTOR / EXPERT IDENTIFICATION
-# ══════════════════════════════════════════════════════════════
-MENTOR_NAMES = {
-    # מנהלים
-    'cyclestrading', 'royben10', 'זיו', 'רועי',
-    # מנטורים — Discord usernames (מהסקריפינג מאי-יוני 2026)
-    'eliravid.', 'razshlomian', 'itamarku', 'ymbp13',
-    'shalevb.g_34506', 'meni6282', 'yairmish', '_shayh',
-    'sagioscar', 'avigailalmog',
-    # מנטורים — שמות עבריים
-    'ישראל מאיר', 'רז שלומיאן', 'שליו בן גיגי', 'אלי רביד',
-    'גולן', 'שגיא', 'שלמה', 'יוסף', 'מני', 'רז',
-}
-
-def detect_role(author: str) -> str:
-    """'MENTOR' אם שם ברשימת מנטורים, 'STUDENT' אחרת."""
-    a = author.strip()
-    for name in MENTOR_NAMES:
-        if name in a or a in name:
-            return 'MENTOR'
-    return 'STUDENT'
-
 
 # ══════════════════════════════════════════════════════════════
 #  SCANNER INTEGRATION
 # ══════════════════════════════════════════════════════════════
 def run_scanner(ticker: str) -> dict:
     """
-    מריץ את analyze() מ-cycles_trading_scanner.py על הטיקר.
-    מחזיר dict עם תוצאה מבנית לצורך השוואה.
+    קורא ל-get_scanner_snapshot() המוגדר ב-cycles_trading_scanner.py —
+    ממשק יציב ומתועד להשוואה מול הסורק, במקום לגעת ישירות במפתחות
+    הפנימיים של analyze(). (המפתחות הישנים שנקראו כאן —
+    'Direction'/'Probability'/'_factor_breakdown' — לא היו קיימים בפועל
+    אחרי פיצול ct_analysis.py; המפתחות האמיתיים הם 'Dir'/'Prob'/'_pfacts',
+    וה-except הרחב הסתיר את זה בשקט.)
     """
     if not ticker:
         return {'error': 'no ticker', 'ticker': ''}
@@ -94,146 +72,14 @@ def run_scanner(ticker: str) -> dict:
         mod  = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
 
-        setups = mod.analyze(
-            ticker,
-            getattr(mod, 'PORTFOLIO_SIZE', 100000),
-            interval=getattr(mod, 'INTERVAL', '1wk'),
-            period=getattr(mod, 'PERIOD', '4y'),
-        )
-        if not setups:
-            return {'ticker': ticker, 'setups': 0, 'summary': 'אין סטאפ'}
-
-        s = setups[0]
-        factors = s.get('_factor_breakdown', [])
-        return {
-            'ticker':           ticker,
-            'setups':           len(setups),
-            'direction':        s.get('Direction', ''),
-            'probability':      s.get('Probability', 0),
-            'trend_confirmed':  s.get('_trend_confirmed', True),
-            'level_amb':        s.get('_level_amb', 'CLEAR'),
-            'level_rel':        s.get('_level_rel', 'UNKNOWN'),
-            'false_breakout':   s.get('_false_breakout', False),
-            'factors':          factors,
-            'summary':          f"Direction={s.get('Direction','')} P={s.get('Probability',0)}%",
-        }
+        return mod.get_scanner_snapshot(ticker)
     except Exception as e:
         return {'error': str(e), 'ticker': ticker}
 
 
 # ══════════════════════════════════════════════════════════════
-#  GAP DETECTION — מה המומחה דיבר עליו ואין בסורק?
-# ══════════════════════════════════════════════════════════════
-
-# מה המומחה יכול להזכיר → Factor מצופה בסורק
-EXPERT_TO_FACTOR = {
-    r'פיבו|fibonacci|הרחבה|retracement':       ('fibonacci',         'Factor 20 — Fibonacci Retracement'),
-    r'שפל.*מחזיק|לא נשבר|swing low.*hold':      ('trend_confirmed',   'Factor 19 ✅'),
-    r'N\.M\.S|סגירה מעל|סגירה מתחת':           ('false_breakout',    'Factor 17 ✅'),
-    r'רמה לא אמינה|שני כיוון':                  ('level_reliability', 'Factor 17 ✅'),
-    r'רמות מתחרות|אין רמה מובהקת':              ('level_amb',         'Factor 18 ✅'),
-    r'נפח|volume':                               ('volume',            'Factor 3 — Volume (partial)'),
-    r'ממוצע נע|MA|moving average':               ('moving_avg',        'Factor 8 — Monthly Trend (partial)'),
-    r'10 מיליון|נזילות|liquidity':               ('liquidity',         'Factor 3 — Volume filter ✅'),
-    r'RSI|רסי':                                  ('rsi',               'Factor 1 ✅'),
-    r'MACD|מקד':                                 ('macd',              'Factor 15 ✅'),
-    r'ATR|תנודתיות|volatility':                  ('atr',               'Factor 11 ✅'),
-    r'ריטסט|retest':                             ('retest',            'Factor 4 — Entry Distance ✅'),
-    r'כניסה מאוחרת|late entry':                  ('late_entry',        'Factor 9 ✅'),
-}
-
-# Factors שיש בסורק — לבדיקת כיסוי
-SCANNER_FACTORS_COVERED = {
-    'rsi', 'rr', 'volume', 'entry_distance', 'earnings', 'setup_quality',
-    'stop_distance', 'monthly_trend', 'sector_rs', 'support_quality',
-    'atr', 'earnings_zone', 'late_entry', 'fundamentals', 'macd',
-    'bollinger', 'level_reliability', 'level_ambiguity', 'trend_confirmed',
-    'false_breakout', 'liquidity', 'retest',
-}
-
-
-def detect_gaps(expert_answer: str, chart_analysis: dict = None,
-                scanner_result: dict = None) -> list:
-    """
-    מוצא פערים בין מה שהמומחה הזכיר לבין מה שהסורק מכסה.
-    מחזיר רשימת gap dicts.
-    """
-    gaps      = []
-    covered   = []
-    text      = expert_answer.lower()
-
-    for pattern, (concept, factor_name) in EXPERT_TO_FACTOR.items():
-        if not re.search(pattern, text, re.IGNORECASE):
-            continue
-        # בדוק אם Concept קיים בסורק
-        is_covered = concept in SCANNER_FACTORS_COVERED
-        match_text = re.search(pattern, expert_answer, re.IGNORECASE)
-        ref        = match_text.group(0) if match_text else pattern
-
-        entry = {
-            'concept':         concept,
-            'factor':          factor_name,
-            'expert_ref':      ref,
-            'covered':         is_covered,
-        }
-        if is_covered:
-            covered.append(entry)
-        else:
-            gaps.append(entry)
-
-    # בדוק גם נתוני גרף (chart_analysis) שהמשימה המתוזמנת שלחה
-    if chart_analysis:
-        if chart_analysis.get('fibonacci_visible') and 'fibonacci' not in SCANNER_FACTORS_COVERED:
-            gaps.append({
-                'concept': 'fibonacci',
-                'factor':  'Factor 20 — Fibonacci Retracement',
-                'expert_ref': 'chart shows fibonacci levels',
-                'covered': False,
-            })
-
-    return gaps, covered
-
-
-def alignment_label(gaps: list, covered: list) -> str:
-    """ALIGNED / PARTIAL / MISALIGNED לפי מספר הפערים."""
-    if not gaps:
-        return 'ALIGNED'
-    if len(gaps) <= 1:
-        return 'PARTIAL'
-    return 'MISALIGNED'
-
-
-# מיפוי מושג → Factor
-CONCEPT_MAP = {
-    r'שפל.*מחזיק|swing low.*hold|לא נשבר':               ('trend_confirmation', 'Factor 19'),
-    r'N\.M\.S|סגירה מעל|סגירה מתחת|weekly close':        ('nms_breakout',       'Factor 17'),
-    r'רמה לא אמינה|unreliable|נשבר.*שני כיוון':          ('level_reliability',  'Factor 17'),
-    r'רמות מתחרות|ambiguous|crowded|שתי רמות':            ('level_ambiguity',    'Factor 18'),
-    r'late entry|כניסה מאוחרת':                            ('late_entry',         'Factor 9'),
-    r'פיבונאצ\'י|פיבו|fibonacci|fib':                     ('fibonacci',          'New Factor'),
-    r'ATR|תנודתיות':                                       ('volatility',         'Factor 11'),
-    r'MACD|מקד':                                           ('macd',               'Factor 15'),
-    r'earnings|רווחים|דוחות':                              ('earnings',           'Factor 5'),
-    r'RSI|רסי':                                            ('rsi',                'Factor 1'),
-    r'מגמה חודשית|monthly trend':                          ('monthly_trend',      'Factor 8'),
-    r'10 מיליון|10m|נזילות|liquidity':                    ('liquidity_filter',   'Factor 3'),
-}
-
-
-# ══════════════════════════════════════════════════════════════
 #  MESSAGE PROCESSING
 # ══════════════════════════════════════════════════════════════
-def _msg_hash(msg: dict) -> str:
-    """fingerprint ייחודי להודעה."""
-    key = f"{msg.get('author','')}-{msg.get('content','')[:80]}"
-    return hashlib.md5(key.encode()).hexdigest()[:12]
-
-
-def _kw_hits(text: str) -> int:
-    t = text.lower()
-    return sum(1 for kw in ALL_KEYWORDS if kw.lower() in t)
-
-
 def _extract_rule_sentence(answer_text: str) -> str:
     """חלץ את המשפט הכי רלוונטי מהתשובה."""
     sentences = re.split(r'[.!?\n]', answer_text)
@@ -243,81 +89,36 @@ def _extract_rule_sentence(answer_text: str) -> str:
     return ''
 
 
-def _detect_concept(text: str) -> tuple:
-    for pattern, (concept, factor) in CONCEPT_MAP.items():
-        if re.search(pattern, text, re.IGNORECASE):
-            return concept, factor
-    return 'general', 'New Factor'
-
-
-def group_qa_pairs(messages: list) -> list:
+def _make_pair(question: dict, answers: list) -> dict:
     """
-    קיבוץ הודעות לזוגות שאלה-תשובה.
-    מזהה:
-      1. reply chains (is_reply_to)
-      2. קרבת זמן (<20 דקות) + תוכן שונה
+    בונה pair בפורמט שהשכבות הבאות (extract_lesson/add_lessons) מצפות לו,
+    מתוך התוצאה של ct_qa_pairing.pair_messages() — יכולה לכלול כמה
+    תשובות לאותה שאלה (thread עם כמה מנטורים עונים).
     """
-    pairs  = []
-    used   = set()
-    by_idx = {i: m for i, m in enumerate(messages)}
-
-    # שיטה 1: תשובות ישירות
-    for i, msg in enumerate(messages):
-        if msg.get('is_reply_to') and i not in used:
-            # חפש את השאלה המקורית
-            reply_to = msg['is_reply_to']
-            for j in range(i - 1, max(-1, i - 20), -1):
-                q = by_idx.get(j, {})
-                if (q.get('author', '') == reply_to or
-                        reply_to in q.get('content', '')):
-                    if j not in used and _kw_hits(q.get('content','') + msg.get('content','')) >= 2:
-                        pairs.append(_make_pair(q, msg))
-                        used.add(j); used.add(i)
-                    break
-
-    # שיטה 2: קרבת זמן
-    for i, msg in enumerate(messages):
-        if i in used:
-            continue
-        content = msg.get('content', '')
-        if '?' not in content and '؟' not in content and len(content) < 50:
-            continue
-        # חפש תשובה בהודעות הבאות
-        for j in range(i + 1, min(i + 6, len(messages))):
-            if j in used:
-                continue
-            candidate = by_idx.get(j, {})
-            if candidate.get('author') == msg.get('author'):
-                continue  # אותו משתמש
-            combined = content + ' ' + candidate.get('content', '')
-            if _kw_hits(combined) >= 2 and len(candidate.get('content','')) > 60:
-                pairs.append(_make_pair(msg, candidate))
-                used.add(i); used.add(j)
-                break
-
-    return pairs
-
-
-def _make_pair(question: dict, answer: dict) -> dict:
+    best   = max(answers, key=lambda a: keyword_hits(a.get('content', '')))
+    merged = ' '.join(a.get('content', '') for a in answers)
     return {
-        'q_hash':          _msg_hash(question),
-        'a_hash':          _msg_hash(answer),
-        'question_author': question.get('author', '?'),
-        'answer_author':   answer.get('author', '?'),
-        'question_role':   detect_role(question.get('author', '')),
-        'answer_role':     detect_role(answer.get('author', '')),
-        'question_text':   question.get('content', ''),
-        'answer_text':     answer.get('content', ''),
-        'timestamp':       question.get('timestamp', ''),
-        'has_image':       question.get('has_image', False) or answer.get('has_image', False),
-        'chart_analysis':  question.get('chart_analysis') or answer.get('chart_analysis') or {},
+        'q_hash':             message_hash(question),
+        'a_hash':              message_hash(best),
+        'question_author':     question.get('author', '?'),
+        'answer_author':       best.get('author', '?'),
+        'question_role':       detect_role(question.get('author', '')),
+        'answer_role':         detect_role(best.get('author', '')),
+        'question_text':       question.get('content', ''),
+        'answer_text':         best.get('content', ''),
+        'merged_answer_text':  merged,
+        'answer_count':        len(answers),
+        'timestamp':           question.get('timestamp', ''),
+        'has_image':           question.get('has_image', False) or
+                                 any(a.get('has_image', False) for a in answers),
+        'chart_analysis':      question.get('chart_analysis') or best.get('chart_analysis') or {},
     }
 
 
 def extract_lesson(pair: dict) -> dict:
     combined   = pair['question_text'] + ' ' + pair['answer_text']
-    concept, factor = _detect_concept(combined)
-    kw_hits    = _kw_hits(combined)
+    concept, factor = detect_concept(combined)
+    kw_hits    = keyword_hits(combined)
     confidence = 'HIGH' if kw_hits >= 5 else ('MEDIUM' if kw_hits >= 3 else 'LOW')
     rule_sent  = _extract_rule_sentence(pair['answer_text'])
 
@@ -325,7 +126,7 @@ def extract_lesson(pair: dict) -> dict:
     chart_analysis = pair.get('chart_analysis') or {}
     ticker         = chart_analysis.get('ticker', '')
     scanner_result = run_scanner(ticker) if ticker else {}
-    gaps, covered  = detect_gaps(pair['answer_text'], chart_analysis, scanner_result)
+    gaps, covered  = detect_gaps(pair['answer_text'], chart_analysis)
     alignment      = alignment_label(gaps, covered)
 
     return {
@@ -450,12 +251,13 @@ def process_messages_file(json_path: str) -> dict:
     print(f'{"═"*55}')
     print(f'  📨 {len(messages)} הודעות התקבלו')
 
-    pairs = group_qa_pairs(messages)
-    print(f'  🔗 {len(pairs)} זוגות שאלה-תשובה זוהו')
+    raw_pairs = pair_messages(messages)
+    print(f'  🔗 {len(raw_pairs)} זוגות שאלה-תשובה זוהו')
 
     pairs_with_ext = []
-    for pair in pairs:
-        ext = extract_lesson(pair)
+    for rp in raw_pairs:
+        pair = _make_pair(rp['question'], rp['answers'])
+        ext  = extract_lesson(pair)
         if ext['keyword_hits'] >= 2:
             pairs_with_ext.append((pair, ext))
 
@@ -475,7 +277,7 @@ def process_messages_file(json_path: str) -> dict:
     except Exception:
         pass
 
-    return {'messages': len(messages), 'pairs': len(pairs), 'added': added}
+    return {'messages': len(messages), 'pairs': len(raw_pairs), 'added': added}
 
 
 # ══════════════════════════════════════════════════════════════
