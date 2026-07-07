@@ -423,6 +423,13 @@ def _fetch_market_data(ticker, is_crypto=False, is_commodity=False,
     support, resistance = get_levels(df, price, atr_val)
     vol_ok = vol_declining(df)
 
+    # Liquidity hard filter (skip OTC / penny / illiquid)
+    avg_vol_20 = float(df['Volume'].rolling(20).mean().iloc[-1])
+    MIN_AVG_VOL = 100_000 if not (is_crypto or is_commodity or is_israel or is_intl) else 10_000
+    if avg_vol_20 < MIN_AVG_VOL:
+        return None  # OTC / illiquid -- skip
+
+
     # Volume ratio — recent 3-bar avg vs 20-bar avg (quantitative retest signal)
     try:
         _vol_recent   = float(df['Volume'].iloc[-3:].mean())
