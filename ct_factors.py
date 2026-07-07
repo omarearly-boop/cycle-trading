@@ -502,11 +502,13 @@ def _factor_directional_volume(r):
     ratio = r.get('_dir_vol_ratio', 1.0)
 
     if ratio >= 2.0:
-        return (-14, 'Dir.Volume', f'Down-bar vol {ratio:.1f}x up-bar vol -- heavy institutional selling')
+        return (-14, 'Dir.Volume', f'Down-bar vol {ratio:.1f}x up-bar vol -- heavy institutional selling. '
+                                   f'Support may NOT hold -- wait for volume to dry up before entering')
     elif ratio >= 1.4:
-        return (-8,  'Dir.Volume', f'Down-bar vol {ratio:.1f}x up-bar vol -- sellers dominate (caution)')
+        return (-8,  'Dir.Volume', f'Down-bar vol {ratio:.1f}x up-bar vol -- sellers dominate. '
+                                   f'Support at risk -- look for entry at next lower level')
     elif ratio >= 1.1:
-        return (-3,  'Dir.Volume', f'Down-bar vol {ratio:.1f}x up-bar vol -- mild selling bias')
+        return (-3,  'Dir.Volume', f'Down-bar vol {ratio:.1f}x up-bar vol -- mild selling bias, watch closely')
     elif ratio <= 0.5:
         return (+12, 'Dir.Volume', f'Up-bar vol {1/ratio:.1f}x down-bar vol -- strong accumulation')
     elif ratio <= 0.7:
