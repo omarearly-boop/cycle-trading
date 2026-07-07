@@ -348,13 +348,8 @@ def send_test_email():
 #  HTML report for watch checker
 # ---------------------------------------------------------------------------
 def generate_watch_html(results: list, today: str) -> str:
-    """
-    results: list of dicts with keys:
-      ticker, direction, prob, tl, entry, stop, target, rr, earn, notes, setup (optional)
-    Returns path to saved HTML file, or '' on failure.
-    """
+    """Generate watch-list HTML report with expandable fundamental analysis."""
     import webbrowser
-    # Import fund box renderer from ct_html (same project)
     try:
         from ct_html import _render_fund_box
         _has_fund = True
@@ -366,9 +361,9 @@ def generate_watch_html(results: list, today: str) -> str:
     ts = datetime.datetime.now().strftime('%Y%m%d_%H%M')
     out_path = reports_dir / f'watch_report_{ts}.html'
 
-    tl_bg   = {'GREEN': '#d5f5e3', 'YELLOW': '#fef9e7', 'RED': '#fdecea', None: '#f8f9fa'}
-    tl_icon = {'GREEN': '🟢', 'YELLOW': '🟡', 'RED': '🔴', None: '⚪'}
-    tl_label= {'GREEN': 'GO', 'YELLOW': 'WAIT', 'RED': 'NOT YET', None: 'NO DATA'}
+    tl_bg    = {'GREEN': '#d5f5e3', 'YELLOW': '#fef9e7', 'RED': '#fdecea', None: '#f8f9fa'}
+    tl_icon  = {'GREEN': '🟢',      'YELLOW': '🟡',      'RED': '🔴',      None: '⚪'}
+    tl_label = {'GREEN': 'GO',      'YELLOW': 'WAIT',    'RED': 'NOT YET', None: 'NO DATA'}
 
     rows_html = ''
     for idx, r in enumerate(sorted(results, key=lambda x: x.get('prob', 0), reverse=True)):
@@ -378,50 +373,52 @@ def generate_watch_html(results: list, today: str) -> str:
         lbl  = tl_label.get(tl, 'NO DATA')
         prob = r.get('prob', 0)
         earn = r.get('earn', '-') or '-'
-        row_id = f'fund_{idx}'
+        rid  = f'fund_{idx}'
 
-        # Generate fund box HTML if setup is available
         fund_html = ''
         if _has_fund and r.get('setup'):
             try:
                 fund_html = _render_fund_box(r['setup'])
             except Exception:
-                fund_html = ''
+                pass
 
-        fund_toggle = ''
-        fund_row    = ''
-        if fund_html:
-            fund_toggle = (
-                f'<button onclick="var d=document.getElementById(\'{row_id}\'),'
-                f'd.style.display=d.style.display===\'none\'?\'table-row\':\'none\'"'
-                f' style="font-size:11px;padding:2px 8px;border:1px solid #ccc;'
-                f'border-radius:4px;background:#fff;cursor:pointer;margin-left:6px">📊</button>'
-            )
-            # Wrap the dark-themed fund box inside a light-context cell
-            fund_row = (
-                f'<tr id="{row_id}" style="display:none">'
-                f'<td colspan="12" style="padding:0 14px 12px 14px;background:#1a1f2e">'
-                f'{fund_html}</td></tr>'
-            )
+        # Simple button — calls named JS function, no quote escaping
+        btn = (f'<button onclick="toggleFund(\'{rid}\')" '
+               f'style="font-size:11px;padding:2px 8px;border:1px solid #ccc;'
+               f'border-radius:4px;background:#fff;cursor:pointer;margin-left:6px"'
+               f' title="Toggle fundamental analysis">📊</button>') if fund_html else ''
 
-        rows_html += f"""
-        <tr style='background:{bg}'>
-          <td style='padding:10px 14px;font-weight:bold;font-size:15px'>{r['ticker']}{fund_toggle}</td>
-          <td style='padding:10px 14px'>{r.get('direction','')}</td>
-          <td style='padding:10px 14px;font-size:18px;text-align:center'>{icon}</td>
-          <td style='padding:10px 14px;font-weight:bold'>{lbl}</td>
-          <td style='padding:10px 14px;font-weight:bold;color:#1a5276'>{prob}%</td>
-          <td style='padding:10px 14px'>{r.get('entry','-')}</td>
-          <td style='padding:10px 14px'>{r.get('stop','-')}</td>
-          <td style='padding:10px 14px'>{r.get('target','-')}</td>
-          <td style='padding:10px 14px'>{r.get('rr','-')}</td>
-          <td style='padding:10px 14px;color:{"#c0392b" if "SOON" in earn or "APPROACH" in earn else "#555"}'>{earn}</td>
-          <td style='padding:10px 14px;color:#777;font-size:12px'>{r.get('notes','')}</td>
-        </tr>{fund_row}"""
+        fund_row = (f'<tr id="{rid}" style="display:none">'
+                    f'<td colspan="11" style="padding:0 14px 12px 14px;background:#1a1f2e">'
+                    f'{fund_html}</td></tr>') if fund_html else ''
+
+        earn_color = '#c0392b' if ('SOON' in earn or 'APPROACH' in earn) else '#555'
+        rows_html += (
+            f"<tr style='background:{bg}'>"
+            f"<td style='padding:10px 14px;font-weight:bold;font-size:15px'>{r['ticker']}{btn}</td>"
+            f"<td style='padding:10px 14px'>{r.get('direction','')}</td>"
+            f"<td style='padding:10px 14px;font-size:18px;text-align:center'>{icon}</td>"
+            f"<td style='padding:10px 14px;font-weight:bold'>{lbl}</td>"
+            f"<td style='padding:10px 14px;font-weight:bold;color:#1a5276'>{prob}%</td>"
+            f"<td style='padding:10px 14px'>{r.get('entry','-')}</td>"
+            f"<td style='padding:10px 14px'>{r.get('stop','-')}</td>"
+            f"<td style='padding:10px 14px'>{r.get('target','-')}</td>"
+            f"<td style='padding:10px 14px'>{r.get('rr','-')}</td>"
+            f"<td style='padding:10px 14px;color:{earn_color}'>{earn}</td>"
+            f"<td style='padding:10px 14px;color:#777;font-size:12px'>{r.get('notes','')}</td>"
+            f"</tr>{fund_row}"
+        )
 
     n_go   = sum(1 for r in results if r.get('tl') == 'GREEN')
     n_wait = sum(1 for r in results if r.get('tl') == 'YELLOW')
-    n_no   = sum(1 for r in results if r.get('tl') not in ('GREEN','YELLOW'))
+    n_no   = sum(1 for r in results if r.get('tl') not in ('GREEN', 'YELLOW'))
+
+    table_html = (
+        '<table><thead><tr>'
+        '<th>Ticker</th><th>Dir</th><th></th><th>Status</th><th>Prob</th>'
+        '<th>Entry</th><th>Stop</th><th>Target</th><th>R:R</th><th>Earnings</th><th>Notes</th>'
+        '</tr></thead><tbody>' + rows_html + '</tbody></table>'
+    ) if results else '<div class="empty">Watchlist is empty</div>'
 
     html = f"""<!DOCTYPE html>
 <html lang="he">
@@ -434,28 +431,40 @@ def generate_watch_html(results: list, today: str) -> str:
             padding:24px 32px;border-radius:12px;margin-bottom:24px}}
   h1 {{margin:0 0 8px;font-size:24px}}
   .pills {{display:flex;gap:12px;flex-wrap:wrap;margin-top:10px}}
-  .pill {{background:rgba(255,255,255,.2);border-radius:20px;padding:5px 16px;font-size:14px;font-weight:bold}}
+  .pill {{background:rgba(255,255,255,.2);border-radius:20px;padding:5px 16px;
+          font-size:14px;font-weight:bold}}
   table {{width:100%;border-collapse:collapse;background:#fff;
           border-radius:10px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,.1)}}
   thead tr {{background:#1a5276;color:#fff}}
   th {{padding:10px 14px;text-align:left;font-size:13px;white-space:nowrap}}
-  tr:hover td {{filter:brightness(.97)}}
+  tr:hover > td {{filter:brightness(.97)}}
   .empty {{text-align:center;padding:40px;color:#999;font-size:16px}}
-  /* fund box overrides for light-background page */
+  /* fund-box classes (dark theme, sits on #1a1f2e background) */
   .fund-box {{border-radius:8px;padding:12px 16px;margin:0}}
-  .fund-header {{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:6px}}
-  .fund-title {{font-size:12px;font-weight:700;color:#8b949e;text-transform:uppercase}}
-  .fund-signal {{font-size:12px;font-weight:800;padding:3px 12px;border-radius:12px;background:transparent}}
-  .fund-bullets,.fund-caveats {{list-style:none;padding:0;margin:4px 0 0 0;font-size:12px;line-height:1.8;color:#8b949e}}
+  .fund-header {{display:flex;justify-content:space-between;align-items:center;
+                 margin-bottom:10px;flex-wrap:wrap;gap:6px}}
+  .fund-title  {{font-size:12px;font-weight:700;color:#8b949e;text-transform:uppercase}}
+  .fund-signal {{font-size:12px;font-weight:800;padding:3px 12px;
+                 border-radius:12px;background:transparent}}
+  .fund-bullets,.fund-caveats {{list-style:none;padding:0;margin:4px 0 0 0;
+                                 font-size:12px;line-height:1.8;color:#8b949e}}
   .fund-caveats li {{color:#d29922}}
-  .fm-sections {{display:flex;flex-wrap:wrap;gap:10px;margin:8px 0 4px 0}}
-  .fm-section {{flex:1 1 140px;min-width:110px}}
-  .fm-section-title {{font-size:10px;font-weight:700;color:#6e7681;text-transform:uppercase;margin-bottom:4px;letter-spacing:.5px}}
-  .fm-grid {{display:flex;flex-direction:column;gap:2px}}
-  .fm-cell {{display:flex;justify-content:space-between;align-items:center;font-size:11px;padding:1px 0;border-bottom:1px solid #ffffff18}}
-  .fm-lbl {{color:#8b949e;white-space:nowrap;margin-right:6px}}
-  .fm-val {{font-weight:700;font-size:11px;text-align:right}}
+  .fm-sections  {{display:flex;flex-wrap:wrap;gap:10px;margin:8px 0 4px 0}}
+  .fm-section   {{flex:1 1 140px;min-width:110px}}
+  .fm-section-title {{font-size:10px;font-weight:700;color:#6e7681;
+                       text-transform:uppercase;margin-bottom:4px;letter-spacing:.5px}}
+  .fm-grid      {{display:flex;flex-direction:column;gap:2px}}
+  .fm-cell      {{display:flex;justify-content:space-between;align-items:center;
+                   font-size:11px;padding:1px 0;border-bottom:1px solid #ffffff18}}
+  .fm-lbl       {{color:#8b949e;white-space:nowrap;margin-right:6px}}
+  .fm-val       {{font-weight:700;font-size:11px;text-align:right}}
 </style>
+<script>
+function toggleFund(id) {{
+  var el = document.getElementById(id);
+  el.style.display = (el.style.display === 'none') ? 'table-row' : 'none';
+}}
+</script>
 </head>
 <body>
 <div class="header">
@@ -467,13 +476,13 @@ def generate_watch_html(results: list, today: str) -> str:
     <span class="pill">📋 Total: {len(results)}</span>
   </div>
 </div>
-{'<table><thead><tr><th>Ticker</th><th>Dir</th><th></th><th>Status</th><th>Prob</th><th>Entry</th><th>Stop</th><th>Target</th><th>R:R</th><th>Earnings</th><th>Notes</th></tr></thead><tbody>' + rows_html + '</tbody></table>' if results else '<div class="empty">Watchlist is empty</div>'}
+{table_html}
 </body></html>"""
 
     out_path.write_text(html, encoding='utf-8')
     print(f"  HTML report: {out_path}")
     try:
-        webbrowser.open('file:///' + str(out_path).replace('\\', '/').replace('\\\\', '/'))
+        webbrowser.open('file:///' + str(out_path).replace('\\', '/'))
     except Exception:
         pass
     return str(out_path)
