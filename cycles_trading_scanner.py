@@ -339,9 +339,9 @@ def main():
         # ── Email summary notification ────────────────────────
         longs  = [r for r in all_results if '▲' in r.get('Dir','') or 'LONG' in r.get('Dir','')]
         shorts = [r for r in all_results if '▼' in r.get('Dir','') or 'SHORT' in r.get('Dir','')]
-        green_l = [r for r in longs  if not r.get('IsWatchlist') and r.get('Prob',0) >= 70]
-        green_s = [r for r in shorts if not r.get('IsWatchlist') and r.get('Prob',0) >= 70]
-        yellow  = [r for r in all_results if not r.get('IsWatchlist') and 65 <= r.get('Prob',0) < 70]
+        green_l = [r for r in longs  if r.get('TrafficLight') == 'GREEN']
+        green_s = [r for r in shorts if r.get('TrafficLight') == 'GREEN']
+        yellow  = [r for r in all_results if r.get('TrafficLight') == 'YELLOW']
         watch   = [r for r in all_results if r.get('IsWatchlist')]
 
         tickers_green  = ', '.join(r['Ticker'] for r in green_l + green_s) or 'אין'
