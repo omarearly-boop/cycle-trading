@@ -67,30 +67,12 @@ def save_watchlist(data):
 #  Traffic light -- mirrors the logic in ct_html.py
 # ---------------------------------------------------------------------------
 def get_tl_color(setup: dict) -> str:
+    """Use the TrafficLight already set by _finalize_setup() in ct_analysis.
+    GREEN  = prob>=70 AND zero red flags
+    YELLOW = prob>=65 AND <=1 red flag
+    RED    = everything else
     """
-    GREEN  -- Prob >= 65, no earnings warning, monthly trend not against direction
-    YELLOW -- Prob >= 50 or some moderate warning
-    RED    -- Prob < 50 or earnings warning or hard counter-trend
-    """
-    prob      = setup.get('Prob', 0)
-    earn_warn = setup.get('Earn') == 'SOON!'
-    direction = 'LONG' if 'LONG' in setup.get('Dir', '') else 'SHORT'
-    monthly   = setup.get('MonthlyTrend')   # 'LONG' / 'SHORT' / None
-
-    if earn_warn:
-        return 'RED'
-
-    # Monthly trend hard against direction
-    if monthly == 'SHORT' and direction == 'LONG':
-        return 'RED'
-    if monthly == 'LONG' and direction == 'SHORT':
-        return 'RED'
-
-    if prob >= 65:
-        return 'GREEN'
-    if prob >= 50:
-        return 'YELLOW'
-    return 'RED'
+    return setup.get('TrafficLight', 'RED')
 
 
 # ---------------------------------------------------------------------------
