@@ -350,10 +350,17 @@ def send_test_email():
 def generate_watch_html(results: list, today: str) -> str:
     """
     results: list of dicts with keys:
-      ticker, direction, prob, tl, entry, stop, target, rr, earn, notes
+      ticker, direction, prob, tl, entry, stop, target, rr, earn, notes, setup (optional)
     Returns path to saved HTML file, or '' on failure.
     """
     import webbrowser
+    # Import fund box renderer from ct_html (same project)
+    try:
+        from ct_html import _render_fund_box
+        _has_fund = True
+    except Exception:
+        _has_fund = False
+
     reports_dir = BASE_DIR / 'REPORTS'
     reports_dir.mkdir(exist_ok=True)
     ts = datetime.datetime.now().strftime('%Y%m%d_%H%M')
@@ -364,16 +371,42 @@ def generate_watch_html(results: list, today: str) -> str:
     tl_label= {'GREEN': 'GO', 'YELLOW': 'WAIT', 'RED': 'NOT YET', None: 'NO DATA'}
 
     rows_html = ''
-    for r in sorted(results, key=lambda x: x.get('prob', 0), reverse=True):
+    for idx, r in enumerate(sorted(results, key=lambda x: x.get('prob', 0), reverse=True)):
         tl   = r.get('tl')
         bg   = tl_bg.get(tl, '#f8f9fa')
         icon = tl_icon.get(tl, '⚪')
         lbl  = tl_label.get(tl, 'NO DATA')
         prob = r.get('prob', 0)
         earn = r.get('earn', '-') or '-'
+        row_id = f'fund_{idx}'
+
+        # Generate fund box HTML if setup is available
+        fund_html = ''
+        if _has_fund and r.get('setup'):
+            try:
+                fund_html = _render_fund_box(r['setup'])
+            except Exception:
+                fund_html = ''
+
+        fund_toggle = ''
+        fund_row    = ''
+        if fund_html:
+            fund_toggle = (
+                f'<button onclick="var d=document.getElementById(\'{row_id}\'),'
+                f'd.style.display=d.style.display===\'none\'?\'table-row\':\'none\'"'
+                f' style="font-size:11px;padding:2px 8px;border:1px solid #ccc;'
+                f'border-radius:4px;background:#fff;cursor:pointer;margin-left:6px">📊</button>'
+            )
+            # Wrap the dark-themed fund box inside a light-context cell
+            fund_row = (
+                f'<tr id="{row_id}" style="display:none">'
+                f'<td colspan="12" style="padding:0 14px 12px 14px;background:#1a1f2e">'
+                f'{fund_html}</td></tr>'
+            )
+
         rows_html += f"""
         <tr style='background:{bg}'>
-          <td style='padding:10px 14px;font-weight:bold;font-size:15px'>{r['ticker']}</td>
+          <td style='padding:10px 14px;font-weight:bold;font-size:15px'>{r['ticker']}{fund_toggle}</td>
           <td style='padding:10px 14px'>{r.get('direction','')}</td>
           <td style='padding:10px 14px;font-size:18px;text-align:center'>{icon}</td>
           <td style='padding:10px 14px;font-weight:bold'>{lbl}</td>
@@ -384,7 +417,7 @@ def generate_watch_html(results: list, today: str) -> str:
           <td style='padding:10px 14px'>{r.get('rr','-')}</td>
           <td style='padding:10px 14px;color:{"#c0392b" if "SOON" in earn or "APPROACH" in earn else "#555"}'>{earn}</td>
           <td style='padding:10px 14px;color:#777;font-size:12px'>{r.get('notes','')}</td>
-        </tr>"""
+        </tr>{fund_row}"""
 
     n_go   = sum(1 for r in results if r.get('tl') == 'GREEN')
     n_wait = sum(1 for r in results if r.get('tl') == 'YELLOW')
@@ -408,6 +441,20 @@ def generate_watch_html(results: list, today: str) -> str:
   th {{padding:10px 14px;text-align:left;font-size:13px;white-space:nowrap}}
   tr:hover td {{filter:brightness(.97)}}
   .empty {{text-align:center;padding:40px;color:#999;font-size:16px}}
+  /* fund box overrides for light-background page */
+  .fund-box {{border-radius:8px;padding:12px 16px;margin:0}}
+  .fund-header {{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:6px}}
+  .fund-title {{font-size:12px;font-weight:700;color:#8b949e;text-transform:uppercase}}
+  .fund-signal {{font-size:12px;font-weight:800;padding:3px 12px;border-radius:12px;background:transparent}}
+  .fund-bullets,.fund-caveats {{list-style:none;padding:0;margin:4px 0 0 0;font-size:12px;line-height:1.8;color:#8b949e}}
+  .fund-caveats li {{color:#d29922}}
+  .fm-sections {{display:flex;flex-wrap:wrap;gap:10px;margin:8px 0 4px 0}}
+  .fm-section {{flex:1 1 140px;min-width:110px}}
+  .fm-section-title {{font-size:10px;font-weight:700;color:#6e7681;text-transform:uppercase;margin-bottom:4px;letter-spacing:.5px}}
+  .fm-grid {{display:flex;flex-direction:column;gap:2px}}
+  .fm-cell {{display:flex;justify-content:space-between;align-items:center;font-size:11px;padding:1px 0;border-bottom:1px solid #ffffff18}}
+  .fm-lbl {{color:#8b949e;white-space:nowrap;margin-right:6px}}
+  .fm-val {{font-weight:700;font-size:11px;text-align:right}}
 </style>
 </head>
 <body>
@@ -490,6 +537,7 @@ def run_check():
             'rr':        setup.get('R:R', '-'),
             'earn':      setup.get('Earn', '-'),
             'notes':     '',
+            'setup':     setup,   # full dict — used by generate_watch_html for _render_fund_box
         })
 
         # Already alerted today -- skip email only
