@@ -44,6 +44,26 @@ def clean_ticker(ticker):
     import re
     return re.sub(r'(-USD|=F|\.[A-Z]+)$', '', ticker)
 
+# -- Scan diagnostics (thread-safe counters) ---
+import threading as _threading
+_DIAG_LOCK = _threading.Lock()
+_DIAG = {'no_data':0,'illiquid':0,'no_trend':0,'rsi_gate':0,'dist':0,'rr':0,'passed':0}
+def _diag(key):
+    with _DIAG_LOCK: _DIAG[key] += 1
+def reset_diag():
+    with _DIAG_LOCK:
+        for k in _DIAG: _DIAG[k] = 0
+def print_diag():
+    d = _DIAG
+    print('\n  -- Scan funnel (per ticker+direction attempt) --')
+    print(f'  No data / error   : {d["no_data"]:>4}')
+    print(f'  Illiquid (OTC)    : {d["illiquid"]:>4}')
+    print(f'  No clear trend    : {d["no_trend"]:>4}')
+    print(f'  RSI gate blocked  : {d["rsi_gate"]:>4}')
+    print(f'  Too far from lvl  : {d["dist"]:>4}')
+    print(f'  R:R < 2.0         : {d["rr"]:>4}')
+    print(f'  Passed (setups)   : {d["passed"]:>4}')
+
 def send_email_summary(subject, body_text, body_html=None, attachment_path=None):
     """
     Send scan summary to omarearly@gmail.com via Gmail SMTP (TLS).
@@ -438,7 +458,7 @@ def _fetch_market_data(ticker, is_crypto=False, is_commodity=False,
 
     trend = get_trend(df)
     if trend is None:
-        return None
+        _diag('no_trend'); return None
 
     support, resistance = get_levels(df, price, atr_val)
     vol_ok = vol_declining(df)
@@ -447,7 +467,7 @@ def _fetch_market_data(ticker, is_crypto=False, is_commodity=False,
     avg_vol_20 = float(df['Volume'].rolling(20).mean().iloc[-1])
     MIN_AVG_VOL = 100_000 if not (is_crypto or is_commodity or is_israel or is_intl) else 10_000
     if avg_vol_20 < MIN_AVG_VOL:
-        return None  # OTC / illiquid -- skip
+        _diag('illiquid'); return None  # OTC / illiquid -- skip
 
 
     # Volume ratio — recent 3-bar avg vs 20-bar avg (quantitative retest signal)
@@ -538,16 +558,16 @@ def _detect_setup(ticker, portfolio_size, market, is_crypto, asset_type, max_dis
     # ── Trend + RSI gate ─────────────────────────────────────────
     if is_long:
         if not (market['trend'] == 'LONG' and rsi_val <= RSI_LONG_MAX):
-            return None
+            _diag('rsi_gate'); return None
     else:
         if not (market['trend'] == 'SHORT' and rsi_val >= RSI_SHORT_MIN):
-            return None
+            _diag('rsi_gate'); return None
 
     # ── Distance to key level ────────────────────────────────────
     key_level = support if is_long else resistance
     dist = (price - key_level) / price if is_long else (key_level - price) / price
     if dist > max_dist:
-        return None
+        _diag('dist'); return None
 
     # ── Entry / Stop / Target ────────────────────────────────────
     entry  = price
@@ -566,7 +586,7 @@ def _detect_setup(ticker, portfolio_size, market, is_crypto, asset_type, max_dis
 
     rratio = round(rew_u / risk_u, 2)
     if rratio < MIN_RR:
-        return None
+        _diag('rr'); return None
 
     # ── Position Sizing (3 safeguards) ──────────────────────────
     units, pos_val, risk_amt, pos_pct, was_capped, cap_reason = \
@@ -661,7 +681,7 @@ def analyze(ticker, portfolio_size, is_crypto=False, is_israel=False,
                                     is_israel=is_israel, is_intl=is_intl,
                                     interval=interval, period=period)
         if market is None:
-            return []
+            _diag('no_data'); return []
 
         if is_crypto:
             max_dist, asset_type = MAX_DIST_CRYPTO, 'CRYPTO'
@@ -679,7 +699,7 @@ def analyze(ticker, portfolio_size, is_crypto=False, is_israel=False,
                                   asset_type, max_dist, direction,
                                   is_commodity, is_israel, is_intl)
             if setup:
-                setups.append(setup)
+                _diag('passed'); setups.append(setup)
 
     except Exception:
         pass

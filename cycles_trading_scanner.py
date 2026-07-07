@@ -62,6 +62,7 @@ from ct_analysis import (
     is_hard_blocked, get_traffic_light, calc_position_size,
     _build_setup_dict, _finalize_setup, _fetch_market_data,
     _detect_setup, _detect_long_setup, _detect_short_setup, analyze,
+    reset_diag, print_diag,
 )
 from ct_report   import profit_breakdown
 from ct_html     import generate_html, make_pine_for_ticker, save_pine_script
@@ -268,6 +269,7 @@ def main():
     scan_group(scan_intl,      'International Stocks',   is_crypto=False, is_israel=False, is_commodity=False, is_intl=True)
     scan_group(scan_crypto,    'Crypto',                 is_crypto=True,  is_israel=False, is_commodity=False, is_intl=False)
     scan_group(scan_commodity, 'Commodities',            is_crypto=False, is_israel=False, is_commodity=True,  is_intl=False)
+    print_diag()  # show rejection funnel
 
     print(f"\n  Done! Scan complete.                          ")
     print()
