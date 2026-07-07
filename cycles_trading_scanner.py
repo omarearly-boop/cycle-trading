@@ -335,7 +335,8 @@ def main():
         print()
 
     # ── HTML Report ──────────────────────────────────────────
-    html_path = generate_html(all_results, reports_d, ts,
+    active_results = [r for r in all_results if not r.get('IsWatchlist')]
+    html_path = generate_html(active_results, reports_d, ts,
                               PORTFOLIO_SIZE, risk_trade, IV_LABEL,
                               len(scan_stocks), len(scan_israel),
                               len(scan_intl), len(scan_crypto), len(scan_commodity))
@@ -346,8 +347,8 @@ def main():
         print()
 
         # ── Email summary notification ────────────────────────
-        longs  = [r for r in all_results if '▲' in r.get('Dir','') or 'LONG' in r.get('Dir','')]
-        shorts = [r for r in all_results if '▼' in r.get('Dir','') or 'SHORT' in r.get('Dir','')]
+        longs  = [r for r in active_results if '▲' in r.get('Dir','') or 'LONG' in r.get('Dir','')]
+        shorts = [r for r in active_results if '▼' in r.get('Dir','') or 'SHORT' in r.get('Dir','')]
         green_l = [r for r in longs  if r.get('TrafficLight') == 'GREEN']
         green_s = [r for r in shorts if r.get('TrafficLight') == 'GREEN']
         yellow  = [r for r in all_results if r.get('TrafficLight') == 'YELLOW']
