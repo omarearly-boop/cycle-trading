@@ -411,7 +411,7 @@ def main():
 <p><a href='file:///{html_path.replace(chr(92),'/')}'>📂 Open full HTML report</a></p>
 </body></html>
 """
-        send_email_summary(subj, txt_body, html_body)
+        send_email_summary(subj, txt_body, html_body, attachment_path=html_path)
 
     # ── Pine Script ──────────────────────────────────────────
     pine_path = save_pine_script(all_results, reports_d, ts)

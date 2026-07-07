@@ -44,7 +44,7 @@ def clean_ticker(ticker):
     import re
     return re.sub(r'(-USD|=F|\.[A-Z]+)$', '', ticker)
 
-def send_email_summary(subject, body_text, body_html=None):
+def send_email_summary(subject, body_text, body_html=None, attachment_path=None):
     """
     Send scan summary to omarearly@gmail.com via Gmail SMTP (TLS).
     Uses App Password — set EMAIL_APP_PASSWORD in environment or below.
@@ -53,6 +53,8 @@ def send_email_summary(subject, body_text, body_html=None):
     import smtplib, os
     from email.mime.multipart import MIMEMultipart
     from email.mime.text import MIMEText
+    from email.mime.base import MIMEBase
+    from email import encoders
 
     # Load from .env if not already in environment
     _env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env')
@@ -72,13 +74,22 @@ def send_email_summary(subject, body_text, body_html=None):
         print('  [!] Email: ALERT_EMAIL_PASSWORD not set in .env -- skipping.')
         return False
     try:
-        msg = MIMEMultipart('alternative')
+        _mime_type = 'mixed' if attachment_path else 'alternative'
+        msg = MIMEMultipart(_mime_type)
         msg['Subject'] = subject
         msg['From']    = SENDER
         msg['To']      = RECEIVER
         msg.attach(MIMEText(body_text, 'plain', 'utf-8'))
         if body_html:
             msg.attach(MIMEText(body_html, 'html', 'utf-8'))
+        if attachment_path and os.path.exists(attachment_path):
+            with open(attachment_path, 'rb') as _af:
+                _part = MIMEBase('application', 'octet-stream')
+                _part.set_payload(_af.read())
+            encoders.encode_base64(_part)
+            _fname = os.path.basename(attachment_path)
+            _part.add_header('Content-Disposition', f'attachment; filename="{_fname}"')
+            msg.attach(_part)
         with smtplib.SMTP('smtp.gmail.com', 587) as server:
             server.ehlo()
             server.starttls()
