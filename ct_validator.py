@@ -29,12 +29,12 @@ def validate_csv(path):
         target = float(r.get('Target', 0))
         direction = r.get('Dir', '')
 
-        # 1. Prob vs TrafficLight consistency (only if column exists in CSV)
-        if light and light not in ('?', 'None'):  # column present and non-empty
-            if prob >= 70 and light != 'GREEN':
-                errors.append(f"{ticker}: prob={prob}% but TrafficLight={light} (expected GREEN)")
-            if prob < 65 and light not in ('RED', ''):
-                warnings.append(f"{ticker}: prob={prob}% but TrafficLight={light} (should be RED/watchlist)")
+        # 1. IsWatchlist vs Prob consistency
+        is_watch = r.get('IsWatchlist', '') == 'True'
+        if is_watch and prob >= 65:
+            errors.append(f"{ticker}: IsWatchlist=True but prob={prob}% >= 65 -- flag mismatch")
+        if not is_watch and prob < 65 and prob > 0:
+            errors.append(f"{ticker}: IsWatchlist=False but prob={prob}% < 65 -- should be watchlist")
 
         # 2. Stale earnings dates
         if earn and earn not in ('-', 'APPROACHING', 'SOON!', ''):
