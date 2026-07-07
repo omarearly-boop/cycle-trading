@@ -361,6 +361,95 @@ def send_test_email():
 # ---------------------------------------------------------------------------
 #  Main check loop
 # ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+#  HTML report for watch checker
+# ---------------------------------------------------------------------------
+def generate_watch_html(results: list, today: str) -> str:
+    """
+    results: list of dicts with keys:
+      ticker, direction, prob, tl, entry, stop, target, rr, earn, notes
+    Returns path to saved HTML file, or '' on failure.
+    """
+    import webbrowser
+    reports_dir = BASE_DIR / 'REPORTS'
+    reports_dir.mkdir(exist_ok=True)
+    ts = datetime.datetime.now().strftime('%Y%m%d_%H%M')
+    out_path = reports_dir / f'watch_report_{ts}.html'
+
+    tl_bg   = {'GREEN': '#d5f5e3', 'YELLOW': '#fef9e7', 'RED': '#fdecea', None: '#f8f9fa'}
+    tl_icon = {'GREEN': '🟢', 'YELLOW': '🟡', 'RED': '🔴', None: '⚪'}
+    tl_label= {'GREEN': 'GO', 'YELLOW': 'WAIT', 'RED': 'NOT YET', None: 'NO DATA'}
+
+    rows_html = ''
+    for r in sorted(results, key=lambda x: x.get('prob', 0), reverse=True):
+        tl   = r.get('tl')
+        bg   = tl_bg.get(tl, '#f8f9fa')
+        icon = tl_icon.get(tl, '⚪')
+        lbl  = tl_label.get(tl, 'NO DATA')
+        prob = r.get('prob', 0)
+        earn = r.get('earn', '-') or '-'
+        rows_html += f"""
+        <tr style='background:{bg}'>
+          <td style='padding:10px 14px;font-weight:bold;font-size:15px'>{r['ticker']}</td>
+          <td style='padding:10px 14px'>{r.get('direction','')}</td>
+          <td style='padding:10px 14px;font-size:18px;text-align:center'>{icon}</td>
+          <td style='padding:10px 14px;font-weight:bold'>{lbl}</td>
+          <td style='padding:10px 14px;font-weight:bold;color:#1a5276'>{prob}%</td>
+          <td style='padding:10px 14px'>{r.get('entry','-')}</td>
+          <td style='padding:10px 14px'>{r.get('stop','-')}</td>
+          <td style='padding:10px 14px'>{r.get('target','-')}</td>
+          <td style='padding:10px 14px'>{r.get('rr','-')}</td>
+          <td style='padding:10px 14px;color:{"#c0392b" if "SOON" in earn or "APPROACH" in earn else "#555"}'>{earn}</td>
+          <td style='padding:10px 14px;color:#777;font-size:12px'>{r.get('notes','')}</td>
+        </tr>"""
+
+    n_go   = sum(1 for r in results if r.get('tl') == 'GREEN')
+    n_wait = sum(1 for r in results if r.get('tl') == 'YELLOW')
+    n_no   = sum(1 for r in results if r.get('tl') not in ('GREEN','YELLOW'))
+
+    html = f"""<!DOCTYPE html>
+<html lang="he">
+<head>
+<meta charset="UTF-8">
+<title>Watch Report {today}</title>
+<style>
+  body {{font-family:Arial,sans-serif;background:#f0f3f7;margin:0;padding:20px;color:#222}}
+  .header {{background:linear-gradient(135deg,#1a5276,#2980b9);color:#fff;
+            padding:24px 32px;border-radius:12px;margin-bottom:24px}}
+  h1 {{margin:0 0 8px;font-size:24px}}
+  .pills {{display:flex;gap:12px;flex-wrap:wrap;margin-top:10px}}
+  .pill {{background:rgba(255,255,255,.2);border-radius:20px;padding:5px 16px;font-size:14px;font-weight:bold}}
+  table {{width:100%;border-collapse:collapse;background:#fff;
+          border-radius:10px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,.1)}}
+  thead tr {{background:#1a5276;color:#fff}}
+  th {{padding:10px 14px;text-align:left;font-size:13px;white-space:nowrap}}
+  tr:hover td {{filter:brightness(.97)}}
+  .empty {{text-align:center;padding:40px;color:#999;font-size:16px}}
+</style>
+</head>
+<body>
+<div class="header">
+  <h1>👁 Cycles Watch Report — {today}</h1>
+  <div class="pills">
+    <span class="pill">🟢 GO: {n_go}</span>
+    <span class="pill">🟡 WAIT: {n_wait}</span>
+    <span class="pill">⚪ NOT YET: {n_no}</span>
+    <span class="pill">📋 Total: {len(results)}</span>
+  </div>
+</div>
+{'<table><thead><tr><th>Ticker</th><th>Dir</th><th></th><th>Status</th><th>Prob</th><th>Entry</th><th>Stop</th><th>Target</th><th>R:R</th><th>Earnings</th><th>Notes</th></tr></thead><tbody>' + rows_html + '</tbody></table>' if results else '<div class="empty">Watchlist is empty</div>'}
+</body></html>"""
+
+    out_path.write_text(html, encoding='utf-8')
+    print(f"  HTML report: {out_path}")
+    try:
+        webbrowser.open('file:///' + str(out_path).replace('\\', '/').replace('\\\\', '/'))
+    except Exception:
+        pass
+    return str(out_path)
+
+
 def run_check():
     data    = load_watchlist()
     tickers = data.get('tickers', [])
@@ -380,6 +469,7 @@ def run_check():
         return
 
     alerts_sent = 0
+    html_results = []
     for entry in tickers:
         ticker     = entry['ticker']
         direction  = entry.get('direction', 'LONG')
@@ -387,21 +477,31 @@ def run_check():
 
         print(f"  {ticker} ({direction})", end='  ')
 
-        # Already alerted today -- skip
-        if last_alert == today:
-            print("-- already alerted today, skipping")
-            continue
-
         setup, tl = analyze_ticker(entry)
 
         if setup is None:
             print("-- no setup found")
+            html_results.append({'ticker': ticker, 'direction': direction,
+                                  'prob': 0, 'tl': None, 'notes': 'No setup'})
             continue
 
         prob = setup.get('Prob', 0)
         print(f"Prob={prob}%  TL={tl}")
+        html_results.append({
+            'ticker':    ticker,
+            'direction': direction,
+            'prob':      prob,
+            'tl':        tl,
+            'entry':     setup.get('Entry', '-'),
+            'stop':      setup.get('Stop', '-'),
+            'target':    setup.get('Target', '-'),
+            'rr':        setup.get('R:R', '-'),
+            'earn':      setup.get('Earn', '-'),
+            'notes':     '',
+        })
 
-        if tl != 'GREEN':
+        # Already alerted today -- skip email only
+        if last_alert == today or tl != 'GREEN':
             continue
 
         # GREEN -- send alert
@@ -415,6 +515,7 @@ def run_check():
 
     # Save updated last_alerted values
     save_watchlist(data)
+    generate_watch_html(html_results, today)
     print(f"\n  Done. {alerts_sent} green light alert(s) sent.")
     print("  " + "=" * 55 + "\n")
 
