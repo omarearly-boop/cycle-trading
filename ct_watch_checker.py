@@ -463,12 +463,22 @@ def run_check():
 
         if setup is None:
             print("-- no setup found")
+            entry['status']       = 'NO_DATA'
+            entry['last_checked'] = today
             html_results.append({'ticker': ticker, 'direction': direction,
                                   'prob': 0, 'tl': None, 'notes': 'No setup'})
             continue
 
         prob = setup.get('Prob', 0)
         print(f"Prob={prob}%  TL={tl}")
+        # Persist status to watch_alerts.json
+        entry['status']       = tl
+        entry['prob']         = prob
+        entry['entry_price']  = setup.get('Entry')
+        entry['stop_price']   = setup.get('Stop')
+        entry['target_price'] = setup.get('Target')
+        entry['rr']           = setup.get('R:R')
+        entry['last_checked'] = today
         html_results.append({
             'ticker':    ticker,
             'direction': direction,
