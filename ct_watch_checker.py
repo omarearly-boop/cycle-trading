@@ -307,17 +307,35 @@ def send_green_alert(to_email: str, entry: dict, setup: dict) -> bool:
 #  Test email
 # ---------------------------------------------------------------------------
 def send_test_email():
+    # -- Diagnostics --
+    env_file = BASE_DIR / '.env'
+    print(f"  .env path : {env_file}")
+    print(f"  .env exists: {env_file.exists()}")
+    if env_file.exists():
+        raw = env_file.read_text(encoding='utf-8')
+        for line in raw.splitlines():
+            line = line.strip()
+            if not line or line.startswith('#'): continue
+            k = line.split('=', 1)[0].strip()
+            print(f"    {k} = {'(set)' if k in line else '(missing)'}")
+
     from_email = os.environ.get('ALERT_EMAIL_FROM', '')
     to_email   = os.environ.get('ALERT_EMAIL_TO', from_email)
-    password   = os.environ.get('ALERT_EMAIL_PASSWORD', '').replace(' ', '')
+    raw_pw     = os.environ.get('ALERT_EMAIL_PASSWORD', '')
+    password   = raw_pw.replace(' ', '')
+
+    print(f"  ALERT_EMAIL_FROM    : {from_email!r}")
+    print(f"  ALERT_EMAIL_TO      : {to_email!r}")
+    print(f"  ALERT_EMAIL_PASSWORD: {'(set, len=' + str(len(password)) + ')' if password else '(MISSING)'}")
 
     if not from_email or not password:
-        print("ERROR: set ALERT_EMAIL_FROM and ALERT_EMAIL_PASSWORD in .env")
+        print("  ERROR: set ALERT_EMAIL_FROM and ALERT_EMAIL_PASSWORD in .env")
         return
 
     subject = "[TEST] Cycles Trading Watch Alert -- email working"
-    body    = "<h2 style='color:#22c55e'>Test OK</h2><p>Email alerts are configured correctly.</p>"
+    body    = "<h2 style=\'color:#22c55e\'>Test OK</h2><p>Email alerts are configured correctly.</p>"
 
+    print("  Connecting to smtp.gmail.com:465 ...")
     try:
         msg = MIMEMultipart('alternative')
         msg['Subject'] = subject
@@ -325,11 +343,19 @@ def send_test_email():
         msg['To']      = to_email
         msg.attach(MIMEText(body, 'html', 'utf-8'))
         with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp:
+            print("  Connected. Logging in...")
             smtp.login(from_email, password)
+            print("  Login OK. Sending...")
             smtp.sendmail(from_email, to_email, msg.as_string())
         print(f"  Test email sent to {to_email}")
+    except smtplib.SMTPAuthenticationError as e:
+        print(f"  ERROR: Authentication failed -- wrong App Password? {e}")
+    except smtplib.SMTPException as e:
+        print(f"  ERROR: SMTP error -- {e}")
+    except OSError as e:
+        print(f"  ERROR: Network/connection error -- {e}")
     except Exception as e:
-        print(f"  ERROR: {e}")
+        print(f"  ERROR: {type(e).__name__}: {e}")
 
 
 # ---------------------------------------------------------------------------

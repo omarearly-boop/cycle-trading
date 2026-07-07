@@ -332,11 +332,35 @@ def _factor_level_ambiguity(r):
 def check_fibonacci_zone(df, direction: str, price: float):
     """
     Compute the Fibonacci retracement zone for the current setup.
-    Uses the last 52-bar swing high/low to measure the prior move.
+    Uses the last 52-bar window. Anchors Fibonacci to the LAST significant
+    swing low/high before the opposing extreme -- not the absolute min/max.
+    This matches the methodology: draw from the last meaningful turning point,
+    filtering insignificant daily wiggles (data is weekly so small daily
+    moves are naturally absent).
 
     Returns (zone, ret_pct, swing_low, swing_high, fib_levels_dict)
     zone: 'GOLDEN_ZONE' | 'SHALLOW' | 'DEEP' | 'TOO_DEEP' | 'NO_RETRACEMENT' | 'UNKNOWN'
     """
+    def _last_swing_low(df_slice, window=2):
+        """Most recent local minimum in df_slice (fallback: global min)."""
+        lows = df_slice['Low'].values
+        n = len(lows)
+        for i in range(n - 1 - window, window, -1):
+            if (all(lows[i] <= lows[i - j] for j in range(1, window + 1)) and
+                    all(lows[i] <= lows[i + j] for j in range(1, window + 1))):
+                return float(lows[i])
+        return float(df_slice['Low'].min())  # fallback
+
+    def _last_swing_high(df_slice, window=2):
+        """Most recent local maximum in df_slice (fallback: global max)."""
+        highs = df_slice['High'].values
+        n = len(highs)
+        for i in range(n - 1 - window, window, -1):
+            if (all(highs[i] >= highs[i - j] for j in range(1, window + 1)) and
+                    all(highs[i] >= highs[i + j] for j in range(1, window + 1))):
+                return float(highs[i])
+        return float(df_slice['High'].max())  # fallback
+
     try:
         look = df.tail(min(52, len(df)))
         if direction == 'LONG':
@@ -345,18 +369,18 @@ def check_fibonacci_zone(df, direction: str, price: float):
             before_hi  = look.loc[:hi_idx]
             if len(before_hi) < 5:
                 return 'UNKNOWN', 0, 0, 0, {}
-            swing_low  = float(before_hi['Low'].min())
+            swing_low  = _last_swing_low(before_hi)   # FIXED: last significant low
             move       = swing_high - swing_low
             if move <= 0:
                 return 'UNKNOWN', 0, 0, 0, {}
             retracement = (swing_high - price) / move
         else:  # SHORT
-            swing_low = float(look['Low'].min())
-            lo_idx    = look['Low'].idxmin()
-            before_lo = look.loc[:lo_idx]
+            swing_low  = float(look['Low'].min())
+            lo_idx     = look['Low'].idxmin()
+            before_lo  = look.loc[:lo_idx]
             if len(before_lo) < 5:
                 return 'UNKNOWN', 0, 0, 0, {}
-            swing_high = float(before_lo['High'].max())
+            swing_high = _last_swing_high(before_lo)  # FIXED: last significant high
             move       = swing_high - swing_low
             if move <= 0:
                 return 'UNKNOWN', 0, 0, 0, {}
