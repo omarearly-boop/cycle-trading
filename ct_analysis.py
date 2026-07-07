@@ -54,13 +54,22 @@ def send_email_summary(subject, body_text, body_html=None):
     from email.mime.multipart import MIMEMultipart
     from email.mime.text import MIMEText
 
-    SENDER   = 'omarearly@gmail.com'
-    RECEIVER = 'omarearly@gmail.com'
-    APP_PWD  = os.environ.get('GMAIL_APP_PASSWORD', '')  # set env var or hard-code here
+    # Load from .env if not already in environment
+    _env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env')
+    if os.path.exists(_env_path):
+        with open(_env_path) as _ef:
+            for _line in _ef:
+                _line = _line.strip()
+                if '=' in _line and not _line.startswith('#'):
+                    _k, _v = _line.split('=', 1)
+                    os.environ.setdefault(_k.strip(), _v.strip())
+
+    SENDER   = os.environ.get('ALERT_EMAIL_FROM', 'omarearly@gmail.com')
+    RECEIVER = os.environ.get('ALERT_EMAIL_TO',   'omarearly@gmail.com')
+    APP_PWD  = os.environ.get('ALERT_EMAIL_PASSWORD', os.environ.get('GMAIL_APP_PASSWORD', ''))
 
     if not APP_PWD:
-        print('  ⚠ Email: GMAIL_APP_PASSWORD not set — skipping email notification.')
-        print('    Set it with:  set GMAIL_APP_PASSWORD=xxxx xxxx xxxx xxxx')
+        print('  [!] Email: ALERT_EMAIL_PASSWORD not set in .env -- skipping.')
         return False
     try:
         msg = MIMEMultipart('alternative')
