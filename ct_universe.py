@@ -12,7 +12,7 @@ Sources (zero Wikipedia):
 Caches to .universe_cache.json for CACHE_TTL_H hours.
 """
 
-import csv, io, json, logging, os, warnings
+import csv, io, json, logging, os, subprocess, warnings
 import requests
 from datetime import datetime, timedelta
 from typing import Dict, List
@@ -158,32 +158,125 @@ def _dedup(lst: List[str]) -> List[str]:
     return [x for x in lst if not (x in seen or seen.add(x))]
 
 
+
+# ══════════════════════════════════════════════════════════════
+#  TRADINGVIEW SCREENER SOURCE  (optional — requires opencli)
+#  Install once:
+#    npm install -g @jackwener/opencli
+#    opencli plugin install github:himself65/finance-skills/tradingview
+#    opencli tradingview launch   (once per desktop session)
+# ══════════════════════════════════════════════════════════════
+
+_TV_FILTERS = json.dumps([
+    {"left": "market_cap_basic", "operation": "greater", "right": 500000000},
+    {"left": "volume",           "operation": "greater", "right": 500000},
+    {"left": "close",            "operation": "greater", "right": 5},
+])
+
+_TV_COLUMNS = "name,close,change,volume,market_cap_basic,sector.tr"
+_TV_LIMIT   = 600
+
+
+def _fetch_tv_screener() -> List[str]:
+    """Fetch live US stock universe from TradingView Screener via opencli.
+    Returns list of ticker symbols.
+    Raises RuntimeError if opencli / TV plugin unavailable.
+    """
+    cmd = [
+        "opencli", "tradingview", "screener",
+        "--market",  "america",
+        "--columns", _TV_COLUMNS,
+        "--filter",  _TV_FILTERS,
+        "--sort",    "volume:desc",
+        "--limit",   str(_TV_LIMIT),
+        "-f",        "json",
+    ]
+    try:
+        res = subprocess.run(
+            cmd,
+            capture_output=True, text=True, timeout=60,
+            shell=(os.name == "nt"),
+        )
+    except FileNotFoundError:
+        raise RuntimeError(
+            "opencli not found. Install: npm install -g @jackwener/opencli"
+        )
+    except subprocess.TimeoutExpired:
+        raise RuntimeError("opencli screener timed out (60s)")
+
+    if res.returncode != 0:
+        err = (res.stderr or res.stdout or "").strip()
+        raise RuntimeError("opencli error (rc={}): {}".format(res.returncode, err[:200]))
+
+    raw = res.stdout.strip()
+    if not raw:
+        raise RuntimeError("opencli returned empty output")
+
+    try:
+        rows = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("opencli output not valid JSON: {}".format(exc))
+
+    tickers = []
+    for row in rows:
+        sym = (row.get("symbol") or row.get("name") or "").strip()
+        if ":" in sym:
+            sym = sym.split(":", 1)[1]
+        sym = sym.upper()
+        if sym and 1 < len(sym) <= 5 and sym.replace("-", "").isalpha():
+            tickers.append(sym)
+
+    if not tickers:
+        raise RuntimeError("No tickers parsed from {} screener rows".format(len(rows)))
+
+    return tickers
+
+
+def get_tv_universe() -> List[str]:
+    """Return TradingView screener universe. Raises RuntimeError if unavailable."""
+    return _fetch_tv_screener()
+
 # ══════════════════════════════════════════════════════════════
 #  PUBLIC API
 # ══════════════════════════════════════════════════════════════
 
-def get_us_universe() -> List[str]:
-    """Fetch S&P 500 + NASDAQ 100 + S&P 400 Mid-Cap (de-duplicated).
-    Any fetch that fails is skipped with a warning — remaining sources still used.
+def get_us_universe(use_tv: bool = True) -> List[str]:
+    """Fetch US stock universe.
+
+    Strategy (automatic fallback):
+      1. TradingView Screener via opencli -- live, volume-sorted, pre-filtered
+         (needs opencli + TV plugin + TradingView desktop running)
+      2. S&P 500 + NASDAQ 100 + S&P 400 Mid-Cap from public APIs
+
+    use_tv=True  -- try TV screener first, fall back to index lists on error
+    use_tv=False -- skip TV screener, use index lists directly
     """
-    tickers: List[str] = []
+    if use_tv:
+        try:
+            result = _fetch_tv_screener()
+            print("    OK TradingView Screener: {} tickers (live, volume-filtered)".format(len(result)))
+            return _dedup(result)
+        except RuntimeError as exc:
+            print("    TV Screener unavailable ({}) -- falling back to index lists".format(exc))
+        except Exception as exc:
+            print("    TV Screener error ({}) -- falling back to index lists".format(exc))
+
+    # Fallback: index-based sources
+    tickers = []
     for name, fn in [
-        ('S&P 500',      _fetch_sp500),
-        ('NASDAQ 100',   _fetch_nasdaq100),
-        ('S&P 400 Mid',  _fetch_sp400),
+        ("S&P 500",      _fetch_sp500),
+        ("NASDAQ 100",   _fetch_nasdaq100),
+        ("S&P 400 Mid",  _fetch_sp400),
     ]:
         try:
             result = fn()
-            print(f"    ✓ {name}: {len(result)} tickers")
+            print("    OK {}: {} tickers".format(name, len(result)))
             tickers.extend(result)
-        except Exception as e:
-            print(f"    ⚠ {name} fetch failed ({e}) — skipped")
-            log.warning("Universe fetch failed (%s): %s", name, e)
+        except Exception as exc:
+            print("    {} fetch failed ({}) -- skipped".format(name, exc))
+            log.warning("Universe fetch failed (%s): %s", name, exc)
 
-    unique = _dedup(tickers)
-    return unique
-
-
+    return _dedup(tickers)
 def get_israel_universe() -> List[str]:
     """Return curated TA-35 + TA-90 tickers."""
     return list(_ISRAEL_TICKERS)
