@@ -184,11 +184,61 @@ def get_fundamental_analysis(ticker, info=None):
         if rev_growth is not None:
             bullets.append(f"Revenue growth: {rev_growth*100:.1f}%")
 
+        # ---- Extended fundamental metrics ----------------
+        fwd_pe       = info.get('forwardPE')
+        peg          = info.get('pegRatio')
+        pb           = info.get('priceToBook')
+        ps           = info.get('priceToSalesTrailingTwelveMonths')
+        gross_margin = info.get('grossMargins')
+        net_margin   = info.get('profitMargins')
+        roe          = info.get('returnOnEquity')
+        roa          = info.get('returnOnAssets')
+        eps_growth   = info.get('earningsGrowth') or info.get('earningsQuarterlyGrowth')
+        current_ratio= info.get('currentRatio')
+        inst_own     = info.get('heldPercentInstitutions')
+        insider_own  = info.get('heldPercentInsiders')
+        beta         = info.get('beta')
+        fcf          = info.get('freeCashflow')
+
+        # Extended caveats
+        if fwd_pe and fwd_pe > 40:
+            caveats.append(f'High Forward P/E: {fwd_pe:.0f}x')
+        if net_margin is not None and net_margin < 0:
+            caveats.append(f'Negative net margin: {net_margin*100:.1f}%')
+        if current_ratio is not None and current_ratio < 1.0:
+            caveats.append(f'Low liquidity (current ratio {current_ratio:.1f})')
+        if eps_growth is not None and eps_growth < -0.10:
+            caveats.append(f'EPS declining: {eps_growth*100:.1f}%')
+
+        # Extended bullets
+        if gross_margin is not None:
+            bullets.append(f'Gross margin: {gross_margin*100:.1f}%  |  Net margin: {net_margin*100:.1f}%' if net_margin else f'Gross margin: {gross_margin*100:.1f}%')
+        if roe is not None:
+            bullets.append(f'ROE: {roe*100:.1f}%' + (f'  |  ROA: {roa*100:.1f}%' if roa else ''))
+        if eps_growth is not None:
+            bullets.append(f'EPS growth: {eps_growth*100:+.1f}%')
+        if inst_own is not None:
+            bullets.append(f'Institutional: {inst_own*100:.1f}%' + (f'  |  Insider: {insider_own*100:.1f}%' if insider_own else ''))
+
         scores = {
-            'pe':          pe,
+            'pe':           pe,
+            'fwdPE':        fwd_pe,
+            'peg':          peg,
+            'pb':           pb,
+            'ps':           ps,
             'debtToEquity': debt_eq,
-            'revenueGrowth': rev_growth,
-            'shortPct':    short_pct,
+            'revenueGrowth':rev_growth,
+            'epsGrowth':    eps_growth,
+            'grossMargin':  gross_margin,
+            'netMargin':    net_margin,
+            'roe':          roe,
+            'roa':          roa,
+            'currentRatio': current_ratio,
+            'instOwn':      inst_own,
+            'insiderOwn':   insider_own,
+            'beta':         beta,
+            'fcf':          fcf,
+            'shortPct':     short_pct,
         }
 
         return {
@@ -197,8 +247,8 @@ def get_fundamental_analysis(ticker, info=None):
             'consensus': a_cons,
             'target':    a_target,
             'upside':    upside,
-            'caveats':   caveats[:3],
-            'bullets':   bullets[:3],
+            'caveats':   caveats[:5],
+            'bullets':   bullets[:6],
             'scores':    scores,
         }
     except Exception as e:

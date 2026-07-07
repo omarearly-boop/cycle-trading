@@ -517,6 +517,158 @@ def _factor_directional_volume(r):
         return (0,   'Dir.Volume', f'Dir.vol ratio {ratio:.1f} -- balanced pressure')
 
 
+
+@factor
+def _factor_fundamental_quality(r):
+    """
+    Factor 23 -- Fundamental Quality.
+    Scores valuation, growth, profitability and ownership aligned with the trade direction.
+    LONG: rewards cheap+growing, penalises expensive+declining.
+    SHORT: rewards expensive+declining fundamentals (validates short thesis).
+    Data sourced from get_fundamental_analysis() → setup['_fundamental']['scores'].
+    """
+    fund = r.get('_fundamental')
+    if not fund:
+        return (0, 'Fundamental', 'No fundamental data available (ETF/crypto/commodity)')
+
+    scores   = fund.get('scores', {})
+    direction = r.get('Direction', 'LONG')
+    is_long   = direction == 'LONG'
+
+    pe          = scores.get('pe')
+    fwd_pe      = scores.get('fwdPE')
+    peg         = scores.get('peg')
+    rev_growth  = scores.get('revenueGrowth')  # decimal, e.g. 0.15 = +15%
+    eps_growth  = scores.get('epsGrowth')
+    net_margin  = scores.get('netMargin')
+    roe         = scores.get('roe')
+    inst_own    = scores.get('instOwn')
+    debt_eq     = scores.get('debtToEquity')
+    current_r   = scores.get('currentRatio')
+
+    pts   = 0
+    notes = []
+
+    # --- Valuation ---
+    val_pe = fwd_pe if fwd_pe else pe
+    if val_pe:
+        if is_long:
+            if val_pe < 15:
+                pts += 6; notes.append(f'Low P/E {val_pe:.0f}x (cheap)')
+            elif val_pe < 25:
+                pts += 2; notes.append(f'Fair P/E {val_pe:.0f}x')
+            elif val_pe > 50:
+                pts -= 8; notes.append(f'Expensive: P/E {val_pe:.0f}x')
+            elif val_pe > 35:
+                pts -= 4; notes.append(f'Rich P/E {val_pe:.0f}x')
+        else:  # SHORT
+            if val_pe > 50:
+                pts += 8; notes.append(f'Expensive: P/E {val_pe:.0f}x validates short')
+            elif val_pe > 35:
+                pts += 4; notes.append(f'Rich P/E {val_pe:.0f}x supports short')
+            elif val_pe < 15:
+                pts -= 6; notes.append(f'Cheap P/E {val_pe:.0f}x (risky short)')
+
+    if peg and peg > 0:
+        if is_long:
+            if peg < 1.0:
+                pts += 5; notes.append(f'PEG {peg:.1f} (growth at discount)')
+            elif peg > 3.0:
+                pts -= 5; notes.append(f'PEG {peg:.1f} (overvalued vs growth)')
+        else:
+            if peg > 3.0:
+                pts += 5; notes.append(f'PEG {peg:.1f} validates short')
+
+    # --- Growth ---
+    if rev_growth is not None:
+        if is_long:
+            if rev_growth >= 0.20:
+                pts += 7; notes.append(f'Revenue +{rev_growth*100:.0f}% (strong growth)')
+            elif rev_growth >= 0.10:
+                pts += 4; notes.append(f'Revenue +{rev_growth*100:.0f}% (solid growth)')
+            elif rev_growth < 0:
+                pts -= 6; notes.append(f'Revenue {rev_growth*100:.0f}% (declining)')
+        else:
+            if rev_growth < -0.05:
+                pts += 6; notes.append(f'Revenue {rev_growth*100:.0f}% supports short')
+            elif rev_growth >= 0.15:
+                pts -= 5; notes.append(f'Revenue +{rev_growth*100:.0f}% (risky short)')
+
+    if eps_growth is not None:
+        if is_long:
+            if eps_growth >= 0.25:
+                pts += 6; notes.append(f'EPS +{eps_growth*100:.0f}% (accelerating)')
+            elif eps_growth >= 0.10:
+                pts += 3
+            elif eps_growth < -0.10:
+                pts -= 5; notes.append(f'EPS {eps_growth*100:.0f}% (decelerating)')
+        else:
+            if eps_growth < -0.10:
+                pts += 5; notes.append(f'EPS {eps_growth*100:.0f}% supports short')
+            elif eps_growth >= 0.25:
+                pts -= 4; notes.append(f'EPS +{eps_growth*100:.0f}% (risky short)')
+
+    # --- Profitability ---
+    if net_margin is not None:
+        if is_long:
+            if net_margin >= 0.20:
+                pts += 5; notes.append(f'Net margin {net_margin*100:.0f}% (excellent)')
+            elif net_margin < 0:
+                pts -= 6; notes.append(f'Net margin {net_margin*100:.1f}% (unprofitable)')
+        else:
+            if net_margin < 0:
+                pts += 5; notes.append(f'Unprofitable: net margin {net_margin*100:.1f}%')
+            elif net_margin >= 0.20:
+                pts -= 4; notes.append(f'High margin {net_margin*100:.0f}% (risky short)')
+
+    if roe is not None and is_long:
+        if roe >= 0.20:
+            pts += 4; notes.append(f'ROE {roe*100:.0f}% (strong returns)')
+        elif roe < 0:
+            pts -= 3
+
+    # --- Balance sheet / risk ---
+    if debt_eq is not None:
+        if is_long and debt_eq > 3.0:
+            pts -= 4; notes.append(f'High leverage D/E {debt_eq:.1f}')
+        elif not is_long and debt_eq > 3.0:
+            pts += 3; notes.append(f'Leveraged: D/E {debt_eq:.1f}')
+
+    if current_r is not None and current_r < 1.0:
+        if is_long:
+            pts -= 3; notes.append(f'Liquidity risk (current ratio {current_r:.1f})')
+        else:
+            pts += 3; notes.append(f'Liquidity risk validates short')
+
+    # --- Institutional ownership ---
+    if inst_own is not None:
+        if is_long and inst_own >= 0.70:
+            pts += 3; notes.append(f'High institutional ownership {inst_own*100:.0f}%')
+        elif not is_long and inst_own < 0.20:
+            pts += 2; notes.append(f'Low institutional support {inst_own*100:.0f}%')
+
+    # Clamp between -20 and +20
+    pts = max(-20, min(20, pts))
+
+    if not notes:
+        notes = ['Mixed fundamentals — neutral weight']
+
+    direction_word = 'LONG' if is_long else 'SHORT'
+    summary = '; '.join(notes[:3])
+    label = f'Fundamental ({direction_word})'
+
+    if pts >= 8:
+        return (pts, label, f'Strong fundamentals support {direction_word}: {summary}')
+    elif pts >= 3:
+        return (pts, label, f'Solid fundamentals: {summary}')
+    elif pts >= -2:
+        return (pts, label, f'Neutral fundamentals: {summary}')
+    elif pts >= -8:
+        return (pts, label, f'Weak fundamentals (caution): {summary}')
+    else:
+        return (pts, label, f'Poor fundamentals work against {direction_word}: {summary}')
+
+
 @factor
 def _factor_trend_confirmation(r):
     """Factor 19 - Trend Confirmation (the MELI lesson).

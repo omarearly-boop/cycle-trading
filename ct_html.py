@@ -64,37 +64,109 @@ def _render_tv_url(r):
     return f"https://www.tradingview.com/chart/?symbol=NASDAQ:{t}&interval=W"
 
 def _render_fund_box(r):
-    """Pure function — result dict → fundamental analysis HTML block."""
+    """Pure function -- result dict -> fundamental analysis HTML block (expanded)."""
     fund = r.get('_fundamental')
     if not fund:
         return ''
     sig      = fund.get('signal', 'HOLD')
     conf_v   = fund.get('conf', 0)
-    cons_v   = fund.get('consensus', '—')
+    cons_v   = fund.get('consensus', '-')
     tgt_v    = fund.get('target')
     upside_v = fund.get('upside')
     caveats  = fund.get('caveats', [])
     bullets  = fund.get('bullets', [])
+    scores   = fund.get('scores', {})
+
     sig_color = {'BUY': '#3fb950', 'SELL': '#f85149', 'HOLD': '#d29922'}.get(sig, '#8b949e')
     sig_bg    = {'BUY': '#0d2b0d', 'SELL': '#2b0d0d', 'HOLD': '#2b1f0d'}.get(sig, '#161b22')
-    sig_emoji = {'BUY': '📈', 'SELL': '📉', 'HOLD': '⏸'}.get(sig, '—')
-    target_str  = f'${tgt_v:,.2f}' if tgt_v else '—'
-    upside_str  = (f' ({upside_v:+.1f}%)' if upside_v is not None else '')
-    bullets_html = ''.join(f'<li>• {b}</li>' for b in bullets)  if bullets  else ''
-    caveats_html = ''.join(f'<li>⚠ {c}</li>' for c in caveats) if caveats  else ''
-    return f'''
-  <div class="fund-box" style="background:{sig_bg};border:1px solid {sig_color}44;">
-    <div class="fund-header">
-      <span class="fund-title">🔬 Fundamental Analysis</span>
-      <span class="fund-signal" style="color:{sig_color};border:1px solid {sig_color}66;">{sig_emoji} {sig} &nbsp;·&nbsp; {conf_v}% confidence</span>
-    </div>
-    <div class="fund-grid">
-      <div class="fund-cell"><div class="fund-label">אנליסטים</div><div class="fund-val" style="color:{sig_color}">{cons_v}</div></div>
-      <div class="fund-cell"><div class="fund-label">יעד מחיר</div><div class="fund-val">{target_str}<span style="color:#3fb950;font-size:11px">{upside_str}</span></div></div>
-    </div>
-    {f'<ul class="fund-bullets">{bullets_html}</ul>'  if bullets_html  else ''}
-    {f'<ul class="fund-caveats">{caveats_html}</ul>' if caveats_html else ''}
-  </div>'''
+    sig_emoji = {'BUY': '\U0001f4c8', 'SELL': '\U0001f4c9', 'HOLD': '⏸'}.get(sig, '-')
+    target_str = f'${tgt_v:,.2f}' if tgt_v else '-'
+    upside_str = (f' ({upside_v:+.1f}%)' if upside_v is not None else '')
+
+    def _fmt_pct(v, decimals=1):
+        if v is None: return '-'
+        return f'{v*100:.{decimals}f}%'
+
+    def _fmt_x(v, decimals=1):
+        if v is None: return '-'
+        return f'{v:.{decimals}f}x'
+
+    def _fmt_num(v, decimals=2):
+        if v is None: return '-'
+        return f'{v:.{decimals}f}'
+
+    def _fmt_fcf(v):
+        if v is None: return '-'
+        if abs(v) >= 1e9: return f'${v/1e9:.1f}B'
+        if abs(v) >= 1e6: return f'${v/1e6:.0f}M'
+        return f'${v:,.0f}'
+
+    def _color(v, good_above=None, bad_below=None, invert=False):
+        if v is None: return 'color:#8b949e'
+        g = '#3fb950'; b = '#f85149'
+        if invert: g, b = b, g
+        if good_above is not None and v >= good_above: return f'color:{g}'
+        if bad_below  is not None and v <= bad_below:  return f'color:{b}'
+        return 'color:#e6edf3'
+
+    def M(label, val, col='color:#e6edf3'):
+        return (f'<div class="fm-cell"><span class="fm-lbl">{label}</span>'
+                f'<span class="fm-val" style="{col}">{val}</span></div>')
+
+    pe=scores.get('pe'); fpe=scores.get('fwdPE'); peg=scores.get('peg')
+    pb=scores.get('pb'); ps=scores.get('ps')
+    de=scores.get('debtToEquity'); rv=scores.get('revenueGrowth')
+    eg=scores.get('epsGrowth'); gm=scores.get('grossMargin')
+    nm=scores.get('netMargin'); roe=scores.get('roe'); roa=scores.get('roa')
+    cr=scores.get('currentRatio'); io=scores.get('instOwn')
+    ins=scores.get('insiderOwn'); beta=scores.get('beta')
+    fcf=scores.get('fcf'); sp=scores.get('shortPct')
+
+    val_html  = (M('P/E (TTM)',_fmt_x(pe,0)) + M('Fwd P/E',_fmt_x(fpe,0)) +
+                 M('PEG',_fmt_num(peg)) + M('P/B',_fmt_x(pb,1)) + M('P/S',_fmt_x(ps,1)))
+    prof_html = (M('Gross Margin',_fmt_pct(gm),_color(gm,0.30,0.0)) +
+                 M('Net Margin',_fmt_pct(nm),_color(nm,0.10,0.0)) +
+                 M('ROE',_fmt_pct(roe),_color(roe,0.15,0.0)) +
+                 M('ROA',_fmt_pct(roa),_color(roa,0.05,0.0)) +
+                 M('FCF',_fmt_fcf(fcf),_color(fcf,0.0)))
+    grw_html  = (M('Rev Growth',_fmt_pct(rv),_color(rv,0.10,0.0)) +
+                 M('EPS Growth',_fmt_pct(eg),_color(eg,0.10,-0.05)))
+    risk_html = (M('Debt/Equity',_fmt_x(de,1)) +
+                 M('Current Ratio',_fmt_x(cr,1),_color(cr,1.5,1.0)) +
+                 M('Beta',_fmt_num(beta)) +
+                 M('Short %',_fmt_pct(sp),_color(sp,0.20,None,invert=True)))
+    own_html  = (M('Institutional',_fmt_pct(io),_color(io,0.60,0.20)) +
+                 M('Insider',_fmt_pct(ins)))
+
+    def section(title, inner):
+        return (f'<div class="fm-section"><div class="fm-section-title">{title}</div>'
+                f'<div class="fm-grid">{inner}</div></div>')
+
+    sections = ''.join([
+        section('Valuation',    val_html),
+        section('Profitability',prof_html),
+        section('Growth',       grw_html),
+        section('Risk',         risk_html),
+        section('Ownership',    own_html),
+    ])
+    bullets_html = ''.join(f'<li>• {b}</li>' for b in bullets)
+    caveats_html = ''.join(f'<li>⚠ {c}</li>' for c in caveats)
+    upside_span  = f'<span style="color:#3fb950;font-size:11px">{upside_str}</span>' if upside_str else ''
+    bul_block = f'<ul class="fund-bullets">{bullets_html}</ul>' if bullets_html else ''
+    cav_block = f'<ul class="fund-caveats">{caveats_html}</ul>' if caveats_html else ''
+
+    return (
+        f'<div class="fund-box" style="background:{sig_bg};border:1px solid {sig_color}44;margin-top:10px">'
+        f'<div class="fund-header">'
+        f'<span class="fund-title">\U0001f52c Fundamental Analysis</span>'
+        f'<span class="fund-signal" style="color:{sig_color};border:1px solid {sig_color}66;">'
+        f'{sig_emoji} {sig} &middot; {conf_v}% conf &middot; '
+        f'Analysts: {cons_v} &middot; Target: {target_str}{upside_span}'
+        f'</span></div>'
+        f'<div class="fm-sections">{sections}</div>'
+        f'{bul_block}{cav_block}'
+        f'</div>'
+    )
 
 
 def _render_setup_cards(rows, direction, portfolio):
@@ -838,6 +910,16 @@ def generate_html(results, script_d, ts, portfolio, risk_trade, iv_label,
     font-size: 12px; line-height: 1.8; color: #8b949e;
   }}
   .fund-caveats li {{ color: #d29922; }}
+  /* fm-* = expanded fundamental metric grid */
+  .fm-sections  {{ display: flex; flex-wrap: wrap; gap: 10px; margin: 8px 0 4px 0; }}
+  .fm-section   {{ flex: 1 1 140px; min-width: 110px; }}
+  .fm-section-title {{ font-size: 10px; font-weight: 700; color: #6e7681;
+                        text-transform: uppercase; margin-bottom: 4px; letter-spacing: .5px; }}
+  .fm-grid      {{ display: flex; flex-direction: column; gap: 2px; }}
+  .fm-cell      {{ display: flex; justify-content: space-between; align-items: center;
+                    font-size: 11px; padding: 1px 0; border-bottom: 1px solid #21262d22; }}
+  .fm-lbl       {{ color: #6e7681; white-space: nowrap; margin-right: 6px; }}
+  .fm-val       {{ font-weight: 700; font-size: 11px; text-align: right; }}
 
   /* ── Traffic Light ── */
   .tl-box {{
