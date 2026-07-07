@@ -351,14 +351,16 @@ def main():
         shorts = [r for r in active_results if '▼' in r.get('Dir','') or 'SHORT' in r.get('Dir','')]
         green_l = [r for r in longs  if r.get('TrafficLight') == 'GREEN']
         green_s = [r for r in shorts if r.get('TrafficLight') == 'GREEN']
-        yellow  = [r for r in all_results if r.get('TrafficLight') == 'YELLOW']
+        yellow  = [r for r in active_results if r.get('TrafficLight') == 'YELLOW']
+        caution = [r for r in active_results if r.get('TrafficLight') == 'RED']
         watch   = [r for r in all_results if r.get('IsWatchlist')]
 
-        tickers_green  = ', '.join(r['Ticker'] for r in green_l + green_s) or 'אין'
-        tickers_yellow = ', '.join(r['Ticker'] for r in yellow[:8])         or 'אין'
-        tickers_watch  = ', '.join(r['Ticker'] for r in watch[:8])          or 'אין'
+        tickers_green   = ', '.join(r['Ticker'] for r in green_l + green_s) or 'אין'
+        tickers_yellow  = ', '.join(r['Ticker'] for r in yellow[:8])         or 'אין'
+        tickers_caution = ', '.join(r['Ticker'] for r in caution[:8])        or 'אין'
+        tickers_watch   = ', '.join(r['Ticker'] for r in watch[:8])          or 'אין'
 
-        subj = f"🤖 Cycles Scanner {ts} — {len(green_l+green_s)} GO setups"
+        subj = f"🤖 Cycles Scanner {ts} — GO:{len(green_l+green_s)} WAIT:{len(yellow)} RISK:{len(caution)}"
 
         # Plain-text body
         txt_body = (
@@ -366,6 +368,7 @@ def main():
             f"{'='*42}\n"
             f"🟢 GO  ({len(green_l+green_s)} setups): {tickers_green}\n"
             f"🟡 WAIT ({len(yellow)} setups): {tickers_yellow}\n"
+            f"🔴 HIGH RISK ({len(caution)} setups): {tickers_caution}\n"
             f"👁  Watchlist ({len(watch)}):  {tickers_watch}\n"
             f"📊 Total scanned: {len(all_results)} setups\n"
             f"💼 Portfolio: ${PORTFOLIO_SIZE:,}  |  Risk/trade: ${int(PORTFOLIO_SIZE*RISK_PCT)}\n"
@@ -396,6 +399,7 @@ def main():
 <p style='font-size:15px'>
   🟢 <b>GO:</b> {len(green_l+green_s)} setups &nbsp;|&nbsp;
   🟡 <b>WAIT:</b> {len(yellow)} &nbsp;|&nbsp;
+  🔴 <b>HIGH RISK:</b> {len(caution)} &nbsp;|&nbsp;
   👁 <b>Watchlist:</b> {len(watch)} &nbsp;|&nbsp;
   📊 Total: {len(all_results)}
 </p>
