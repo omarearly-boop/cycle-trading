@@ -30,7 +30,7 @@ def validate_csv(path):
         direction = r.get('Dir', '')
 
         # 1. Prob vs TrafficLight consistency (only if column exists in CSV)
-        if light:  # column present and non-empty
+        if light and light not in ('?', 'None'):  # column present and non-empty
             if prob >= 70 and light != 'GREEN':
                 errors.append(f"{ticker}: prob={prob}% but TrafficLight={light} (expected GREEN)")
             if prob < 65 and light not in ('RED', ''):

@@ -412,6 +412,8 @@ def _finalize_setup(setup, direction, ticker, atr_val, m_analysis,
         return None
 
     setup['IsWatchlist'] = prob < MIN_PROBABILITY
+    tl_color, tl_label, _, _ = get_traffic_light(prob, setup)
+    setup['TrafficLight'] = tl_color  # 'GREEN', 'YELLOW', or 'RED'
     return setup
 
 
