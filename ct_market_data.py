@@ -126,6 +126,8 @@ def get_earnings(tkr):
             return None, None
         ed   = pd.to_datetime(date).date()
         days = (ed - datetime.now().date()).days
+        if days < 0:  # already past -- skip stale date
+            return None, None
         return str(ed), days
     except Exception:
         return None, None

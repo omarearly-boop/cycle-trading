@@ -277,8 +277,10 @@ def main():
     # ── Sort by score ────────────────────────────────────────
     all_results.sort(key=lambda x: x['_score'], reverse=True)
 
-    longs  = [r for r in all_results if 'LONG'  in r['Dir']]
-    shorts = [r for r in all_results if 'SHORT' in r['Dir']]
+    longs   = [r for r in all_results if 'LONG'  in r['Dir'] and not r.get('IsWatchlist')]
+    shorts  = [r for r in all_results if 'SHORT' in r['Dir'] and not r.get('IsWatchlist')]
+    watch_l = [r for r in all_results if 'LONG'  in r['Dir'] and r.get('IsWatchlist')]
+    watch_s = [r for r in all_results if 'SHORT' in r['Dir'] and r.get('IsWatchlist')]
 
     pd.set_option('display.max_columns', None)
     pd.set_option('display.width', 300)
@@ -305,8 +307,13 @@ def main():
     print()
 
     # ── Profit potential breakdown ───────────────────────────
-    if all_results:
-        profit_breakdown(all_results, PORTFOLIO_SIZE, risk_trade)
+    watch_all = watch_l + watch_s
+    if watch_all:
+        wt = ', '.join(r['Ticker'] for r in watch_all)
+        print(f'  [{len(watch_all)} watchlist candidates (prob<65%) -- not actionable: {wt}]')
+        print()
+    if longs or shorts:
+        profit_breakdown(longs + shorts, PORTFOLIO_SIZE, risk_trade)
 
     # ── Setup paths ──────────────────────────────────────────
     ts       = datetime.now().strftime('%Y%m%d_%H%M')
