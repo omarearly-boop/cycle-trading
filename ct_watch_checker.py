@@ -83,7 +83,10 @@ _INTL_SUFFIXES = ('.L', '.DE', '.PA', '.T', '.AX', '.TO', '.SW', '.NS', '.HK', '
 def analyze_ticker(entry: dict):
     """
     Run ct_analysis._detect_setup() on a single watchlist entry.
-    Returns (setup_dict, tl_color) or (None, None) if no setup found.
+    Returns (setup, tl, current_price, reason) where reason is one of:
+      None           -> success
+      'FETCH_ERROR'  -> market data unavailable
+      'NO_LEVEL'     -> price not near any S/R level
     """
     ticker    = entry['ticker']
     direction = entry.get('direction', 'LONG')
@@ -113,7 +116,9 @@ def analyze_ticker(entry: dict):
             is_intl=is_intl,
         )
         if market is None:
-            return None, None
+            return None, None, None, 'FETCH_ERROR'
+
+        current_price = market.get('price')
 
         setup = _detect_setup(
             ticker, 100000, market, is_crypto, asset_type,
@@ -123,14 +128,14 @@ def analyze_ticker(entry: dict):
             is_intl=is_intl,
         )
         if setup is None:
-            return None, None
+            return None, None, current_price, 'NO_LEVEL'
 
         tl = get_tl_color(setup)
-        return setup, tl
+        return setup, tl, current_price, None
 
     except Exception as e:
         print(f"    ERROR analyzing {ticker}: {e}")
-        return None, None
+        return None, None, None, 'FETCH_ERROR' 
 
 
 # ---------------------------------------------------------------------------
@@ -361,9 +366,12 @@ def generate_watch_html(results: list, today: str) -> str:
     ts = datetime.datetime.now().strftime('%Y%m%d_%H%M')
     out_path = reports_dir / f'watch_report_{ts}.html'
 
-    tl_bg    = {'GREEN': '#d5f5e3', 'YELLOW': '#fef9e7', 'RED': '#fdecea', None: '#f8f9fa'}
-    tl_icon  = {'GREEN': '🟢',      'YELLOW': '🟡',      'RED': '🔴',      None: '⚪'}
-    tl_label = {'GREEN': 'GO',      'YELLOW': 'WAIT',    'RED': 'NOT YET', None: 'NO DATA'}
+    tl_bg    = {'GREEN': '#d5f5e3', 'YELLOW': '#fef9e7', 'RED': '#fdecea',
+                'NO_LEVEL': '#f8f9fa', 'FETCH_ERROR': '#fff3e0', None: '#f8f9fa'}
+    tl_icon  = {'GREEN': '🟢',      'YELLOW': '🟡',      'RED': '🔴',
+                'NO_LEVEL': '🔘',    'FETCH_ERROR': '⚠️',  None: '⚪'}
+    tl_label = {'GREEN': 'GO',      'YELLOW': 'WAIT',    'RED': 'NOT YET',
+                'NO_LEVEL': 'Not in zone', 'FETCH_ERROR': 'Fetch error', None: 'No Setup'}
 
     rows_html = ''
     for idx, r in enumerate(sorted(results, key=lambda x: x.get('prob', 0), reverse=True)):
@@ -392,6 +400,11 @@ def generate_watch_html(results: list, today: str) -> str:
                     f'<td colspan="11" style="padding:0 14px 12px 14px;background:#1a1f2e">'
                     f'{fund_html}</td></tr>') if fund_html else ''
 
+        # When no setup: show current price in Entry column
+        no_setup = tl in ('NO_LEVEL', 'FETCH_ERROR', None)
+        entry_val = (f"<span style='color:#888;font-size:12px'>now {r.get('cur_price','-')}</span>"
+                     if no_setup else r.get('entry', '-'))
+
         earn_color = '#c0392b' if ('SOON' in earn or 'APPROACH' in earn) else '#555'
         rows_html += (
             f"<tr style='background:{bg}'>"
@@ -399,11 +412,11 @@ def generate_watch_html(results: list, today: str) -> str:
             f"<td style='padding:10px 14px'>{r.get('direction','')}</td>"
             f"<td style='padding:10px 14px;font-size:18px;text-align:center'>{icon}</td>"
             f"<td style='padding:10px 14px;font-weight:bold'>{lbl}</td>"
-            f"<td style='padding:10px 14px;font-weight:bold;color:#1a5276'>{prob}%</td>"
-            f"<td style='padding:10px 14px'>{r.get('entry','-')}</td>"
-            f"<td style='padding:10px 14px'>{r.get('stop','-')}</td>"
-            f"<td style='padding:10px 14px'>{r.get('target','-')}</td>"
-            f"<td style='padding:10px 14px'>{r.get('rr','-')}</td>"
+            f"<td style='padding:10px 14px;font-weight:bold;color:#1a5276'>{prob if not no_setup else ''}</td>"
+            f"<td style='padding:10px 14px'>{entry_val}</td>"
+            f"<td style='padding:10px 14px'>{r.get('stop','-') if not no_setup else '-'}</td>"
+            f"<td style='padding:10px 14px'>{r.get('target','-') if not no_setup else '-'}</td>"
+            f"<td style='padding:10px 14px'>{r.get('rr','-') if not no_setup else '-'}</td>"
             f"<td style='padding:10px 14px;color:{earn_color}'>{earn}</td>"
             f"<td style='padding:10px 14px;color:#777;font-size:12px'>{r.get('notes','')}</td>"
             f"</tr>{fund_row}"
@@ -411,7 +424,8 @@ def generate_watch_html(results: list, today: str) -> str:
 
     n_go   = sum(1 for r in results if r.get('tl') == 'GREEN')
     n_wait = sum(1 for r in results if r.get('tl') == 'YELLOW')
-    n_no   = sum(1 for r in results if r.get('tl') not in ('GREEN', 'YELLOW'))
+    n_zone = sum(1 for r in results if r.get('tl') == 'NO_LEVEL')
+    n_no   = sum(1 for r in results if r.get('tl') not in ('GREEN', 'YELLOW', 'NO_LEVEL', 'FETCH_ERROR'))
 
     table_html = (
         '<table><thead><tr>'
@@ -472,7 +486,8 @@ function toggleFund(id) {{
   <div class="pills">
     <span class="pill">🟢 GO: {n_go}</span>
     <span class="pill">🟡 WAIT: {n_wait}</span>
-    <span class="pill">⚪ NOT YET: {n_no}</span>
+    <span class="pill">🔴 NOT YET: {n_no}</span>
+    <span class="pill">🔘 Not in zone: {n_zone}</span>
     <span class="pill">📋 Total: {len(results)}</span>
   </div>
 </div>
@@ -515,14 +530,17 @@ def run_check():
 
         print(f"  {ticker} ({direction})", end='  ')
 
-        setup, tl = analyze_ticker(entry)
+        setup, tl, cur_price, reason = analyze_ticker(entry)
 
         if setup is None:
-            print("-- no setup found")
-            entry['status']       = 'NO_DATA'
+            reason_label = 'Fetch error' if reason == 'FETCH_ERROR' else 'Not in zone'
+            price_str = f'${cur_price:.2f}' if cur_price else '-'
+            print(f"-- {reason_label}  (price={price_str})")
+            entry['status']       = reason or 'NO_DATA'
             entry['last_checked'] = today
             html_results.append({'ticker': ticker, 'direction': direction,
-                                  'prob': 0, 'tl': None, 'notes': 'No setup'})
+                                  'prob': 0, 'tl': reason, 'cur_price': price_str,
+                                  'notes': reason_label})
             continue
 
         prob = setup.get('Prob', 0)
