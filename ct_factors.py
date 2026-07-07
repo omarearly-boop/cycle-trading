@@ -492,6 +492,32 @@ def _factor_market_regime(r):
 
 
 @factor
+def _factor_directional_volume(r):
+    """
+    Factor 22 -- Directional Volume.
+    Compares avg volume on down bars vs up bars over last 10 weekly bars.
+    High volume on down bars = institutional selling pressure (expert: ASTS lesson).
+    Expert principle: high down-bar volume = sellers still in control.
+    """
+    ratio = r.get('_dir_vol_ratio', 1.0)
+
+    if ratio >= 2.0:
+        return (-14, 'Dir.Volume', f'Down-bar vol {ratio:.1f}x up-bar vol -- heavy institutional selling')
+    elif ratio >= 1.4:
+        return (-8,  'Dir.Volume', f'Down-bar vol {ratio:.1f}x up-bar vol -- sellers dominate (caution)')
+    elif ratio >= 1.1:
+        return (-3,  'Dir.Volume', f'Down-bar vol {ratio:.1f}x up-bar vol -- mild selling bias')
+    elif ratio <= 0.5:
+        return (+12, 'Dir.Volume', f'Up-bar vol {1/ratio:.1f}x down-bar vol -- strong accumulation')
+    elif ratio <= 0.7:
+        return (+7,  'Dir.Volume', f'Up-bar vol {1/ratio:.1f}x down-bar vol -- buyers dominate')
+    elif ratio <= 0.9:
+        return (+3,  'Dir.Volume', f'Up-bar vol {1/ratio:.1f}x down-bar vol -- mild buying bias')
+    else:
+        return (0,   'Dir.Volume', f'Dir.vol ratio {ratio:.1f} -- balanced pressure')
+
+
+@factor
 def _factor_trend_confirmation(r):
     """Factor 19 - Trend Confirmation (the MELI lesson).
 
