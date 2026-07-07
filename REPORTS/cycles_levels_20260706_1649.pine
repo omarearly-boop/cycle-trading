@@ -1,0 +1,87 @@
+//@version=5
+indicator("Cycles Trading Levels — All Setups", overlay=true, max_lines_count=500)
+// ─── HOW TO USE ───────────────────────────────────────────
+// 1. Open the chart for any stock/coin below (Weekly 1W)
+// 2. Click Pine Editor at the bottom
+// 3. Paste this entire script -> click "Add to chart"
+// 4. Lines for that ticker appear automatically
+
+ticker = syminfo.ticker
+
+// ▲ ADI
+if str.contains(syminfo.ticker, "ADI")
+    line.new(bar_index-50, 389.58, bar_index+20, 389.58, color=color.blue,  width=2)
+    line.new(bar_index-50, 369.78,  bar_index+20, 369.78,  color=color.red,   width=2, style=line.style_dashed)
+    line.new(bar_index-50, 508.1,bar_index+20, 508.1,color=color.green, width=2, style=line.style_dashed)
+    line.new(bar_index-50, 581.3454,    bar_index+20, 581.3454,    color=color.green, width=1, style=line.style_dotted)
+    line.new(bar_index-50, 699.8654,    bar_index+20, 699.8654,    color=color.green, width=1, style=line.style_dotted)
+    label.new(bar_index+1, 389.58,  "Entry $389.58",  color=color.blue,  textcolor=color.white, style=label.style_label_left)
+    label.new(bar_index+1, 369.78,   "Stop  $369.78",   color=color.red,   textcolor=color.white, style=label.style_label_left)
+    label.new(bar_index+1, 508.1, "T1    $508.1", color=color.green, textcolor=color.white, style=label.style_label_left)
+    label.new(bar_index+1, 581.3454,     "T2    $581.3454",     color=color.green, textcolor=color.white, style=label.style_label_left)
+    label.new(bar_index+1, 699.8654,     "T3    $699.8654",     color=color.green, textcolor=color.white, style=label.style_label_left)
+
+// ▼ FICO
+if str.contains(syminfo.ticker, "FICO")
+    line.new(bar_index-50, 1271.59, bar_index+20, 1271.59, color=color.blue,  width=2)
+    line.new(bar_index-50, 1363.05,  bar_index+20, 1363.05,  color=color.red,   width=2, style=line.style_dashed)
+    line.new(bar_index-50, 870.01,bar_index+20, 870.01,color=color.green, width=2, style=line.style_dashed)
+    line.new(bar_index-50, 621.8336,    bar_index+20, 621.8336,    color=color.green, width=1, style=line.style_dotted)
+    line.new(bar_index-50, 220.2536,    bar_index+20, 220.2536,    color=color.green, width=1, style=line.style_dotted)
+    label.new(bar_index+1, 1271.59,  "Entry $1271.59",  color=color.blue,  textcolor=color.white, style=label.style_label_left)
+    label.new(bar_index+1, 1363.05,   "Stop  $1363.05",   color=color.red,   textcolor=color.white, style=label.style_label_left)
+    label.new(bar_index+1, 870.01, "T1    $870.01", color=color.green, textcolor=color.white, style=label.style_label_left)
+    label.new(bar_index+1, 621.8336,     "T2    $621.8336",     color=color.green, textcolor=color.white, style=label.style_label_left)
+    label.new(bar_index+1, 220.2536,     "T3    $220.2536",     color=color.green, textcolor=color.white, style=label.style_label_left)
+
+// ▼ CCL
+if str.contains(syminfo.ticker, "CCL")
+    line.new(bar_index-50, 27.85, bar_index+20, 27.85, color=color.blue,  width=2)
+    line.new(bar_index-50, 29.27,  bar_index+20, 29.27,  color=color.red,   width=2, style=line.style_dashed)
+    line.new(bar_index-50, 24.34,bar_index+20, 24.34,color=color.green, width=2, style=line.style_dashed)
+    line.new(bar_index-50, 22.1708,    bar_index+20, 22.1708,    color=color.green, width=1, style=line.style_dotted)
+    line.new(bar_index-50, 18.6608,    bar_index+20, 18.6608,    color=color.green, width=1, style=line.style_dotted)
+    label.new(bar_index+1, 27.85,  "Entry $27.85",  color=color.blue,  textcolor=color.white, style=label.style_label_left)
+    label.new(bar_index+1, 29.27,   "Stop  $29.27",   color=color.red,   textcolor=color.white, style=label.style_label_left)
+    label.new(bar_index+1, 24.34, "T1    $24.34", color=color.green, textcolor=color.white, style=label.style_label_left)
+    label.new(bar_index+1, 22.1708,     "T2    $22.1708",     color=color.green, textcolor=color.white, style=label.style_label_left)
+    label.new(bar_index+1, 18.6608,     "T3    $18.6608",     color=color.green, textcolor=color.white, style=label.style_label_left)
+
+// ▼ WYNN
+if str.contains(syminfo.ticker, "WYNN")
+    line.new(bar_index-50, 94.92, bar_index+20, 94.92, color=color.blue,  width=2)
+    line.new(bar_index-50, 100.74,  bar_index+20, 100.74,  color=color.red,   width=2, style=line.style_dashed)
+    line.new(bar_index-50, 82.47,bar_index+20, 82.47,color=color.green, width=2, style=line.style_dashed)
+    line.new(bar_index-50, 74.7759,    bar_index+20, 74.7759,    color=color.green, width=1, style=line.style_dotted)
+    line.new(bar_index-50, 62.3259,    bar_index+20, 62.3259,    color=color.green, width=1, style=line.style_dotted)
+    label.new(bar_index+1, 94.92,  "Entry $94.92",  color=color.blue,  textcolor=color.white, style=label.style_label_left)
+    label.new(bar_index+1, 100.74,   "Stop  $100.74",   color=color.red,   textcolor=color.white, style=label.style_label_left)
+    label.new(bar_index+1, 82.47, "T1    $82.47", color=color.green, textcolor=color.white, style=label.style_label_left)
+    label.new(bar_index+1, 74.7759,     "T2    $74.7759",     color=color.green, textcolor=color.white, style=label.style_label_left)
+    label.new(bar_index+1, 62.3259,     "T3    $62.3259",     color=color.green, textcolor=color.white, style=label.style_label_left)
+
+// ▲ GILD
+if str.contains(syminfo.ticker, "GILD")
+    line.new(bar_index-50, 129.35, bar_index+20, 129.35, color=color.blue,  width=2)
+    line.new(bar_index-50, 116.98,  bar_index+20, 116.98,  color=color.red,   width=2, style=line.style_dashed)
+    line.new(bar_index-50, 155.38,bar_index+20, 155.38,color=color.green, width=2, style=line.style_dashed)
+    line.new(bar_index-50, 171.4665,    bar_index+20, 171.4665,    color=color.green, width=1, style=line.style_dotted)
+    line.new(bar_index-50, 197.4965,    bar_index+20, 197.4965,    color=color.green, width=1, style=line.style_dotted)
+    label.new(bar_index+1, 129.35,  "Entry $129.35",  color=color.blue,  textcolor=color.white, style=label.style_label_left)
+    label.new(bar_index+1, 116.98,   "Stop  $116.98",   color=color.red,   textcolor=color.white, style=label.style_label_left)
+    label.new(bar_index+1, 155.38, "T1    $155.38", color=color.green, textcolor=color.white, style=label.style_label_left)
+    label.new(bar_index+1, 171.4665,     "T2    $171.4665",     color=color.green, textcolor=color.white, style=label.style_label_left)
+    label.new(bar_index+1, 197.4965,     "T3    $197.4965",     color=color.green, textcolor=color.white, style=label.style_label_left)
+
+// ▼ VRSK
+if str.contains(syminfo.ticker, "VRSK")
+    line.new(bar_index-50, 185.77, bar_index+20, 185.77, color=color.blue,  width=2)
+    line.new(bar_index-50, 196.72,  bar_index+20, 196.72,  color=color.red,   width=2, style=line.style_dashed)
+    line.new(bar_index-50, 163.74,bar_index+20, 163.74,color=color.green, width=2, style=line.style_dashed)
+    line.new(bar_index-50, 150.1255,    bar_index+20, 150.1255,    color=color.green, width=1, style=line.style_dotted)
+    line.new(bar_index-50, 128.0955,    bar_index+20, 128.0955,    color=color.green, width=1, style=line.style_dotted)
+    label.new(bar_index+1, 185.77,  "Entry $185.77",  color=color.blue,  textcolor=color.white, style=label.style_label_left)
+    label.new(bar_index+1, 196.72,   "Stop  $196.72",   color=color.red,   textcolor=color.white, style=label.style_label_left)
+    label.new(bar_index+1, 163.74, "T1    $163.74", color=color.green, textcolor=color.white, style=label.style_label_left)
+    label.new(bar_index+1, 150.1255,     "T2    $150.1255",     color=color.green, textcolor=color.white, style=label.style_label_left)
+    label.new(bar_index+1, 128.0955,     "T3    $128.0955",     color=color.green, textcolor=color.white, style=label.style_label_left)

@@ -1,0 +1,4067 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cycles Trading Scanner — July 06, 2026  15:32 (IL)</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #0d1117; color: #e6edf3; font-family: 'Segoe UI', Arial, sans-serif; font-size: 14px; }
+  a { color: #58a6ff; text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  .header {
+    background: linear-gradient(135deg, #161b22 0%, #1c2128 100%);
+    border-bottom: 1px solid #30363d;
+    padding: 24px 32px;
+  }
+  .header h1 { font-size: 22px; color: #f0f6fc; margin-bottom: 6px; }
+  .header .subtitle { color: #8b949e; font-size: 13px; }
+
+  .stats-bar {
+    display: flex; gap: 16px; flex-wrap: wrap;
+    padding: 16px 32px;
+    background: #161b22;
+    border-bottom: 1px solid #30363d;
+  }
+  .stat-box {
+    background: #21262d;
+    border: 1px solid #30363d;
+    border-radius: 8px;
+    padding: 12px 18px;
+    min-width: 150px;
+  }
+  .stat-label { color: #8b949e; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .stat-value { color: #f0f6fc; font-size: 18px; font-weight: 600; margin-top: 2px; }
+
+  .section { padding: 24px 32px; }
+  .section-title {
+    font-size: 16px; font-weight: 700;
+    margin-bottom: 16px; padding-bottom: 8px;
+    border-bottom: 2px solid;
+    display: flex; align-items: center; gap: 10px;
+  }
+  .section-title.long  { color: #3fb950; border-color: #3fb950; }
+  .section-title.short { color: #f85149; border-color: #f85149; }
+
+  .card {
+    background: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 12px;
+    padding: 20px;
+    margin-bottom: 20px;
+    transition: border-color .2s;
+  }
+  .long-card  { border-left: 4px solid #3fb950; }
+  .short-card { border-left: 4px solid #f85149; }
+  .card:hover { border-color: #58a6ff; }
+
+  .card-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px; flex-wrap: wrap; gap: 10px; }
+  .card-title  { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+
+  .ticker { font-size: 22px; font-weight: 800; color: #f0f6fc; }
+  .dir-badge {
+    font-size: 12px; font-weight: 700; padding: 4px 12px;
+    border-radius: 20px; letter-spacing: 1px;
+  }
+  .long-badge  { background: #1a3a1f; color: #3fb950; border: 1px solid #3fb950; }
+  .short-badge { background: #3a1a1a; color: #f85149; border: 1px solid #f85149; }
+  .type-badge  { background: #21262d; color: #8b949e; font-size: 11px; padding: 3px 8px; border-radius: 10px; }
+
+  .card-meta { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .badge { font-size: 11px; padding: 3px 8px; border-radius: 10px; }
+  .badge.ok               { background: #1a3a1f; color: #3fb950; }
+  .badge.warn             { background: #3a2a0a; color: #d29922; }
+  .badge.earn-approaching { background: #2d2007; color: #e3a800; border: 1px solid #a07800; font-weight:700; }
+  .badge.atr-high         { background: #3a0a0a; color: #ff8080; border: 1px solid #cc3333; font-weight:700; }
+  .badge.late-entry       { background: #1a1a3a; color: #9999ff; border: 1px solid #5555cc; font-weight:700; }
+
+  /* ── Horizon badge on each card ── */
+  .horizon-badge {
+    font-size: 12px; font-weight: 700; padding: 3px 10px; border-radius: 12px;
+    letter-spacing: 0.3px; margin-left: 4px;
+  }
+
+  /* ── Position Sizing box ── */
+  .pos-size-box {
+    background: #161b22; border: 1px solid #30363d; border-radius: 8px;
+    margin: 0 0 12px 0; padding: 14px 16px;
+  }
+  .pos-size-title {
+    font-size: 12px; font-weight: 700; color: #8b949e;
+    text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 10px;
+  }
+  .pos-size-grid {
+    display: grid; grid-template-columns: repeat(4,1fr); gap: 10px; margin-bottom: 10px;
+  }
+  .ps-cell { text-align: center; }
+  .ps-label { font-size: 10px; color: #6e7681; text-transform: uppercase; margin-bottom: 4px; }
+  .ps-val { font-size: 18px; font-weight: 700; color: #e6edf3; }
+  .ps-sub { font-size: 11px; color: #8b949e; margin-top: 2px; }
+  .ps-rule {
+    font-size: 11px; color: #58a6ff; border-top: 1px solid #21262d;
+    padding-top: 8px; text-align: center;
+  }
+  .badge.pos-capped  { background: #1a2a3a; color: #58a6ff; border: 1px solid #1f6feb; font-size: 10px; }
+  .badge.macd-bull   { background: #0d2b0d; color: #3fb950; border: 1px solid #3fb95066; font-weight:700; }
+  .badge.macd-bear   { background: #2b0d0d; color: #f85149; border: 1px solid #f8514966; font-weight:700; }
+  .badge.boll-low    { background: #0d1f2b; color: #58a6ff; border: 1px solid #58a6ff66; font-weight:700; }
+  .badge.boll-high   { background: #2b1a0d; color: #d29922; border: 1px solid #d2992266; font-weight:700; }
+  .badge.boll-squeeze{ background: #1f0d2b; color: #bc8cff; border: 1px solid #bc8cff66; font-weight:700; }
+
+  /* ── Fundamental Analysis box ── */
+  .fund-box {
+    border-radius: 8px; padding: 12px 16px; margin: 0 0 12px 0;
+  }
+  .fund-header {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 10px;
+  }
+  .fund-title  { font-size: 12px; font-weight: 700; color: #8b949e; text-transform: uppercase; }
+  .fund-signal {
+    font-size: 12px; font-weight: 800; padding: 3px 12px;
+    border-radius: 12px; background: transparent;
+  }
+  .fund-grid   { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 8px; }
+  .fund-cell   { text-align: center; }
+  .fund-label  { font-size: 10px; color: #6e7681; text-transform: uppercase; margin-bottom: 3px; }
+  .fund-val    { font-size: 16px; font-weight: 700; color: #e6edf3; }
+  .fund-bullets, .fund-caveats {
+    list-style: none; padding: 0; margin: 4px 0 0 0;
+    font-size: 12px; line-height: 1.8; color: #8b949e;
+  }
+  .fund-caveats li { color: #d29922; }
+
+  /* ── Traffic Light ── */
+  .tl-box {
+    border-radius: 8px; padding: 12px 16px; margin: 0 0 12px 0;
+    display: flex; align-items: flex-start; gap: 14px;
+  }
+  .tl-signal { font-size: 18px; font-weight: 800; white-space: nowrap; min-width: 140px; }
+  .tl-lists { flex: 1; }
+  .tl-green, .tl-red { list-style: none; padding: 0; margin: 0; font-size: 12px; line-height: 1.7; }
+  .tl-green li { color: #3fb950; }
+  .tl-red   li { color: #f85149; }
+
+  /* ── Watchlist section ── */
+  .watchlist-title {
+    font-size: 14px; font-weight: 700; color: #8b949e;
+    padding: 16px 32px 8px; border-top: 1px dashed #30363d; margin-top: 8px;
+  }
+
+  /* ── Horizon filter tabs ── */
+  .horizon-tabs {
+    display: flex; gap: 8px; flex-wrap: wrap;
+    padding: 16px 32px 0 32px;
+    background: #0d1117;
+  }
+  .htab {
+    padding: 6px 18px; border-radius: 20px; font-size: 13px; font-weight: 600;
+    cursor: pointer; border: 1px solid #30363d;
+    background: #161b22; color: #8b949e;
+    transition: all 0.15s;
+  }
+  .htab:hover { border-color: #58a6ff; color: #e6edf3; }
+  .htab.active { background: #1f6feb; border-color: #1f6feb; color: #fff; }
+  .htab.tab-weekly  { }
+  .htab.tab-monthly { }
+  .htab.tab-medium  { }
+  .htab.tab-long    { }
+
+  .tv-link { background: #1c2d4a; color: #58a6ff; padding: 4px 12px; border-radius: 6px; font-size: 12px; border: 1px solid #1f6feb; }
+  .pine-btn { background: #2d2a1f; color: #d29922; padding: 4px 12px; border-radius: 6px; font-size: 12px; border: 1px solid #6e511e; cursor: pointer; }
+  .pine-btn:hover { background: #3a3010; }
+  .colmex-btn { background: #0d2137; color: #1ea7e1; padding: 4px 12px; border-radius: 6px; font-size: 12px; border: 1px solid #1ea7e1; cursor: pointer; font-weight: 600; }
+  .colmex-btn:hover { background: #163450; }
+
+  /* Pine Script modal */
+  .pine-modal {
+    display: none; position: fixed; inset: 0;
+    background: rgba(0,0,0,0.75); z-index: 9999;
+    justify-content: center; align-items: center;
+  }
+  .pine-modal[style*="block"] { display: flex !important; }
+  .pine-box {
+    background: #161b22; border: 1px solid #30363d;
+    border-radius: 12px; padding: 0; width: 90%; max-width: 680px;
+    max-height: 90vh; display: flex; flex-direction: column;
+    box-shadow: 0 16px 48px rgba(0,0,0,0.6);
+  }
+  .pine-header {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 14px 20px; border-bottom: 1px solid #30363d;
+    font-weight: 700; color: #d29922; font-size: 14px;
+  }
+  .pine-close {
+    background: none; border: none; color: #8b949e;
+    font-size: 18px; cursor: pointer; padding: 0 4px;
+  }
+  .pine-close:hover { color: #f0f6fc; }
+  .pine-instructions {
+    padding: 12px 20px; font-size: 12px; color: #8b949e;
+    background: #0d1117; border-bottom: 1px solid #21262d; line-height: 1.6;
+  }
+  .pine-code {
+    flex: 1; margin: 0; padding: 14px 20px;
+    background: #0d1117; color: #3fb950;
+    font-family: 'Consolas', 'Courier New', monospace; font-size: 12px;
+    border: none; resize: none; outline: none;
+    min-height: 260px; overflow-y: auto;
+  }
+  .pine-copy-btn {
+    margin: 12px 20px; padding: 8px 18px;
+    background: #1a3a1f; color: #3fb950;
+    border: 1px solid #2ea043; border-radius: 6px;
+    cursor: pointer; font-size: 13px; font-weight: 600;
+    align-self: flex-start;
+  }
+  .pine-copy-btn:hover { background: #2ea043; color: #fff; }
+  .copied-msg { color: #3fb950; font-size: 13px; margin: 12px 0; font-weight: 600; }
+
+  .levels-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+    gap: 10px;
+    margin-bottom: 20px;
+  }
+  .level-box {
+    background: #21262d;
+    border: 1px solid #30363d;
+    border-radius: 8px;
+    padding: 10px 12px;
+    text-align: center;
+  }
+  .level-label { font-size: 10px; color: #8b949e; text-transform: uppercase; letter-spacing: 0.4px; margin-bottom: 4px; }
+  .level-value { font-size: 15px; font-weight: 700; }
+  .level-value.green   { color: #3fb950; }
+  .level-value.red     { color: #f85149; }
+  .level-value.blue    { color: #58a6ff; }
+  .level-value.neutral { color: #f0f6fc; }
+
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 16px; }
+  @media (max-width: 700px) { .two-col { grid-template-columns: 1fr; } }
+
+  h4 { font-size: 12px; color: #8b949e; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
+
+  .scenario-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .scenario-table th {
+    background: #21262d; color: #8b949e;
+    font-size: 11px; font-weight: 600;
+    padding: 6px 10px; text-align: left;
+    border-bottom: 1px solid #30363d;
+  }
+  .scenario-table td { padding: 6px 10px; border-bottom: 1px solid #21262d; }
+  .scenario-table .loss-row td { color: #f85149; }
+  .green { color: #3fb950; }
+  .red   { color: #f85149; }
+
+  /* ColmexPro Modal — styled like the real platform */
+  .cmx-box { max-width: 420px; background: #141c26 !important; }
+  .cmx-header { background: #141c26 !important; color: #e0e6f0 !important; border-bottom: 1px solid #253347 !important; }
+  .cmx-instructions { padding: 10px 14px; font-size: 12px; color: #8b9ab0; border-bottom: 1px solid #253347; }
+  .cmx-tip { background: #0d2137; border-left: 3px solid #1ea7e1; padding: 7px 10px; font-size: 12px; color: #8bb8d4; border-radius: 0 4px 4px 0; }
+  .cmx-note { color: #d29922; font-size: 11px; background: #2a2310; border-radius: 4px; padding: 5px 8px; margin-top: 6px; }
+  .cmx-form { padding: 0 14px 14px; display: flex; flex-direction: column; gap: 0; overflow-y: auto; max-height: 70vh; }
+  .cmx-form-title { font-size: 14px; font-weight: 600; color: #c8d8ec; padding: 12px 0 10px; border-bottom: 1px solid #253347; margin-bottom: 8px; }
+  .cmx-field-row { display: grid; grid-template-columns: 110px 1fr auto; align-items: center; gap: 8px; padding: 7px 10px; border-radius: 6px; margin-bottom: 4px; background: #1a2535; }
+  .cmx-fib-row { background: #151e2c; opacity: 0.85; }
+  .cmx-field-label { font-size: 12px; color: #7a8fa8; }
+  .cmx-field-label small { font-size: 10px; color: #556070; }
+  .cmx-field-val { font-size: 13px; color: #c8d8ec; display: flex; align-items: center; gap: 6px; }
+  .cmx-field-input { font-size: 14px; font-weight: 700; color: #c8d8ec; background: #0f1923; border: 1px solid #2d4060; border-radius: 5px; padding: 4px 10px; font-family: monospace; }
+  .cmx-price-blue { color: #4a9fd4 !important; border-color: #1e4060 !important; }
+  .cmx-price-red  { color: #e05555 !important; border-color: #501e1e !important; }
+  .cmx-price-green{ color: #3fb950 !important; border-color: #1e4030 !important; }
+  .cmx-eq-badge { background: #c94f2a; color: #fff; font-size: 9px; font-weight: 700; padding: 1px 5px; border-radius: 3px; margin-right: 4px; }
+  .cmx-side-btns { display: flex; gap: 4px; }
+  .cmx-side-active { padding: 4px 16px; border-radius: 5px; font-size: 13px; font-weight: 700; }
+  .cmx-side-buy  { background: #1a5c35; color: #3fb950; border: 1px solid #238636; }
+  .cmx-side-sell { background: #5c1a1a; color: #f85149; border: 1px solid #7d1b1b; }
+  .cmx-side-inactive { padding: 4px 16px; border-radius: 5px; font-size: 13px; background: #1a2535; color: #556070; border: 1px solid #253347; }
+  .cmx-price-bar { display: flex; justify-content: space-between; align-items: center; background: #0f1923; border-radius: 6px; padding: 8px 12px; margin-top: 8px; font-size: 13px; font-weight: 700; font-family: monospace; }
+  .cmx-bar-mid { font-size: 11px; color: #556070; font-family: sans-serif; font-weight: 400; text-align: center; }
+  .cmx-copy { background: #1a2535; color: #7a8fa8; border: 1px solid #2d4060; border-radius: 4px; font-size: 10px; padding: 3px 8px; cursor: pointer; white-space: nowrap; }
+  .cmx-copy:hover { background: #1ea7e1; color: #fff; border-color: #1ea7e1; }
+  .cmx-copy.copied { background: #238636; color: #fff; border-color: #238636; }
+  .cmx-place-btn { display: block; margin-top: 12px; background: #1b6bbf; color: #fff; text-align: center; padding: 11px; border-radius: 7px; font-weight: 700; text-decoration: none; font-size: 14px; }
+  .cmx-place-btn:hover { background: #1558a0; }
+
+  /* Probability section */
+  .prob-section {
+    background: #21262d;
+    border: 1px solid #30363d;
+    border-radius: 8px;
+    padding: 14px 16px;
+    margin-bottom: 16px;
+  }
+  .prob-header {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 10px;
+  }
+  .prob-title { font-size: 12px; color: #8b949e; text-transform: uppercase; letter-spacing: 0.5px; }
+  .prob-value {
+    font-size: 22px; font-weight: 800;
+  }
+  .prob-bar-bg {
+    height: 8px; background: #30363d; border-radius: 4px; overflow: hidden; margin-bottom: 12px;
+  }
+  .prob-bar-fill { height: 100%; border-radius: 4px; transition: width .4s; }
+  .prob-factors { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 16px; }
+  .prob-factor { font-size: 11px; color: #8b949e; display: flex; justify-content: space-between; }
+  .prob-factor .fname { color: #c9d1d9; }
+  .prob-factor .fdelta { font-weight: 700; }
+
+  /* Top-Down Filters */
+  .topdown-section {
+    background: #0d1117;
+    border: 1px solid #30363d;
+    border-radius: 8px;
+    padding: 14px 16px;
+    margin-bottom: 16px;
+  }
+  .topdown-title {
+    font-size: 11px; color: #8b949e; text-transform: uppercase;
+    letter-spacing: 0.5px; margin-bottom: 10px; font-weight: 600;
+  }
+  .topdown-grid {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px;
+  }
+  .td-box {
+    background: #161b22; border: 1px solid #30363d;
+    border-radius: 6px; padding: 10px 12px;
+  }
+  .td-label {
+    font-size: 10px; color: #8b949e; text-transform: uppercase;
+    letter-spacing: 0.3px; margin-bottom: 5px;
+  }
+  .td-badge {
+    font-size: 12px; font-weight: 700; padding: 3px 8px;
+    border-radius: 4px; display: inline-block; margin-bottom: 4px;
+  }
+  .td-sub { font-size: 10px; color: #8b949e; }
+  .td-bull { background: #0d2a1a; color: #3fb950; border: 1px solid #238636; }
+  .td-ok   { background: #1a2f0d; color: #8dbb3a; border: 1px solid #5a7a20; }
+  .td-neut { background: #21262d; color: #8b949e; border: 1px solid #484f58; }
+  .td-warn { background: #2d1f0a; color: #d29922; border: 1px solid #6e511e; }
+  .td-bear { background: #2d0f0f; color: #f85149; border: 1px solid #6e1b18; }
+
+  .none { color: #8b949e; font-style: italic; padding: 20px 0; }
+
+  /* Squeeze risk */
+  .badge.squeeze-high { background: #4a0a0a; color: #ff6b6b; border: 1px solid #f85149; font-weight:700; }
+  .badge.squeeze-med  { background: #3a2a0a; color: #d29922; border: 1px solid #6e511e; }
+  .badge.squeeze-long { background: #0d2a1a; color: #56d364; border: 1px solid #2ea043; }
+
+  .squeeze-box {
+    border-radius: 8px; padding: 14px 16px;
+    margin-bottom: 16px; font-size: 13px; line-height: 1.6;
+  }
+  .squeeze-box.high {
+    background: #2d0f0f; border: 2px solid #f85149; color: #ffa0a0;
+  }
+  .squeeze-box.medium {
+    background: #2d1f0a; border: 1px solid #d29922; color: #f0c060;
+  }
+  .squeeze-box.long-squeeze {
+    background: #0d2a1a; border: 1px solid #2ea043; color: #56d364;
+  }
+  .squeeze-box strong { color: inherit; font-size: 14px; }
+
+  .footer {
+    text-align: center;
+    padding: 20px;
+    color: #8b949e;
+    font-size: 12px;
+    border-top: 1px solid #30363d;
+  }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>📈 Cycles Trading Scanner</h1>
+  <div class="subtitle">
+    July 06, 2026  15:32 (IL) &nbsp;|&nbsp; Interval: Weekly (1wk) &nbsp;|&nbsp;
+    Based on Focus Trader / Cycles Trading methodology
+  </div>
+</div>
+
+<div class="stats-bar">
+  <div class="stat-box">
+    <div class="stat-label">Portfolio</div>
+    <div class="stat-value">$25,000</div>
+  </div>
+  <div class="stat-box">
+    <div class="stat-label">Risk / Trade</div>
+    <div class="stat-value">$250</div>
+  </div>
+  <div class="stat-box">
+    <div class="stat-label">Interval</div>
+    <div class="stat-value" style="font-size:14px">Weekly (1wk)</div>
+  </div>
+  <div class="stat-box">
+    <div class="stat-label">US Stocks</div>
+    <div class="stat-value">340</div>
+  </div>
+  <div class="stat-box">
+    <div class="stat-label">Israeli (TASE)</div>
+    <div class="stat-value">47</div>
+  </div>
+  <div class="stat-box">
+    <div class="stat-label">International</div>
+    <div class="stat-value">109</div>
+  </div>
+  <div class="stat-box">
+    <div class="stat-label">Crypto</div>
+    <div class="stat-value">30</div>
+  </div>
+  <div class="stat-box">
+    <div class="stat-label">Commodities</div>
+    <div class="stat-value">21</div>
+  </div>
+  <div class="stat-box">
+    <div class="stat-label">Long Setups</div>
+    <div class="stat-value" style="color:#3fb950">3</div>
+  </div>
+  <div class="stat-box">
+    <div class="stat-label">Short Setups</div>
+    <div class="stat-value" style="color:#f85149">7</div>
+  </div>
+  <div class="stat-box">
+    <div class="stat-label">Total Found</div>
+    <div class="stat-value">10</div>
+  </div>
+</div>
+
+<!-- ── Time Horizon Filter Tabs ── -->
+<div class="horizon-tabs">
+  <span class="htab active" onclick="filterHorizon('ALL', this)">🔭 ALL</span>
+  <span class="htab tab-weekly"  onclick="filterHorizon('WEEKLY',  this)"
+        style="color:#3fb950;border-color:#3fb95055;">⚡ שבועי (1–2w)</span>
+  <span class="htab tab-monthly" onclick="filterHorizon('MONTHLY', this)"
+        style="color:#58a6ff;border-color:#58a6ff55;">📅 חודשי (3–6w)</span>
+  <span class="htab tab-medium"  onclick="filterHorizon('MEDIUM',  this)"
+        style="color:#d29922;border-color:#d2992255;">📈 בינוני (2–3m)</span>
+  <span class="htab tab-long"    onclick="filterHorizon('LONG',    this)"
+        style="color:#8b949e;border-color:#8b949e55;">🎯 ארוך (3m+)</span>
+</div>
+
+<div class="section">
+  <div class="section-title long">▲ LONG SETUPS &nbsp;
+    <span style="font-size:13px;font-weight:400;color:#8b949e">1 קח / 2 Watchlist</span>
+  </div>
+  
+<div class="card long-card" data-horizon="MONTHLY">
+  <div class="card-header">
+<div class="card-title">
+  <span class="ticker">HO</span>
+  <span class="dir-badge long-badge">
+    ▲ LONG
+  </span>
+  <span class="horizon-badge" style="background:#58a6ff22;color:#58a6ff;border:1px solid #58a6ff66;"
+        title="~5.7 weeks to T1 · 3–6 שבועות">
+    📅 חודשי
+  </span>
+  <span class="type-badge">COMMODITY</span>
+</div>
+<div class="card-meta">
+  <span class="badge ok">✓ Vol OK</span> <span class="badge ok">-</span> <span class="badge atr-high">🔥 ATR 14.28%</span> <span class="badge late-entry">⚡ LATE +6.7% from level</span> <span class="badge warn">MACD ▼</span>  
+  <a href="https://www.tradingview.com/chart/?symbol=NYMEX:HO1!&interval=W" target="_blank" class="tv-link">📊 TradingView</a>
+  <button class="pine-btn" onclick="showPine('pine_LONG_0')">📋 Pine Script</button>
+  <button class="colmex-btn" onclick="showColmex('pine_LONG_0_cmx')">💹 Trade on Colmex</button>
+</div>
+  </div>
+  
+  <!-- Position Sizing Box -->
+  <div class="pos-size-box">
+<div class="pos-size-title">💼 Position Sizing</div>
+<div class="pos-size-grid">
+  <div class="ps-cell">
+    <div class="ps-label">סיכון לעסקה</div>
+    <div class="ps-val">$125</div>
+    <div class="ps-sub">1% של התיק (×0.5 — High Vol)</div>
+  </div>
+  <div class="ps-cell">
+    <div class="ps-label">גודל פוזיציה</div>
+    <div class="ps-val" style="color:#3fb950">$1,369</div>
+    <div class="ps-sub" style="color:#3fb950">5.5% מהתיק — SAFE </div>
+  </div>
+  <div class="ps-cell">
+    <div class="ps-label">כמות מניות</div>
+    <div class="ps-val">421.9</div>
+    <div class="ps-sub">@ $3.25</div>
+  </div>
+  <div class="ps-cell">
+    <div class="ps-label">מקסימום פוזיציות</div>
+    <div class="ps-val">6</div>
+    <div class="ps-sub">סה"כ בו זמנית</div>
+  </div>
+</div>
+<div class="ps-rule">📏 כלל: 1% סיכון × 6 פוזיציות = 6% חשיפה מקסימלית</div>
+  </div>
+  <!-- Fundamental Analysis Box (stock-analysis skill) -->
+  
+  <!-- Traffic Light Decision Box -->
+  <div class="tl-box" style="background:#2b0d0d;border:1px solid #f85149;">
+<div class="tl-signal">🔴 אל תיכנס</div>
+<div class="tl-lists">
+  <ul class="tl-green"><li>✅ Strong support level</li></ul>
+  <ul class="tl-red"><li>⚠ High Volatility ATR 14.28%</li><li>⚠ Monthly trend vs direction</li></ul>
+</div>
+  </div>
+  <!-- Colmex Trade Modal for HO -->
+  <div id="pine_LONG_0_cmx" class="pine-modal" onclick="if(event.target===this)this.style.display='none'">
+<div class="pine-box cmx-box">
+  <div class="pine-header cmx-header">
+    <span>💹 ColmexPro Order — HO (Long)</span>
+    <button class="pine-close" onclick="document.getElementById('pine_LONG_0_cmx').style.display='none'">✕</button>
+  </div>
+  <div class="cmx-instructions">
+    <div class="cmx-tip">💡 פתח ColmexPro בטאב נפרד והתחבר → חפש <b>HEATINGOIL</b> → מלא לפי הטופס למטה</div>
+    
+  </div>
+
+  <!-- ColmexPro-style order form -->
+  <div class="cmx-form">
+    <div class="cmx-form-title">Order entry HEATINGOIL</div>
+
+    <div class="cmx-field-row">
+      <span class="cmx-field-label">Symbol</span>
+      <div class="cmx-field-val">
+        <span class="cmx-eq-badge">EQ</span>
+        <b>HEATINGOIL</b>
+      </div>
+      <button class="cmx-copy" onclick="copyText('HEATINGOIL',this)">Copy</button>
+    </div>
+
+    <div class="cmx-field-row">
+      <span class="cmx-field-label">Side</span>
+      <div class="cmx-side-btns">
+        <span class="cmx-side-active cmx-side-buy">BUY</span>
+        <span class="cmx-side-inactive">Sell</span>
+      </div>
+      <button class="cmx-copy" onclick="copyText('BUY',this)">Copy</button>
+    </div>
+
+    <div class="cmx-field-row">
+      <span class="cmx-field-label">Quantity</span>
+      <div class="cmx-field-input">421.9</div>
+      <button class="cmx-copy" onclick="copyText('421.9',this)">Copy</button>
+    </div>
+
+    <div class="cmx-field-row">
+      <span class="cmx-field-label">Order type</span>
+      <div class="cmx-field-val">Limit</div>
+    </div>
+
+    <div class="cmx-field-row">
+      <span class="cmx-field-label">Validity</span>
+      <div class="cmx-field-val">GTC</div>
+    </div>
+
+    <div class="cmx-field-row">
+      <span class="cmx-field-label">Limit price</span>
+      <div class="cmx-field-input cmx-price-blue">3.25</div>
+      <button class="cmx-copy" onclick="copyText('3.25',this)">Copy</button>
+    </div>
+
+    <div class="cmx-field-row">
+      <span class="cmx-field-label">SL price</span>
+      <div class="cmx-field-input cmx-price-red">2.95</div>
+      <button class="cmx-copy" onclick="copyText('2.95',this)">Copy</button>
+    </div>
+
+    <div class="cmx-field-row">
+      <span class="cmx-field-label">TP price <small>(T1)</small></span>
+      <div class="cmx-field-input cmx-price-green">4.84</div>
+      <button class="cmx-copy" onclick="copyText('4.84',this)">Copy</button>
+    </div>
+
+    <div class="cmx-field-row cmx-fib-row">
+      <span class="cmx-field-label">TP <small>(T2 Fib)</small></span>
+      <div class="cmx-field-input cmx-price-green">5.82</div>
+      <button class="cmx-copy" onclick="copyText('5.82',this)">Copy</button>
+    </div>
+
+    <div class="cmx-field-row cmx-fib-row">
+      <span class="cmx-field-label">TP <small>(T3 Fib)</small></span>
+      <div class="cmx-field-input cmx-price-green">7.41</div>
+      <button class="cmx-copy" onclick="copyText('7.41',this)">Copy</button>
+    </div>
+
+    <div class="cmx-price-bar">
+      <span class="cmx-price-blue">3.25</span>
+      <span class="cmx-bar-mid">421.9 units · $1,369 · R:R 1:5.36</span>
+      <span class="cmx-price-green">4.84</span>
+    </div>
+
+    <a href="https://webplatform.colmex.com/" target="_blank" class="cmx-place-btn">
+      🟢 Place BUY Order
+    </a>
+  </div>
+</div>
+  </div>
+
+  <!-- Pine Script modal for HO -->
+  <div id="pine_LONG_0" class="pine-modal" onclick="if(event.target===this)this.style.display='none'">
+<div class="pine-box">
+  <div class="pine-header">
+    <span>📋 Pine Script — HO LONG ▲</span>
+    <button class="pine-close" onclick="document.getElementById('pine_LONG_0').style.display='none'">✕</button>
+  </div>
+  <div class="pine-instructions">
+    <b>How to use:</b>&nbsp; 1. Open TradingView &nbsp;→&nbsp;
+    2. Open <b>HO</b> chart, Weekly (1W) &nbsp;→&nbsp;
+    3. Click <b>Pine Editor</b> at the bottom &nbsp;→&nbsp;
+    4. Paste the code below &nbsp;→&nbsp; Click <b>"Add to chart"</b><br>
+    → Entry (blue), Stop (red), T1/T2/T3 (green) lines appear automatically.
+  </div>
+  <textarea id="pine_LONG_0_code" class="pine-code" readonly>//@version=5
+indicator("Cycles: HO", overlay=true, max_lines_count=100)
+// ─── HOW TO USE ───────────────────────────────────────────
+// 1. Open this stock/coin chart on TradingView (Weekly 1W)
+// 2. Click Pine Editor at the bottom
+// 3. Paste this code and click "Add to chart"
+// 4. Entry / Stop / Target lines appear automatically
+
+// LONG  ▲  HO
+// Entry : 3.25  |  Stop: 2.95  |  R:R: 5.36
+
+entry_price  = 3.25
+stop_price   = 2.95
+target1      = 4.84
+target2      = 5.8226
+target3      = 7.4126
+
+// Draw horizontal lines
+line.new(bar_index - 50, entry_price, bar_index + 20, entry_price,
+         color=color.new(color.blue,  0), width=2, style=line.style_solid)
+line.new(bar_index - 50, stop_price,  bar_index + 20, stop_price,
+         color=color.new(color.red,   0), width=2, style=line.style_dashed)
+line.new(bar_index - 50, target1,     bar_index + 20, target1,
+         color=color.new(color.green, 0), width=2, style=line.style_dashed)
+line.new(bar_index - 50, target2,     bar_index + 20, target2,
+         color=color.new(color.green,30), width=1, style=line.style_dashed)
+line.new(bar_index - 50, target3,     bar_index + 20, target3,
+         color=color.new(color.green,60), width=1, style=line.style_dotted)
+
+// Labels
+label.new(bar_index+1, entry_price, "Entry  $3.25",
+          color=color.blue,  textcolor=color.white, style=label.style_label_left, size=size.small)
+label.new(bar_index+1, stop_price,  "Stop   $2.95",
+          color=color.red,   textcolor=color.white, style=label.style_label_left, size=size.small)
+label.new(bar_index+1, target1,     "T1     $4.84",
+          color=color.green, textcolor=color.white, style=label.style_label_left, size=size.small)
+label.new(bar_index+1, target2,     "T2     $5.8226",
+          color=color.green, textcolor=color.white, style=label.style_label_left, size=size.small)
+label.new(bar_index+1, target3,     "T3     $7.4126",
+          color=color.green, textcolor=color.white, style=label.style_label_left, size=size.small)</textarea>
+  <button class="pine-copy-btn" onclick="copyPine('pine_LONG_0')">📋 Copy to Clipboard</button>
+  <span id="pine_LONG_0_copied" class="copied-msg" style="display:none">✓ Copied!</span>
+</div>
+  </div>
+
+  <div class="levels-grid">
+<div class="level-box">
+  <div class="level-label">Current Price</div>
+  <div class="level-value neutral">$3.25</div>
+</div>
+<div class="level-box">
+  <div class="level-label">Entry</div>
+  <div class="level-value blue">$3.25</div>
+</div>
+<div class="level-box">
+  <div class="level-label">Stop Loss</div>
+  <div class="level-value red">$2.95</div>
+</div>
+<div class="level-box">
+  <div class="level-label">Target T1</div>
+  <div class="level-value green">$4.84</div>
+</div>
+<div class="level-box">
+  <div class="level-label">T2 (Fib 161.8%)</div>
+  <div class="level-value green">$5.82</div>
+</div>
+<div class="level-box">
+  <div class="level-label">T3 (Fib 261.8%)</div>
+  <div class="level-value green">$7.41</div>
+</div>
+<div class="level-box">
+  <div class="level-label">R:R Ratio</div>
+  <div class="level-value green">1:5.36</div>
+</div>
+<div class="level-box">
+  <div class="level-label">RSI</div>
+  <div class="level-value green">29.7</div>
+</div>
+<div class="level-box">
+  <div class="level-label">Position $</div>
+  <div class="level-value neutral">$1,369</div>
+</div>
+  </div>
+
+  <div class="two-col">
+<div>
+  <h4>Profit / Loss Scenarios</h4>
+  <table class="scenario-table">
+    <tr><th>Scenario</th><th>Price</th><th>P&L</th><th>% Portfolio</th></tr>
+    <tr class="loss-row">
+      <td>Stop hit</td><td>$2.95</td>
+      <td>-$126.57</td><td class="red">-0.51%</td>
+    </tr>
+    <tr>
+      <td>Target T1</td><td>$4.84</td>
+      <td>+$670.82</td><td class="green">+2.68%</td>
+    </tr>
+    <tr>
+      <td>Target T2</td><td>$5.82</td>
+      <td>+$1084.28</td><td class="green">+4.34%</td>
+    </tr>
+    <tr>
+      <td>Target T3</td><td>$7.41</td>
+      <td>+$1755.1</td><td class="green">+7.02%</td>
+    </tr>
+  </table>
+</div>
+<div>
+  <h4>4-Week Compounding</h4>
+  <table class="scenario-table">
+    <tr><th>Week</th><th>Portfolio</th><th>Total Gain</th></tr>
+    
+            <tr>
+              <td>Week 1</td>
+              <td>$38,400.00</td>
+              <td class="green">+$13,400.00</td>
+            </tr>
+            <tr>
+              <td>Week 2</td>
+              <td>$58,982.40</td>
+              <td class="green">+$33,982.40</td>
+            </tr>
+            <tr>
+              <td>Week 3</td>
+              <td>$90,596.97</td>
+              <td class="green">+$65,596.97</td>
+            </tr>
+            <tr>
+              <td>Week 4</td>
+              <td>$139,156.95</td>
+              <td class="green">+$114,156.95</td>
+            </tr>
+  </table>
+</div>
+  </div>
+
+  <!-- Top-Down Filter Analysis -->
+  <div class="topdown-section">
+<div class="topdown-title">📊 Top-Down Filter Analysis (Cycles Trading)</div>
+<div class="topdown-grid">
+  <div class="td-box">
+    <div class="td-label">Monthly Trend</div>
+    <div class="td-badge td-bull">▲ LONG</div>
+    <div class="td-sub">BEAR (-6.4%)</div>
+  </div>
+  <div class="td-box">
+    <div class="td-label">Sector Relative Strength</div>
+    <div class="td-badge td-neut">—</div>
+    <div class="td-sub">N/A</div>
+  </div>
+  <div class="td-box">
+    <div class="td-label">Support Quality</div>
+    <div class="td-badge td-bull">STRONG</div>
+    <div class="td-sub">3 touches at level</div>
+  </div>
+</div>
+  </div>
+
+  <!-- Probability of Success -->
+  <div class="prob-section">
+<div class="prob-header">
+  <span class="prob-title">Estimated Success Probability (reach T1)</span>
+  <span class="prob-value" style="color:#d29922">66% &nbsp;<small style="font-size:13px;font-weight:500">MEDIUM</small></span>
+</div>
+<div class="prob-bar-bg">
+  <div class="prob-bar-fill" style="width:66%;background:#d29922"></div>
+</div>
+<div class="prob-factors">
+  <div class="prob-factor" title="RSI 29.7 — oversold bounce potential"><span class="fname">RSI</span><span class="fdelta" style="color:#3fb950">+5%</span></div><div class="prob-factor" title="R:R 1:5.36 — excellent room to target"><span class="fname">R:R Ratio</span><span class="fdelta" style="color:#3fb950">+14%</span></div><div class="prob-factor" title="Volume declining near level — accumulation signal"><span class="fname">Volume</span><span class="fdelta" style="color:#3fb950">+10%</span></div><div class="prob-factor" title="6.5% from key level — acceptable"><span class="fname">Entry Distance</span><span class="fdelta" style="color:#3fb950">+4%</span></div><div class="prob-factor" title="No earnings concern"><span class="fname">Earnings Risk</span><span class="fdelta" style="color:#3fb950">+5%</span></div><div class="prob-factor" title="Setup score 8.8 — high-quality signal"><span class="fname">Setup Quality</span><span class="fdelta" style="color:#3fb950">+8%</span></div><div class="prob-factor" title="Stop 9.2% away — wide"><span class="fname">Stop Distance</span><span class="fdelta" style="color:#8b949e">+0%</span></div><div class="prob-factor" title="Monthly trend LONG despite bearish candle (BEAR)"><span class="fname">Monthly Trend</span><span class="fdelta" style="color:#3fb950">+8%</span></div><div class="prob-factor" title="Support tested 3x — proven level"><span class="fname">Support Quality</span><span class="fdelta" style="color:#3fb950">+10%</span></div><div class="prob-factor" title="ATR 14.3% — extreme volatility"><span class="fname">Volatility (ATR)</span><span class="fdelta" style="color:#f85149">-18%</span></div><div class="prob-factor" title="Price 6.7% above support — entry less optimal"><span class="fname">Late Entry</span><span class="fdelta" style="color:#f85149">-8%</span></div><div class="prob-factor" title="MACD below signal line — weak LONG momentum"><span class="fname">MACD</span><span class="fdelta" style="color:#f85149">-6%</span></div><div class="prob-factor" title="Mid-band (%B=0.27) — neutral"><span class="fname">Bollinger Bands</span><span class="fdelta" style="color:#8b949e">+0%</span></div><div class="prob-factor" title="Level never broken to the other side — strong, reliable barrier"><span class="fname">Level Reliability</span><span class="fdelta" style="color:#3fb950">+10%</span></div><div class="prob-factor" title="8 competing levels nearby — unclear entry point (seek cleaner setup)"><span class="fname">Level Clarity</span><span class="fdelta" style="color:#f85149">-16%</span></div><div class="prob-factor" title="Price in golden Fibonacci zone (57% retracement) — ideal entry area 38.2%–61.8%"><span class="fname">Fib 57%: Golden Zone</span><span class="fdelta" style="color:#3fb950">+8%</span></div><div class="prob-factor" title="Last swing high not closed through — may be a correction; wait for weekly close confirmation before entering"><span class="fname">TrendConf: UNCONFIRMED</span><span class="fdelta" style="color:#f85149">-18%</span></div>
+</div>
+<div style="font-size:10px;color:#484f58;margin-top:8px">
+  * Algorithmic estimate based on 10 technical factors (incl. Monthly Trend, Sector RS, Support Quality). Not a guarantee. Always manage your risk.
+</div>
+  </div>
+
+</div>
+  <div class="watchlist-title">👁 Watchlist — LONG (Prob &lt; 65% — נצפה בלבד, אל תיכנס)</div>
+  
+<div class="card long-card" data-horizon="MONTHLY">
+  <div class="card-header">
+<div class="card-title">
+  <span class="ticker">GILD</span>
+  <span class="dir-badge long-badge">
+    ▲ LONG
+  </span>
+  <span class="horizon-badge" style="background:#58a6ff22;color:#58a6ff;border:1px solid #58a6ff66;"
+        title="~6.0 weeks to T1 · 3–6 שבועות">
+    📅 חודשי
+  </span>
+  <span class="type-badge">STOCK</span>
+</div>
+<div class="card-meta">
+  <span class="badge warn">⚠ Vol</span> <span class="badge ok">2026-08-06</span> <span class="badge ok">ATR 5.12%</span>  <span class="badge warn">MACD ▼</span>  
+  <a href="https://www.tradingview.com/chart/?symbol=NASDAQ:GILD&interval=W" target="_blank" class="tv-link">📊 TradingView</a>
+  <button class="pine-btn" onclick="showPine('pine_LONG_0')">📋 Pine Script</button>
+  <button class="colmex-btn" onclick="showColmex('pine_LONG_0_cmx')">💹 Trade on Colmex</button>
+</div>
+  </div>
+  
+  <!-- Position Sizing Box -->
+  <div class="pos-size-box">
+<div class="pos-size-title">💼 Position Sizing</div>
+<div class="pos-size-grid">
+  <div class="ps-cell">
+    <div class="ps-label">סיכון לעסקה</div>
+    <div class="ps-val">$236</div>
+    <div class="ps-sub">1% של התיק</div>
+  </div>
+  <div class="ps-cell">
+    <div class="ps-label">גודל פוזיציה</div>
+    <div class="ps-val" style="color:#d29922">$3,750</div>
+    <div class="ps-sub" style="color:#d29922">15.0% מהתיק — OK <span class="badge pos-capped">✂ Capped at 15% of portfolio</span></div>
+  </div>
+  <div class="ps-cell">
+    <div class="ps-label">כמות מניות</div>
+    <div class="ps-val">28.6</div>
+    <div class="ps-sub">@ $131.27</div>
+  </div>
+  <div class="ps-cell">
+    <div class="ps-label">מקסימום פוזיציות</div>
+    <div class="ps-val">6</div>
+    <div class="ps-sub">סה"כ בו זמנית</div>
+  </div>
+</div>
+<div class="ps-rule">📏 כלל: 1% סיכון × 6 פוזיציות = 6% חשיפה מקסימלית</div>
+  </div>
+  <!-- Fundamental Analysis Box (stock-analysis skill) -->
+  
+  <div class="fund-box" style="background:#0d2b0d;border:1px solid #3fb95044;">
+    <div class="fund-header">
+      <span class="fund-title">🔬 Fundamental Analysis</span>
+      <span class="fund-signal" style="color:#3fb950;border:1px solid #3fb95066;">📈 BUY &nbsp;·&nbsp; 75% confidence</span>
+    </div>
+    <div class="fund-grid">
+      <div class="fund-cell"><div class="fund-label">אנליסטים</div><div class="fund-val" style="color:#3fb950">Buy (27 analysts)</div></div>
+      <div class="fund-cell"><div class="fund-label">יעד מחיר</div><div class="fund-val">$157.67<span style="color:#3fb950;font-size:11px"> (+20.1%)</span></div></div>
+    </div>
+    <ul class="fund-bullets"><li>• Healthcare / Drug Manufacturers - General — $163.0B market cap</li><li>• Analyst target $157.67 → +20.1% upside</li><li>• Revenue growth: 4.4%</li></ul>
+    
+  </div>
+  <!-- Traffic Light Decision Box -->
+  <div class="tl-box" style="background:#2b0d0d;border:1px solid #f85149;">
+<div class="tl-signal">🔴 אל תיכנס</div>
+<div class="tl-lists">
+  <ul class="tl-green"><li>✅ Strong support level</li></ul>
+  <ul class="tl-red"><li>⚠ Sector RS: WEAK-</li><li>⚠ Monthly trend vs direction</li></ul>
+</div>
+  </div>
+  <!-- Colmex Trade Modal for GILD -->
+  <div id="pine_LONG_0_cmx" class="pine-modal" onclick="if(event.target===this)this.style.display='none'">
+<div class="pine-box cmx-box">
+  <div class="pine-header cmx-header">
+    <span>💹 ColmexPro Order — GILD (Long)</span>
+    <button class="pine-close" onclick="document.getElementById('pine_LONG_0_cmx').style.display='none'">✕</button>
+  </div>
+  <div class="cmx-instructions">
+    <div class="cmx-tip">💡 פתח ColmexPro בטאב נפרד והתחבר → חפש <b>GILD</b> → מלא לפי הטופס למטה</div>
+    
+  </div>
+
+  <!-- ColmexPro-style order form -->
+  <div class="cmx-form">
+    <div class="cmx-form-title">Order entry GILD</div>
+
+    <div class="cmx-field-row">
+      <span class="cmx-field-label">Symbol</span>
+      <div class="cmx-field-val">
+        <span class="cmx-eq-badge">EQ</span>
+        <b>GILD</b>
+      </div>
+      <button class="cmx-copy" onclick="copyText('GILD',this)">Copy</button>
+    </div>
+
+    <div class="cmx-field-row">
+      <span class="cmx-field-label">Side</span>
+      <div class="cmx-side-btns">
+        <span class="cmx-side-active cmx-side-buy">BUY</span>
+        <span class="cmx-side-inactive">Sell</span>
+      </div>
+      <button class="cmx-copy" onclick="copyText('BUY',this)">Copy</button>
+    </div>
+
+    <div class="cmx-field-row">
+      <span class="cmx-field-label">Quantity</span>
+      <div class="cmx-field-input">28.6</div>
+      <button class="cmx-copy" onclick="copyText('28.6',this)">Copy</button>
+    </div>
+
+    <div class="cmx-field-row">
+      <span class="cmx-field-label">Order type</span>
+      <div class="cmx-field-val">Limit</div>
+    </div>
+
+    <div class="cmx-field-row">
+      <span class="cmx-field-label">Validity</span>
+      <div class="cmx-field-val">GTC</div>
+    </div>
+
+    <div class="cmx-field-row">
+      <span class="cmx-field-label">Limit price</span>
+      <div class="cmx-field-input cmx-price-blue">131.27</div>
+      <button class="cmx-copy" onclick="copyText('131.27',this)">Copy</button>
+    </div>
+
+    <div class="cmx-field-row">
+      <span class="cmx-field-label">SL price</span>
+      <div class="cmx-field-input cmx-price-red">123.0</div>
+      <button class="cmx-copy" onclick="copyText('123.0',this)">Copy</button>
+    </div>
+
+    <div class="cmx-field-row">
+      <span class="cmx-field-label">TP price <small>(T1)</small></span>
+      <div class="cmx-field-input cmx-price-green">155.38</div>
+      <button class="cmx-copy" onclick="copyText('155.38',this)">Copy</button>
+    </div>
+
+    <div class="cmx-field-row cmx-fib-row">
+      <span class="cmx-field-label">TP <small>(T2 Fib)</small></span>
+      <div class="cmx-field-input cmx-price-green">170.28</div>
+      <button class="cmx-copy" onclick="copyText('170.28',this)">Copy</button>
+    </div>
+
+    <div class="cmx-field-row cmx-fib-row">
+      <span class="cmx-field-label">TP <small>(T3 Fib)</small></span>
+      <div class="cmx-field-input cmx-price-green">194.39</div>
+      <button class="cmx-copy" onclick="copyText('194.39',this)">Copy</button>
+    </div>
+
+    <div class="cmx-price-bar">
+      <span class="cmx-price-blue">131.27</span>
+      <span class="cmx-bar-mid">28.6 units · $3,750 · R:R 1:2.92</span>
+      <span class="cmx-price-green">155.38</span>
+    </div>
+
+    <a href="https://webplatform.colmex.com/" target="_blank" class="cmx-place-btn">
+      🟢 Place BUY Order
+    </a>
+  </div>
+</div>
+  </div>
+
+  <!-- Pine Script modal for GILD -->
+  <div id="pine_LONG_0" class="pine-modal" onclick="if(event.target===this)this.style.display='none'">
+<div class="pine-box">
+  <div class="pine-header">
+    <span>📋 Pine Script — GILD LONG ▲</span>
+    <button class="pine-close" onclick="document.getElementById('pine_LONG_0').style.display='none'">✕</button>
+  </div>
+  <div class="pine-instructions">
+    <b>How to use:</b>&nbsp; 1. Open TradingView &nbsp;→&nbsp;
+    2. Open <b>GILD</b> chart, Weekly (1W) &nbsp;→&nbsp;
+    3. Click <b>Pine Editor</b> at the bottom &nbsp;→&nbsp;
+    4. Paste the code below &nbsp;→&nbsp; Click <b>"Add to chart"</b><br>
+    → Entry (blue), Stop (red), T1/T2/T3 (green) lines appear automatically.
+  </div>
+  <textarea id="pine_LONG_0_code" class="pine-code" readonly>//@version=5
+indicator("Cycles: GILD", overlay=true, max_lines_count=100)
+// ─── HOW TO USE ───────────────────────────────────────────
+// 1. Open this stock/coin chart on TradingView (Weekly 1W)
+// 2. Click Pine Editor at the bottom
+// 3. Paste this code and click "Add to chart"
+// 4. Entry / Stop / Target lines appear automatically
+
+// LONG  ▲  GILD
+// Entry : 131.27  |  Stop: 123.0  |  R:R: 2.92
+
+entry_price  = 131.27
+stop_price   = 123.0
+target1      = 155.38
+target2      = 170.28
+target3      = 194.39
+
+// Draw horizontal lines
+line.new(bar_index - 50, entry_price, bar_index + 20, entry_price,
+         color=color.new(color.blue,  0), width=2, style=line.style_solid)
+line.new(bar_index - 50, stop_price,  bar_index + 20, stop_price,
+         color=color.new(color.red,   0), width=2, style=line.style_dashed)
+line.new(bar_index - 50, target1,     bar_index + 20, target1,
+         color=color.new(color.green, 0), width=2, style=line.style_dashed)
+line.new(bar_index - 50, target2,     bar_index + 20, target2,
+         color=color.new(color.green,30), width=1, style=line.style_dashed)
+line.new(bar_index - 50, target3,     bar_index + 20, target3,
+         color=color.new(color.green,60), width=1, style=line.style_dotted)
+
+// Labels
+label.new(bar_index+1, entry_price, "Entry  $131.27",
+          color=color.blue,  textcolor=color.white, style=label.style_label_left, size=size.small)
+label.new(bar_index+1, stop_price,  "Stop   $123.0",
+          color=color.red,   textcolor=color.white, style=label.style_label_left, size=size.small)
+label.new(bar_index+1, target1,     "T1     $155.38",
+          color=color.green, textcolor=color.white, style=label.style_label_left, size=size.small)
+label.new(bar_index+1, target2,     "T2     $170.28",
+          color=color.green, textcolor=color.white, style=label.style_label_left, size=size.small)
+label.new(bar_index+1, target3,     "T3     $194.39",
+          color=color.green, textcolor=color.white, style=label.style_label_left, size=size.small)</textarea>
+  <button class="pine-copy-btn" onclick="copyPine('pine_LONG_0')">📋 Copy to Clipboard</button>
+  <span id="pine_LONG_0_copied" class="copied-msg" style="display:none">✓ Copied!</span>
+</div>
+  </div>
+
+  <div class="levels-grid">
+<div class="level-box">
+  <div class="level-label">Current Price</div>
+  <div class="level-value neutral">$131.27</div>
+</div>
+<div class="level-box">
+  <div class="level-label">Entry</div>
+  <div class="level-value blue">$131.27</div>
+</div>
+<div class="level-box">
+  <div class="level-label">Stop Loss</div>
+  <div class="level-value red">$123.0</div>
+</div>
+<div class="level-box">
+  <div class="level-label">Target T1</div>
+  <div class="level-value green">$155.38</div>
+</div>
+<div class="level-box">
+  <div class="level-label">T2 (Fib 161.8%)</div>
+  <div class="level-value green">$170.28</div>
+</div>
+<div class="level-box">
+  <div class="level-label">T3 (Fib 261.8%)</div>
+  <div class="level-value green">$194.39</div>
+</div>
+<div class="level-box">
+  <div class="level-label">R:R Ratio</div>
+  <div class="level-value green">1:2.92</div>
+</div>
+<div class="level-box">
+  <div class="level-label">RSI</div>
+  <div class="level-value neutral">47.4</div>
+</div>
+<div class="level-box">
+  <div class="level-label">Position $</div>
+  <div class="level-value neutral">$3,750</div>
+</div>
+  </div>
+
+  <div class="two-col">
+<div>
+  <h4>Profit / Loss Scenarios</h4>
+  <table class="scenario-table">
+    <tr><th>Scenario</th><th>Price</th><th>P&L</th><th>% Portfolio</th></tr>
+    <tr class="loss-row">
+      <td>Stop hit</td><td>$123.0</td>
+      <td>-$236.52</td><td class="red">-0.95%</td>
+    </tr>
+    <tr>
+      <td>Target T1</td><td>$155.38</td>
+      <td>+$689.55</td><td class="green">+2.76%</td>
+    </tr>
+    <tr>
+      <td>Target T2</td><td>$170.28</td>
+      <td>+$1115.69</td><td class="green">+4.46%</td>
+    </tr>
+    <tr>
+      <td>Target T3</td><td>$194.39</td>
+      <td>+$1805.23</td><td class="green">+7.22%</td>
+    </tr>
+  </table>
+</div>
+<div>
+  <h4>4-Week Compounding</h4>
+  <table class="scenario-table">
+    <tr><th>Week</th><th>Portfolio</th><th>Total Gain</th></tr>
+    
+            <tr>
+              <td>Week 1</td>
+              <td>$32,300.00</td>
+              <td class="green">+$7,300.00</td>
+            </tr>
+            <tr>
+              <td>Week 2</td>
+              <td>$41,731.60</td>
+              <td class="green">+$16,731.60</td>
+            </tr>
+            <tr>
+              <td>Week 3</td>
+              <td>$53,917.23</td>
+              <td class="green">+$28,917.23</td>
+            </tr>
+            <tr>
+              <td>Week 4</td>
+              <td>$69,661.06</td>
+              <td class="green">+$44,661.06</td>
+            </tr>
+  </table>
+</div>
+  </div>
+
+  <!-- Top-Down Filter Analysis -->
+  <div class="topdown-section">
+<div class="topdown-title">📊 Top-Down Filter Analysis (Cycles Trading)</div>
+<div class="topdown-grid">
+  <div class="td-box">
+    <div class="td-label">Monthly Trend</div>
+    <div class="td-badge td-bull">▲ LONG</div>
+    <div class="td-sub">BEAR (-5.7%)</div>
+  </div>
+  <div class="td-box">
+    <div class="td-label">Sector Relative Strength</div>
+    <div class="td-badge td-bear">WEAK− (-5.2%)</div>
+    <div class="td-sub">vs XLV · UP</div>
+  </div>
+  <div class="td-box">
+    <div class="td-label">Support Quality</div>
+    <div class="td-badge td-bull">STRONG</div>
+    <div class="td-sub">7 touches at level</div>
+  </div>
+</div>
+  </div>
+
+  <!-- Probability of Success -->
+  <div class="prob-section">
+<div class="prob-header">
+  <span class="prob-title">Estimated Success Probability (reach T1)</span>
+  <span class="prob-value" style="color:#f85149">47% &nbsp;<small style="font-size:13px;font-weight:500">LOW</small></span>
+</div>
+<div class="prob-bar-bg">
+  <div class="prob-bar-fill" style="width:47%;background:#f85149"></div>
+</div>
+<div class="prob-factors">
+  <div class="prob-factor" title="RSI 47.4 — ideal pullback zone (30–50)"><span class="fname">RSI</span><span class="fdelta" style="color:#3fb950">+16%</span></div><div class="prob-factor" title="R:R 1:2.92 — solid"><span class="fname">R:R Ratio</span><span class="fdelta" style="color:#3fb950">+6%</span></div><div class="prob-factor" title="Volume not declining — less conviction"><span class="fname">Volume</span><span class="fdelta" style="color:#f85149">-6%</span></div><div class="prob-factor" title="3.4% from key level — good entry"><span class="fname">Entry Distance</span><span class="fdelta" style="color:#3fb950">+9%</span></div><div class="prob-factor" title="Next earnings: 2026-08-06 — safe window"><span class="fname">Earnings Risk</span><span class="fdelta" style="color:#3fb950">+3%</span></div><div class="prob-factor" title="Setup score 3.7 — average"><span class="fname">Setup Quality</span><span class="fdelta" style="color:#3fb950">+1%</span></div><div class="prob-factor" title="Stop 6.3% away — normal"><span class="fname">Stop Distance</span><span class="fdelta" style="color:#3fb950">+3%</span></div><div class="prob-factor" title="Monthly trend LONG despite bearish candle (BEAR)"><span class="fname">Monthly Trend</span><span class="fdelta" style="color:#3fb950">+8%</span></div><div class="prob-factor" title="Stock significantly weaker — avoid"><span class="fname">Sector RS</span><span class="fdelta" style="color:#f85149">-18%</span></div><div class="prob-factor" title="Support tested 7x — proven level"><span class="fname">Support Quality</span><span class="fdelta" style="color:#3fb950">+10%</span></div><div class="prob-factor" title="ATR 5.1% — normal volatility"><span class="fname">Volatility (ATR)</span><span class="fdelta" style="color:#8b949e">+0%</span></div><div class="prob-factor" title="Analyst BUY (conf 75%) — Buy (27 analysts), target $157.66667"><span class="fname">Fundamentals</span><span class="fdelta" style="color:#3fb950">+15%</span></div><div class="prob-factor" title="MACD below signal line — weak LONG momentum"><span class="fname">MACD</span><span class="fdelta" style="color:#f85149">-6%</span></div><div class="prob-factor" title="Mid-band (%B=0.39) — neutral"><span class="fname">Bollinger Bands</span><span class="fdelta" style="color:#8b949e">+0%</span></div><div class="prob-factor" title="Level broken both directions — market never respected it"><span class="fname">Level Reliability</span><span class="fdelta" style="color:#f85149">-18%</span></div><div class="prob-factor" title="5 competing levels nearby — unclear entry point (seek cleaner setup)"><span class="fname">Level Clarity</span><span class="fdelta" style="color:#f85149">-16%</span></div><div class="prob-factor" title="Price in golden Fibonacci zone (48% retracement) — ideal entry area 38.2%–61.8%"><span class="fname">Fib 48%: Golden Zone</span><span class="fdelta" style="color:#3fb950">+8%</span></div><div class="prob-factor" title="Last swing high not closed through — may be a correction; wait for weekly close confirmation before entering"><span class="fname">TrendConf: UNCONFIRMED</span><span class="fdelta" style="color:#f85149">-18%</span></div>
+</div>
+<div style="font-size:10px;color:#484f58;margin-top:8px">
+  * Algorithmic estimate based on 10 technical factors (incl. Monthly Trend, Sector RS, Support Quality). Not a guarantee. Always manage your risk.
+</div>
+  </div>
+
+</div>
+<div class="card long-card" data-horizon="WEEKLY">
+  <div class="card-header">
+<div class="card-title">
+  <span class="ticker">DIOD</span>
+  <span class="dir-badge long-badge">
+    ▲ LONG
+  </span>
+  <span class="horizon-badge" style="background:#3fb95022;color:#3fb950;border:1px solid #3fb95066;"
+        title="~2.4 weeks to T1 · 1–2 שבועות">
+    ⚡ שבועי
+  </span>
+  <span class="type-badge">STOCK</span>
+</div>
+<div class="card-meta">
+  <span class="badge warn">⚠ Vol</span> <span class="badge ok">2026-08-06</span> <span class="badge atr-high">🔥 ATR 15.8%</span> <span class="badge late-entry">⚡ LATE +5.7% from level</span> <span class="badge macd-bear">💀 MACD Death Cross</span>  
+  <a href="https://www.tradingview.com/chart/?symbol=NASDAQ:DIOD&interval=W" target="_blank" class="tv-link">📊 TradingView</a>
+  <button class="pine-btn" onclick="showPine('pine_LONG_1')">📋 Pine Script</button>
+  <button class="colmex-btn" onclick="showColmex('pine_LONG_1_cmx')">💹 Trade on Colmex</button>
+</div>
+  </div>
+  
+  <!-- Position Sizing Box -->
+  <div class="pos-size-box">
+<div class="pos-size-title">💼 Position Sizing</div>
+<div class="pos-size-grid">
+  <div class="ps-cell">
+    <div class="ps-label">סיכון לעסקה</div>
+    <div class="ps-val">$125</div>
+    <div class="ps-sub">1% של התיק (×0.5 — High Vol)</div>
+  </div>
+  <div class="ps-cell">
+    <div class="ps-label">גודל פוזיציה</div>
+    <div class="ps-val" style="color:#3fb950">$1,511</div>
+    <div class="ps-sub" style="color:#3fb950">6.0% מהתיק — SAFE </div>
+  </div>
+  <div class="ps-cell">
+    <div class="ps-label">כמות מניות</div>
+    <div class="ps-val">15.7</div>
+    <div class="ps-sub">@ $96.25</div>
+  </div>
+  <div class="ps-cell">
+    <div class="ps-label">מקסימום פוזיציות</div>
+    <div class="ps-val">6</div>
+    <div class="ps-sub">סה"כ בו זמנית</div>
+  </div>
+</div>
+<div class="ps-rule">📏 כלל: 1% סיכון × 6 פוזיציות = 6% חשיפה מקסימלית</div>
+  </div>
+  <!-- Fundamental Analysis Box (stock-analysis skill) -->
+  
+  <div class="fund-box" style="background:#2b1f0d;border:1px solid #d2992244;">
+    <div class="fund-header">
+      <span class="fund-title">🔬 Fundamental Analysis</span>
+      <span class="fund-signal" style="color:#d29922;border:1px solid #d2992266;">⏸ HOLD &nbsp;·&nbsp; 50% confidence</span>
+    </div>
+    <div class="fund-grid">
+      <div class="fund-cell"><div class="fund-label">אנליסטים</div><div class="fund-val" style="color:#d29922">None (2 analysts)</div></div>
+      <div class="fund-cell"><div class="fund-label">יעד מחיר</div><div class="fund-val">$129.50<span style="color:#3fb950;font-size:11px"> (+34.5%)</span></div></div>
+    </div>
+    <ul class="fund-bullets"><li>• Technology / Semiconductors — $4.4B market cap</li><li>• Analyst target $129.50 → +34.5% upside</li><li>• Revenue growth: 22.1%</li></ul>
+    <ul class="fund-caveats"><li>⚠ High P/E: 52x</li></ul>
+  </div>
+  <!-- Traffic Light Decision Box -->
+  <div class="tl-box" style="background:#2b0d0d;border:1px solid #f85149;">
+<div class="tl-signal">🔴 אל תיכנס</div>
+<div class="tl-lists">
+  
+  <ul class="tl-red"><li>⚠ High Volatility ATR 15.8%</li><li>⚠ Monthly trend vs direction</li></ul>
+</div>
+  </div>
+  <!-- Colmex Trade Modal for DIOD -->
+  <div id="pine_LONG_1_cmx" class="pine-modal" onclick="if(event.target===this)this.style.display='none'">
+<div class="pine-box cmx-box">
+  <div class="pine-header cmx-header">
+    <span>💹 ColmexPro Order — DIOD (Long)</span>
+    <button class="pine-close" onclick="document.getElementById('pine_LONG_1_cmx').style.display='none'">✕</button>
+  </div>
+  <div class="cmx-instructions">
+    <div class="cmx-tip">💡 פתח ColmexPro בטאב נפרד והתחבר → חפש <b>DIOD</b> → מלא לפי הטופס למטה</div>
+    
+  </div>
+
+  <!-- ColmexPro-style order form -->
+  <div class="cmx-form">
+    <div class="cmx-form-title">Order entry DIOD</div>
+
+    <div class="cmx-field-row">
+      <span class="cmx-field-label">Symbol</span>
+      <div class="cmx-field-val">
+        <span class="cmx-eq-badge">EQ</span>
+        <b>DIOD</b>
+      </div>
+      <button class="cmx-copy" onclick="copyText('DIOD',this)">Copy</button>
+    </div>
+
+    <div class="cmx-field-row">
+      <span class="cmx-field-label">Side</span>
+      <div class="cmx-side-btns">
+        <span class="cmx-side-active cmx-side-buy">BUY</span>
+        <span class="cmx-side-inactive">Sell</span>
+      </div>
+      <button class="cmx-copy" onclick="copyText('BUY',this)">Copy</button>
+    </div>
+
+    <div class="cmx-field-row">
+      <span class="cmx-field-label">Quantity</span>
+      <div class="cmx-field-input">15.7</div>
+      <button class="cmx-copy" onclick="copyText('15.7',this)">Copy</button>
+    </div>
+
+    <div class="cmx-field-row">
+      <span class="cmx-field-label">Order type</span>
+      <div class="cmx-field-val">Limit</div>
+    </div>
+
+    <div class="cmx-field-row">
+      <span class="cmx-field-label">Validity</span>
+      <div class="cmx-field-val">GTC</div>
+    </div>
+
+    <div class="cmx-field-row">
+      <span class="cmx-field-label">Limit price</span>
+      <div class="cmx-field-input cmx-price-blue">96.25</div>
+      <button class="cmx-copy" onclick="copyText('96.25',this)">Copy</button>
+    </div>
+
+    <div class="cmx-field-row">
+      <span class="cmx-field-label">SL price</span>
+      <div class="cmx-field-input cmx-price-red">88.29</div>
+      <button class="cmx-copy" onclick="copyText('88.29',this)">Copy</button>
+    </div>
+
+    <div class="cmx-field-row">
+      <span class="cmx-field-label">TP price <small>(T1)</small></span>
+      <div class="cmx-field-input cmx-price-green">117.8</div>
+      <button class="cmx-copy" onclick="copyText('117.8',this)">Copy</button>
+    </div>
+
+    <div class="cmx-field-row cmx-fib-row">
+      <span class="cmx-field-label">TP <small>(T2 Fib)</small></span>
+      <div class="cmx-field-input cmx-price-green">131.12</div>
+      <button class="cmx-copy" onclick="copyText('131.12',this)">Copy</button>
+    </div>
+
+    <div class="cmx-field-row cmx-fib-row">
+      <span class="cmx-field-label">TP <small>(T3 Fib)</small></span>
+      <div class="cmx-field-input cmx-price-green">152.67</div>
+      <button class="cmx-copy" onclick="copyText('152.67',this)">Copy</button>
+    </div>
+
+    <div class="cmx-price-bar">
+      <span class="cmx-price-blue">96.25</span>
+      <span class="cmx-bar-mid">15.7 units · $1,511 · R:R 1:2.71</span>
+      <span class="cmx-price-green">117.8</span>
+    </div>
+
+    <a href="https://webplatform.colmex.com/" target="_blank" class="cmx-place-btn">
+      🟢 Place BUY Order
+    </a>
+  </div>
+</div>
+  </div>
+
+  <!-- Pine Script modal for DIOD -->
+  <div id="pine_LONG_1" class="pine-modal" onclick="if(event.target===this)this.style.display='none'">
+<div class="pine-box">
+  <div class="pine-header">
+    <span>📋 Pine Script — DIOD LONG ▲</span>
+    <button class="pine-close" onclick="document.getElementById('pine_LONG_1').style.display='none'">✕</button>
+  </div>
+  <div class="pine-instructions">
+    <b>How to use:</b>&nbsp; 1. Open TradingView &nbsp;→&nbsp;
+    2. Open <b>DIOD</b> chart, Weekly (1W) &nbsp;→&nbsp;
+    3. Click <b>Pine Editor</b> at the bottom &nbsp;→&nbsp;
+    4. Paste the code below &nbsp;→&nbsp; Click <b>"Add to chart"</b><br>
+    → Entry (blue), Stop (red), T1/T2/T3 (green) lines appear automatically.
+  </div>
+  <textarea id="pine_LONG_1_code" class="pine-code" readonly>//@version=5
+indicator("Cycles: DIOD", overlay=true, max_lines_count=100)
+// ─── HOW TO USE ───────────────────────────────────────────
+// 1. Open this stock/coin chart on TradingView (Weekly 1W)
+// 2. Click Pine Editor at the bottom
+// 3. Paste this code and click "Add to chart"
+// 4. Entry / Stop / Target lines appear automatically
+
+// LONG  ▲  DIOD
+// Entry : 96.25  |  Stop: 88.29  |  R:R: 2.71
+
+entry_price  = 96.25
+stop_price   = 88.29
+target1      = 117.8
+target2      = 131.1179
+target3      = 152.6679
+
+// Draw horizontal lines
+line.new(bar_index - 50, entry_price, bar_index + 20, entry_price,
+         color=color.new(color.blue,  0), width=2, style=line.style_solid)
+line.new(bar_index - 50, stop_price,  bar_index + 20, stop_price,
+         color=color.new(color.red,   0), width=2, style=line.style_dashed)
+line.new(bar_index - 50, target1,     bar_index + 20, target1,
+         color=color.new(color.green, 0), width=2, style=line.style_dashed)
+line.new(bar_index - 50, target2,     bar_index + 20, target2,
+         color=color.new(color.green,30), width=1, style=line.style_dashed)
+line.new(bar_index - 50, target3,     bar_index + 20, target3,
+         color=color.new(color.green,60), width=1, style=line.style_dotted)
+
+// Labels
+label.new(bar_index+1, entry_price, "Entry  $96.25",
+          color=color.blue,  textcolor=color.white, style=label.style_label_left, size=size.small)
+label.new(bar_index+1, stop_price,  "Stop   $88.29",
+          color=color.red,   textcolor=color.white, style=label.style_label_left, size=size.small)
+label.new(bar_index+1, target1,     "T1     $117.8",
+          color=color.green, textcolor=color.white, style=label.style_label_left, size=size.small)
+label.new(bar_index+1, target2,     "T2     $131.1179",
+          color=color.green, textcolor=color.white, style=label.style_label_left, size=size.small)
+label.new(bar_index+1, target3,     "T3     $152.6679",
+          color=color.green, textcolor=color.white, style=label.style_label_left, size=size.small)</textarea>
+  <button class="pine-copy-btn" onclick="copyPine('pine_LONG_1')">📋 Copy to Clipboard</button>
+  <span id="pine_LONG_1_copied" class="copied-msg" style="display:none">✓ Copied!</span>
+</div>
+  </div>
+
+  <div class="levels-grid">
+<div class="level-box">
+  <div class="level-label">Current Price</div>
+  <div class="level-value neutral">$96.25</div>
+</div>
+<div class="level-box">
+  <div class="level-label">Entry</div>
+  <div class="level-value blue">$96.25</div>
+</div>
+<div class="level-box">
+  <div class="level-label">Stop Loss</div>
+  <div class="level-value red">$88.29</div>
+</div>
+<div class="level-box">
+  <div class="level-label">Target T1</div>
+  <div class="level-value green">$117.8</div>
+</div>
+<div class="level-box">
+  <div class="level-label">T2 (Fib 161.8%)</div>
+  <div class="level-value green">$131.12</div>
+</div>
+<div class="level-box">
+  <div class="level-label">T3 (Fib 261.8%)</div>
+  <div class="level-value green">$152.67</div>
+</div>
+<div class="level-box">
+  <div class="level-label">R:R Ratio</div>
+  <div class="level-value green">1:2.71</div>
+</div>
+<div class="level-box">
+  <div class="level-label">RSI</div>
+  <div class="level-value neutral">63.2</div>
+</div>
+<div class="level-box">
+  <div class="level-label">Position $</div>
+  <div class="level-value neutral">$1,511</div>
+</div>
+  </div>
+
+  <div class="two-col">
+<div>
+  <h4>Profit / Loss Scenarios</h4>
+  <table class="scenario-table">
+    <tr><th>Scenario</th><th>Price</th><th>P&L</th><th>% Portfolio</th></tr>
+    <tr class="loss-row">
+      <td>Stop hit</td><td>$88.29</td>
+      <td>-$124.97</td><td class="red">-0.5%</td>
+    </tr>
+    <tr>
+      <td>Target T1</td><td>$117.8</td>
+      <td>+$338.33</td><td class="green">+1.35%</td>
+    </tr>
+    <tr>
+      <td>Target T2</td><td>$131.12</td>
+      <td>+$547.46</td><td class="green">+2.19%</td>
+    </tr>
+    <tr>
+      <td>Target T3</td><td>$152.67</td>
+      <td>+$885.79</td><td class="green">+3.54%</td>
+    </tr>
+  </table>
+</div>
+<div>
+  <h4>4-Week Compounding</h4>
+  <table class="scenario-table">
+    <tr><th>Week</th><th>Portfolio</th><th>Total Gain</th></tr>
+    
+            <tr>
+              <td>Week 1</td>
+              <td>$31,775.00</td>
+              <td class="green">+$6,775.00</td>
+            </tr>
+            <tr>
+              <td>Week 2</td>
+              <td>$40,386.03</td>
+              <td class="green">+$15,386.03</td>
+            </tr>
+            <tr>
+              <td>Week 3</td>
+              <td>$51,330.64</td>
+              <td class="green">+$26,330.64</td>
+            </tr>
+            <tr>
+              <td>Week 4</td>
+              <td>$65,241.24</td>
+              <td class="green">+$40,241.24</td>
+            </tr>
+  </table>
+</div>
+  </div>
+
+  <!-- Top-Down Filter Analysis -->
+  <div class="topdown-section">
+<div class="topdown-title">📊 Top-Down Filter Analysis (Cycles Trading)</div>
+<div class="topdown-grid">
+  <div class="td-box">
+    <div class="td-label">Monthly Trend</div>
+    <div class="td-badge td-bull">▲ LONG</div>
+    <div class="td-sub">BULL (+5.7%)</div>
+  </div>
+  <div class="td-box">
+    <div class="td-label">Sector Relative Strength</div>
+    <div class="td-badge td-neut">—</div>
+    <div class="td-sub">N/A</div>
+  </div>
+  <div class="td-box">
+    <div class="td-label">Support Quality</div>
+    <div class="td-badge td-warn">WEAK</div>
+    <div class="td-sub">1 touch at level</div>
+  </div>
+</div>
+  </div>
+
+  <!-- Probability of Success -->
+  <div class="prob-section">
+<div class="prob-header">
+  <span class="prob-title">Estimated Success Probability (reach T1)</span>
+  <span class="prob-value" style="color:#f85149">15% &nbsp;<small style="font-size:13px;font-weight:500">LOW</small></span>
+</div>
+<div class="prob-bar-bg">
+  <div class="prob-bar-fill" style="width:15%;background:#f85149"></div>
+</div>
+<div class="prob-factors">
+  <div class="prob-factor" title="RSI 63.2 — elevated, less room to run"><span class="fname">RSI</span><span class="fdelta" style="color:#f85149">-8%</span></div><div class="prob-factor" title="R:R 1:2.71 — solid"><span class="fname">R:R Ratio</span><span class="fdelta" style="color:#3fb950">+6%</span></div><div class="prob-factor" title="Volume not declining — less conviction"><span class="fname">Volume</span><span class="fdelta" style="color:#f85149">-6%</span></div><div class="prob-factor" title="5.4% from key level — acceptable"><span class="fname">Entry Distance</span><span class="fdelta" style="color:#3fb950">+4%</span></div><div class="prob-factor" title="Next earnings: 2026-08-06 — safe window"><span class="fname">Earnings Risk</span><span class="fdelta" style="color:#3fb950">+3%</span></div><div class="prob-factor" title="Setup score 3.0 — average"><span class="fname">Setup Quality</span><span class="fdelta" style="color:#3fb950">+1%</span></div><div class="prob-factor" title="Stop 8.3% away — wide"><span class="fname">Stop Distance</span><span class="fdelta" style="color:#8b949e">+0%</span></div><div class="prob-factor" title="Monthly trend LONG, last candle BULL — full alignment"><span class="fname">Monthly Trend</span><span class="fdelta" style="color:#3fb950">+18%</span></div><div class="prob-factor" title="Support tested once — unproven"><span class="fname">Support Quality</span><span class="fdelta" style="color:#f85149">-8%</span></div><div class="prob-factor" title="ATR 15.8% — extreme volatility"><span class="fname">Volatility (ATR)</span><span class="fdelta" style="color:#f85149">-18%</span></div><div class="prob-factor" title="Price 5.7% above support — entry less optimal"><span class="fname">Late Entry</span><span class="fdelta" style="color:#f85149">-8%</span></div><div class="prob-factor" title="Analyst HOLD — None (2 analysts)"><span class="fname">Fundamentals</span><span class="fdelta" style="color:#8b949e">+0%</span></div><div class="prob-factor" title="MACD Death Cross — conflicts with LONG"><span class="fname">MACD</span><span class="fdelta" style="color:#f85149">-12%</span></div><div class="prob-factor" title="Mid-band (%B=0.58) — neutral"><span class="fname">Bollinger Bands</span><span class="fdelta" style="color:#8b949e">+0%</span></div><div class="prob-factor" title="False breakout — wick through level but no weekly close (N.M.S. criteria)"><span class="fname">Level Reliability</span><span class="fdelta" style="color:#f85149">-12%</span></div><div class="prob-factor" title="4 competing levels nearby — unclear entry point (seek cleaner setup)"><span class="fname">Level Clarity</span><span class="fdelta" style="color:#f85149">-16%</span></div><div class="prob-factor" title="Shallow retracement (36%) — price hasn't pulled back to fib levels yet; consider waiting"><span class="fname">Fib 36%: Shallow</span><span class="fdelta" style="color:#8b949e">+0%</span></div><div class="prob-factor" title="Trend structure confirmed — last swing high closed through"><span class="fname">TrendConf: CONFIRMED</span><span class="fdelta" style="color:#3fb950">+10%</span></div>
+</div>
+<div style="font-size:10px;color:#484f58;margin-top:8px">
+  * Algorithmic estimate based on 10 technical factors (incl. Monthly Trend, Sector RS, Support Quality). Not a guarantee. Always manage your risk.
+</div>
+  </div>
+
+</div>
+</div>
+
+<div class="section">
+  <div class="section-title short">▼ SHORT SETUPS &nbsp;
+    <span style="font-size:13px;font-weight:400;color:#8b949e">3 קח / 4 Watchlist</span>
+  </div>
+  
+<div class="card short-card" data-horizon="MONTHLY">
+  <div class="card-header">
+<div class="card-title">
+  <span class="ticker">GTLB</span>
+  <span class="dir-badge short-badge">
+    ▼ SHORT
+  </span>
+  <span class="horizon-badge" style="background:#58a6ff22;color:#58a6ff;border:1px solid #58a6ff66;"
+        title="~5.7 weeks to T1 · 3–6 שבועות">
+    📅 חודשי
+  </span>
+  <span class="type-badge">STOCK</span>
+</div>
+<div class="card-meta">
+  <span class="badge ok">✓ Vol OK</span> <span class="badge ok">2026-09-02</span> <span class="badge atr-high">🔥 ATR 12.12%</span> <span class="badge late-entry">⚡ LATE +5.8% from level</span> <span class="badge ok">MACD ▲</span> <span class="badge boll-high">⚠ Upper Band (0.96)</span> <span class="badge squeeze-med">⚠ Squeeze Risk — Short 12.5% / Inst 86.6%</span>
+  <a href="https://www.tradingview.com/chart/?symbol=NASDAQ:GTLB&interval=W" target="_blank" class="tv-link">📊 TradingView</a>
+  <button class="pine-btn" onclick="showPine('pine_SHORT_0')">📋 Pine Script</button>
+  <button class="colmex-btn" onclick="showColmex('pine_SHORT_0_cmx')">💹 Trade on Colmex</button>
+</div>
+  </div>
+  
+  <div class="squeeze-box medium">
+<strong>⚠ Squeeze Risk — MEDIUM</strong><br>
+Short Interest: <b>12.5%</b> &nbsp;|&nbsp; Institutional Ownership: <b>86.6%</b><br>
+<span style="color:#e6edf3">Elevated short interest. Manage position size carefully.</span>
+  </div>
+  <!-- Position Sizing Box -->
+  <div class="pos-size-box">
+<div class="pos-size-title">💼 Position Sizing</div>
+<div class="pos-size-grid">
+  <div class="ps-cell">
+    <div class="ps-label">סיכון לעסקה</div>
+    <div class="ps-val">$125</div>
+    <div class="ps-sub">1% של התיק (×0.5 — High Vol)</div>
+  </div>
+  <div class="ps-cell">
+    <div class="ps-label">גודל פוזיציה</div>
+    <div class="ps-val" style="color:#3fb950">$1,331</div>
+    <div class="ps-sub" style="color:#3fb950">5.3% מהתיק — SAFE </div>
+  </div>
+  <div class="ps-cell">
+    <div class="ps-label">כמות מניות</div>
+    <div class="ps-val">41.5</div>
+    <div class="ps-sub">@ $32.07</div>
+  </div>
+  <div class="ps-cell">
+    <div class="ps-label">מקסימום פוזיציות</div>
+    <div class="ps-val">6</div>
+    <div class="ps-sub">סה"כ בו זמנית</div>
+  </div>
+</div>
+<div class="ps-rule">📏 כלל: 1% סיכון × 6 פוזיציות = 6% חשיפה מקסימלית</div>
+  </div>
+  <!-- Fundamental Analysis Box (stock-analysis skill) -->
+  
+  <div class="fund-box" style="background:#2b1f0d;border:1px solid #d2992244;">
+    <div class="fund-header">
+      <span class="fund-title">🔬 Fundamental Analysis</span>
+      <span class="fund-signal" style="color:#d29922;border:1px solid #d2992266;">⏸ HOLD &nbsp;·&nbsp; 55% confidence</span>
+    </div>
+    <div class="fund-grid">
+      <div class="fund-cell"><div class="fund-label">אנליסטים</div><div class="fund-val" style="color:#d29922">Hold (23 analysts)</div></div>
+      <div class="fund-cell"><div class="fund-label">יעד מחיר</div><div class="fund-val">$33.61<span style="color:#3fb950;font-size:11px"> (+4.8%)</span></div></div>
+    </div>
+    <ul class="fund-bullets"><li>• Technology / Software - Infrastructure — $5.4B market cap</li><li>• Analyst target $33.61 → +4.8% upside</li><li>• Revenue growth: 23.1%</li></ul>
+    
+  </div>
+  <!-- Traffic Light Decision Box -->
+  <div class="tl-box" style="background:#2b1f0d;border:1px solid #d29922;">
+<div class="tl-signal">🟡 שקול בזהירות</div>
+<div class="tl-lists">
+  
+  <ul class="tl-red"><li>⚠ High Volatility ATR 12.12%</li></ul>
+</div>
+  </div>
+  <!-- Colmex Trade Modal for GTLB -->
+  <div id="pine_SHORT_0_cmx" class="pine-modal" onclick="if(event.target===this)this.style.display='none'">
+<div class="pine-box cmx-box">
+  <div class="pine-header cmx-header">
+    <span>💹 ColmexPro Order — GTLB (Short)</span>
+    <button class="pine-close" onclick="document.getElementById('pine_SHORT_0_cmx').style.display='none'">✕</button>
+  </div>
+  <div class="cmx-instructions">
+    <div class="cmx-tip">💡 פתח ColmexPro בטאב נפרד והתחבר → חפש <b>GTLB</b> → מלא לפי הטופס למטה</div>
+    
+  </div>
+
+  <!-- ColmexPro-style order form -->
+  <div class="cmx-form">
+    <div class="cmx-form-title">Order entry GTLB</div>
+
+    <div class="cmx-field-row">
+      <span class="cmx-field-label">Symbol</span>
+      <div class="cmx-field-val">
+        <span class="cmx-eq-badge">EQ</span>
+        <b>GTLB</b>
+      </div>
+      <button class="cmx-copy" onclick="copyText('GTLB',this)">Copy</button>
+    </div>
+
+    <div class="cmx-field-row">
+      <span class="cmx-field-label">Side</span>
+      <div class="cmx-side-btns">
+        <span class="cmx-side-active cmx-side-sell">SELL</span>
+        <span class="cmx-side-inactive">Buy</span>
+      </div>
+      <button class="cmx-copy" onclick="copyText('SELL',this)">Copy</button>
+    </div>
+
+    <div class="cmx-field-row">
+      <span class="cmx-field-label">Quantity</span>
+      <div class="cmx-field-input">41.5</div>
+      <button class="cmx-copy" onclick="copyText('41.5',this)">Copy</button>
+    </div>
+
+    <div class="cmx-field-row">
+      <span class="cmx-field-label">Order type</span>
+      <div class="cmx-field-val">Limit</div>
+    </div>
+
+    <div class="cmx-field-row">
+      <span class="cmx-field-label">Validity</span>
+      <div class="cmx-field-val">GTC</div>
+    </div>
+
+    <div class="cmx-field-row">
+      <span class="cmx-field-label">Limit price</span>
+      <div class="cmx-field-input cmx-price-blue">32.07</div>
+      <button class="cmx-copy" onclick="copyText('32.07',this)">Copy</button>
+    </div>
+
+    <div class="cmx-field-row">
+      <span class="cmx-field-label">SL price</span>
+      <div class="cmx-field-input cmx-price-red">35.08</div>
+      <button class="cmx-copy" onclick="copyText('35.08',this)">Copy</button>
+    </div>
+
+    <div class="cmx-field-row">
+      <span class="cmx-field-label">TP price <small>(T1)</small></span>
+      <div class="cmx-field-input cmx-price-green">18.73</div>
+      <button class="cmx-copy" onclick="copyText('18.73',this)">Copy</button>
+    </div>
+
+    <div class="cmx-field-row cmx-fib-row">
+      <span class="cmx-field-label">TP <small>(T2 Fib)</small></span>
+      <div class="cmx-field-input cmx-price-green">10.49</div>
+      <button class="cmx-copy" onclick="copyText('10.49',this)">Copy</button>
+    </div>
+
+    <div class="cmx-field-row cmx-fib-row">
+      <span class="cmx-field-label">TP <small>(T3 Fib)</small></span>
+      <div class="cmx-field-input cmx-price-green">-2.85</div>
+      <button class="cmx-copy" onclick="copyText('-2.85',this)">Copy</button>
+    </div>
+
+    <div class="cmx-price-bar">
+      <span class="cmx-price-blue">32.07</span>
+      <span class="cmx-bar-mid">41.5 units · $1,331 · R:R 1:4.43</span>
+      <span class="cmx-price-red">18.73</span>
+    </div>
+
+    <a href="https://webplatform.colmex.com/" target="_blank" class="cmx-place-btn">
+      🔴 Place SELL Order
+    </a>
+  </div>
+</div>
+  </div>
+
+  <!-- Pine Script modal for GTLB -->
+  <div id="pine_SHORT_0" class="pine-modal" onclick="if(event.target===this)this.style.display='none'">
+<div class="pine-box">
+  <div class="pine-header">
+    <span>📋 Pine Script — GTLB SHORT ▼</span>
+    <button class="pine-close" onclick="document.getElementById('pine_SHORT_0').style.display='none'">✕</button>
+  </div>
+  <div class="pine-instructions">
+    <b>How to use:</b>&nbsp; 1. Open TradingView &nbsp;→&nbsp;
+    2. Open <b>GTLB</b> chart, Weekly (1W) &nbsp;→&nbsp;
+    3. Click <b>Pine Editor</b> at the bottom &nbsp;→&nbsp;
+    4. Paste the code below &nbsp;→&nbsp; Click <b>"Add to chart"</b><br>
+    → Entry (blue), Stop (red), T1/T2/T3 (green) lines appear automatically.
+  </div>
+  <textarea id="pine_SHORT_0_code" class="pine-code" readonly>//@version=5
+indicator("Cycles: GTLB", overlay=true, max_lines_count=100)
+// ─── HOW TO USE ───────────────────────────────────────────
+// 1. Open this stock/coin chart on TradingView (Weekly 1W)
+// 2. Click Pine Editor at the bottom
+// 3. Paste this code and click "Add to chart"
+// 4. Entry / Stop / Target lines appear automatically
+
+// SHORT ▼  GTLB
+// Entry : 32.07  |  Stop: 35.08  |  R:R: 4.43
+
+entry_price  = 32.07
+stop_price   = 35.08
+target1      = 18.73
+target2      = 10.4859
+target3      = -2.8541
+
+// Draw horizontal lines
+line.new(bar_index - 50, entry_price, bar_index + 20, entry_price,
+         color=color.new(color.blue,  0), width=2, style=line.style_solid)
+line.new(bar_index - 50, stop_price,  bar_index + 20, stop_price,
+         color=color.new(color.red,   0), width=2, style=line.style_dashed)
+line.new(bar_index - 50, target1,     bar_index + 20, target1,
+         color=color.new(color.green, 0), width=2, style=line.style_dashed)
+line.new(bar_index - 50, target2,     bar_index + 20, target2,
+         color=color.new(color.green,30), width=1, style=line.style_dashed)
+line.new(bar_index - 50, target3,     bar_index + 20, target3,
+         color=color.new(color.green,60), width=1, style=line.style_dotted)
+
+// Labels
+label.new(bar_index+1, entry_price, "Entry  $32.07",
+          color=color.blue,  textcolor=color.white, style=label.style_label_left, size=size.small)
+label.new(bar_index+1, stop_price,  "Stop   $35.08",
+          color=color.red,   textcolor=color.white, style=label.style_label_left, size=size.small)
+label.new(bar_index+1, target1,     "T1     $18.73",
+          color=color.green, textcolor=color.white, style=label.style_label_left, size=size.small)
+label.new(bar_index+1, target2,     "T2     $10.4859",
+          color=color.green, textcolor=color.white, style=label.style_label_left, size=size.small)
+label.new(bar_index+1, target3,     "T3     $-2.8541",
+          color=color.green, textcolor=color.white, style=label.style_label_left, size=size.small)</textarea>
+  <button class="pine-copy-btn" onclick="copyPine('pine_SHORT_0')">📋 Copy to Clipboard</button>
+  <span id="pine_SHORT_0_copied" class="copied-msg" style="display:none">✓ Copied!</span>
+</div>
+  </div>
+
+  <div class="levels-grid">
+<div class="level-box">
+  <div class="level-label">Current Price</div>
+  <div class="level-value neutral">$32.07</div>
+</div>
+<div class="level-box">
+  <div class="level-label">Entry</div>
+  <div class="level-value blue">$32.07</div>
+</div>
+<div class="level-box">
+  <div class="level-label">Stop Loss</div>
+  <div class="level-value red">$35.08</div>
+</div>
+<div class="level-box">
+  <div class="level-label">Target T1</div>
+  <div class="level-value green">$18.73</div>
+</div>
+<div class="level-box">
+  <div class="level-label">T2 (Fib 161.8%)</div>
+  <div class="level-value green">$10.49</div>
+</div>
+<div class="level-box">
+  <div class="level-label">T3 (Fib 261.8%)</div>
+  <div class="level-value green">$-2.85</div>
+</div>
+<div class="level-box">
+  <div class="level-label">R:R Ratio</div>
+  <div class="level-value green">1:4.43</div>
+</div>
+<div class="level-box">
+  <div class="level-label">RSI</div>
+  <div class="level-value red">68.4</div>
+</div>
+<div class="level-box">
+  <div class="level-label">Position $</div>
+  <div class="level-value neutral">$1,331</div>
+</div>
+  </div>
+
+  <div class="two-col">
+<div>
+  <h4>Profit / Loss Scenarios</h4>
+  <table class="scenario-table">
+    <tr><th>Scenario</th><th>Price</th><th>P&L</th><th>% Portfolio</th></tr>
+    <tr class="loss-row">
+      <td>Stop hit</td><td>$35.08</td>
+      <td>-$124.91</td><td class="red">-0.5%</td>
+    </tr>
+    <tr>
+      <td>Target T1</td><td>$18.73</td>
+      <td>+$553.61</td><td class="green">+2.21%</td>
+    </tr>
+    <tr>
+      <td>Target T2</td><td>$10.49</td>
+      <td>+$895.57</td><td class="green">+3.58%</td>
+    </tr>
+    <tr>
+      <td>Target T3</td><td>$-2.85</td>
+      <td>+$1449.18</td><td class="green">+5.8%</td>
+    </tr>
+  </table>
+</div>
+<div>
+  <h4>4-Week Compounding</h4>
+  <table class="scenario-table">
+    <tr><th>Week</th><th>Portfolio</th><th>Total Gain</th></tr>
+    
+            <tr>
+              <td>Week 1</td>
+              <td>$36,075.00</td>
+              <td class="green">+$11,075.00</td>
+            </tr>
+            <tr>
+              <td>Week 2</td>
+              <td>$52,056.22</td>
+              <td class="green">+$27,056.22</td>
+            </tr>
+            <tr>
+              <td>Week 3</td>
+              <td>$75,117.13</td>
+              <td class="green">+$50,117.13</td>
+            </tr>
+            <tr>
+              <td>Week 4</td>
+              <td>$108,394.02</td>
+              <td class="green">+$83,394.02</td>
+            </tr>
+  </table>
+</div>
+  </div>
+
+  <!-- Top-Down Filter Analysis -->
+  <div class="topdown-section">
+<div class="topdown-title">📊 Top-Down Filter Analysis (Cycles Trading)</div>
+<div class="topdown-grid">
+  <div class="td-box">
+    <div class="td-label">Monthly Trend</div>
+    <div class="td-badge td-bear">▼ SHORT</div>
+    <div class="td-sub">BEAR (-3.7%)</div>
+  </div>
+  <div class="td-box">
+    <div class="td-label">Sector Relative Strength</div>
+    <div class="td-badge td-neut">—</div>
+    <div class="td-sub">N/A</div>
+  </div>
+  <div class="td-box">
+    <div class="td-label">Support Quality</div>
+    <div class="td-badge td-ok">MEDIUM</div>
+    <div class="td-sub">2 touches at level</div>
+  </div>
+</div>
+  </div>
+
+  <!-- Probability of Success -->
+  <div class="prob-section">
+<div class="prob-header">
+  <span class="prob-title">Estimated Success Probability (reach T1)</span>
+  <span class="prob-value" style="color:#3fb950">92% &nbsp;<small style="font-size:13px;font-weight:500">HIGH</small></span>
+</div>
+<div class="prob-bar-bg">
+  <div class="prob-bar-fill" style="width:92%;background:#3fb950"></div>
+</div>
+<div class="prob-factors">
+  <div class="prob-factor" title="RSI 68.4 — ideal bounce zone (55–72)"><span class="fname">RSI</span><span class="fdelta" style="color:#3fb950">+16%</span></div><div class="prob-factor" title="R:R 1:4.43 — excellent room to target"><span class="fname">R:R Ratio</span><span class="fdelta" style="color:#3fb950">+14%</span></div><div class="prob-factor" title="Volume declining near level — accumulation signal"><span class="fname">Volume</span><span class="fdelta" style="color:#3fb950">+10%</span></div><div class="prob-factor" title="6.2% from key level — acceptable"><span class="fname">Entry Distance</span><span class="fdelta" style="color:#3fb950">+4%</span></div><div class="prob-factor" title="Next earnings: 2026-09-02 — safe window"><span class="fname">Earnings Risk</span><span class="fdelta" style="color:#3fb950">+3%</span></div><div class="prob-factor" title="Setup score 4.6 — good signal"><span class="fname">Setup Quality</span><span class="fdelta" style="color:#3fb950">+4%</span></div><div class="prob-factor" title="Stop 9.4% away — wide"><span class="fname">Stop Distance</span><span class="fdelta" style="color:#8b949e">+0%</span></div><div class="prob-factor" title="Monthly trend SHORT, last candle BEAR — full alignment"><span class="fname">Monthly Trend</span><span class="fdelta" style="color:#3fb950">+18%</span></div><div class="prob-factor" title="Support tested 2x — reasonable level"><span class="fname">Support Quality</span><span class="fdelta" style="color:#3fb950">+4%</span></div><div class="prob-factor" title="ATR 12.1% — extreme volatility"><span class="fname">Volatility (ATR)</span><span class="fdelta" style="color:#f85149">-18%</span></div><div class="prob-factor" title="Analyst HOLD — Hold (23 analysts)"><span class="fname">Fundamentals</span><span class="fdelta" style="color:#8b949e">+0%</span></div><div class="prob-factor" title="MACD neutral"><span class="fname">MACD</span><span class="fdelta" style="color:#8b949e">+0%</span></div><div class="prob-factor" title="Near upper band (%B=0.96) — overbought, good SHORT"><span class="fname">Bollinger Bands</span><span class="fdelta" style="color:#3fb950">+10%</span></div><div class="prob-factor" title="Level tested once then held — moderate confidence"><span class="fname">Level Reliability</span><span class="fdelta" style="color:#3fb950">+4%</span></div><div class="prob-factor" title="4 competing levels nearby — unclear entry point (seek cleaner setup)"><span class="fname">Level Clarity</span><span class="fdelta" style="color:#f85149">-16%</span></div><div class="prob-factor" title="Price in golden Fibonacci zone (40% retracement) — ideal entry area 38.2%–61.8%"><span class="fname">Fib 40%: Golden Zone</span><span class="fdelta" style="color:#3fb950">+8%</span></div><div class="prob-factor" title="Last swing high not closed through — may be a correction; wait for weekly close confirmation before entering"><span class="fname">TrendConf: UNCONFIRMED</span><span class="fdelta" style="color:#f85149">-18%</span></div>
+</div>
+<div style="font-size:10px;color:#484f58;margin-top:8px">
+  * Algorithmic estimate based on 10 technical factors (incl. Monthly Trend, Sector RS, Support Quality). Not a guarantee. Always manage your risk.
+</div>
+  </div>
+
+</div>
+<div class="card short-card" data-horizon="MONTHLY">
+  <div class="card-header">
+<div class="card-title">
+  <span class="ticker">ULTA</span>
+  <span class="dir-badge short-badge">
+    ▼ SHORT
+  </span>
+  <span class="horizon-badge" style="background:#58a6ff22;color:#58a6ff;border:1px solid #58a6ff66;"
+        title="~5.1 weeks to T1 · 3–6 שבועות">
+    📅 חודשי
+  </span>
+  <span class="type-badge">STOCK</span>
+</div>
+<div class="card-meta">
+  <span class="badge warn">⚠ Vol</span> <span class="badge ok">2026-08-27</span> <span class="badge ok">ATR 7.7%</span> <span class="badge late-entry">⚡ LATE +6.2% from level</span> <span class="badge warn">MACD ▼</span>  <span class="badge squeeze-high">🚨 SQUEEZE RISK HIGH — Short 5.0% / Inst 101.6%</span>
+  <a href="https://www.tradingview.com/chart/?symbol=NASDAQ:ULTA&interval=W" target="_blank" class="tv-link">📊 TradingView</a>
+  <button class="pine-btn" onclick="showPine('pine_SHORT_1')">📋 Pine Script</button>
+  <button class="colmex-btn" onclick="showColmex('pine_SHORT_1_cmx')">💹 Trade on Colmex</button>
+</div>
+  </div>
+  
+  <div class="squeeze-box high">
+<strong>🚨 SHORT SQUEEZE WARNING — HIGH RISK</strong><br>
+Short Interest: <b>5.0%</b> &nbsp;|&nbsp; Institutional Ownership: <b>101.6%</b><br>
+<span style="color:#f0f6fc">
+  5.0% of the float is already shorted. Institutional ownership at 101.6% means
+  very few shares are available. Any positive news can trigger a violent squeeze upward.
+  <b>Consider skipping this SHORT.</b>
+</span>
+  </div>
+  <!-- Position Sizing Box -->
+  <div class="pos-size-box">
+<div class="pos-size-title">💼 Position Sizing</div>
+<div class="pos-size-grid">
+  <div class="ps-cell">
+    <div class="ps-label">סיכון לעסקה</div>
+    <div class="ps-val">$250</div>
+    <div class="ps-sub">1% של התיק</div>
+  </div>
+  <div class="ps-cell">
+    <div class="ps-label">גודל פוזיציה</div>
+    <div class="ps-val" style="color:#d29922">$2,539</div>
+    <div class="ps-sub" style="color:#d29922">10.2% מהתיק — OK </div>
+  </div>
+  <div class="ps-cell">
+    <div class="ps-label">כמות מניות</div>
+    <div class="ps-val">5.5</div>
+    <div class="ps-sub">@ $461.33</div>
+  </div>
+  <div class="ps-cell">
+    <div class="ps-label">מקסימום פוזיציות</div>
+    <div class="ps-val">6</div>
+    <div class="ps-sub">סה"כ בו זמנית</div>
+  </div>
+</div>
+<div class="ps-rule">📏 כלל: 1% סיכון × 6 פוזיציות = 6% חשיפה מקסימלית</div>
+  </div>
+  <!-- Fundamental Analysis Box (stock-analysis skill) -->
+  
+  <div class="fund-box" style="background:#0d2b0d;border:1px solid #3fb95044;">
+    <div class="fund-header">
+      <span class="fund-title">🔬 Fundamental Analysis</span>
+      <span class="fund-signal" style="color:#3fb950;border:1px solid #3fb95066;">📈 BUY &nbsp;·&nbsp; 75% confidence</span>
+    </div>
+    <div class="fund-grid">
+      <div class="fund-cell"><div class="fund-label">אנליסטים</div><div class="fund-val" style="color:#3fb950">Buy (24 analysts)</div></div>
+      <div class="fund-cell"><div class="fund-label">יעד מחיר</div><div class="fund-val">$627.25<span style="color:#3fb950;font-size:11px"> (+36.0%)</span></div></div>
+    </div>
+    <ul class="fund-bullets"><li>• Consumer Cyclical / Specialty Retail — $19.8B market cap</li><li>• Analyst target $627.25 → +36.0% upside</li><li>• Revenue growth: 11.1%</li></ul>
+    
+  </div>
+  <!-- Traffic Light Decision Box -->
+  <div class="tl-box" style="background:#0d2b0d;border:1px solid #3fb950;">
+<div class="tl-signal">🟢 קח את העסקה</div>
+<div class="tl-lists">
+  <ul class="tl-green"><li>✅ Strong support level</li></ul>
+  
+</div>
+  </div>
+  <!-- Colmex Trade Modal for ULTA -->
+  <div id="pine_SHORT_1_cmx" class="pine-modal" onclick="if(event.target===this)this.style.display='none'">
+<div class="pine-box cmx-box">
+  <div class="pine-header cmx-header">
+    <span>💹 ColmexPro Order — ULTA (Short)</span>
+    <button class="pine-close" onclick="document.getElementById('pine_SHORT_1_cmx').style.display='none'">✕</button>
+  </div>
+  <div class="cmx-instructions">
+    <div class="cmx-tip">💡 פתח ColmexPro בטאב נפרד והתחבר → חפש <b>ULTA</b> → מלא לפי הטופס למטה</div>
+    
+  </div>
+
+  <!-- ColmexPro-style order form -->
+  <div class="cmx-form">
+    <div class="cmx-form-title">Order entry ULTA</div>
+
+    <div class="cmx-field-row">
+      <span class="cmx-field-label">Symbol</span>
+      <div class="cmx-field-val">
+        <span class="cmx-eq-badge">EQ</span>
+        <b>ULTA</b>
+      </div>
+      <button class="cmx-copy" onclick="copyText('ULTA',this)">Copy</button>
+    </div>
+
+    <div class="cmx-field-row">
+      <span class="cmx-field-label">Side</span>
+      <div class="cmx-side-btns">
+        <span class="cmx-side-active cmx-side-sell">SELL</span>
+        <span class="cmx-side-inactive">Buy</span>
+      </div>
+      <button class="cmx-copy" onclick="copyText('SELL',this)">Copy</button>
+    </div>
+
+    <div class="cmx-field-row">
+      <span class="cmx-field-label">Quantity</span>
+      <div class="cmx-field-input">5.5</div>
+      <button class="cmx-copy" onclick="copyText('5.5',this)">Copy</button>
+    </div>
+
+    <div class="cmx-field-row">
+      <span class="cmx-field-label">Order type</span>
+      <div class="cmx-field-val">Limit</div>
+    </div>
+
+    <div class="cmx-field-row">
+      <span class="cmx-field-label">Validity</span>
+      <div class="cmx-field-val">GTC</div>
+    </div>
+
+    <div class="cmx-field-row">
+      <span class="cmx-field-label">Limit price</span>
+      <div class="cmx-field-input cmx-price-blue">461.33</div>
+      <button class="cmx-copy" onclick="copyText('461.33',this)">Copy</button>
+    </div>
+
+    <div class="cmx-field-row">
+      <span class="cmx-field-label">SL price</span>
+      <div class="cmx-field-input cmx-price-red">506.74</div>
+      <button class="cmx-copy" onclick="copyText('506.74',this)">Copy</button>
+    </div>
+
+    <div class="cmx-field-row">
+      <span class="cmx-field-label">TP price <small>(T1)</small></span>
+      <div class="cmx-field-input cmx-price-green">352.4</div>
+      <button class="cmx-copy" onclick="copyText('352.4',this)">Copy</button>
+    </div>
+
+    <div class="cmx-field-row cmx-fib-row">
+      <span class="cmx-field-label">TP <small>(T2 Fib)</small></span>
+      <div class="cmx-field-input cmx-price-green">285.08</div>
+      <button class="cmx-copy" onclick="copyText('285.08',this)">Copy</button>
+    </div>
+
+    <div class="cmx-field-row cmx-fib-row">
+      <span class="cmx-field-label">TP <small>(T3 Fib)</small></span>
+      <div class="cmx-field-input cmx-price-green">176.15</div>
+      <button class="cmx-copy" onclick="copyText('176.15',this)">Copy</button>
+    </div>
+
+    <div class="cmx-price-bar">
+      <span class="cmx-price-blue">461.33</span>
+      <span class="cmx-bar-mid">5.5 units · $2,539 · R:R 1:2.4</span>
+      <span class="cmx-price-red">352.4</span>
+    </div>
+
+    <a href="https://webplatform.colmex.com/" target="_blank" class="cmx-place-btn">
+      🔴 Place SELL Order
+    </a>
+  </div>
+</div>
+  </div>
+
+  <!-- Pine Script modal for ULTA -->
+  <div id="pine_SHORT_1" class="pine-modal" onclick="if(event.target===this)this.style.display='none'">
+<div class="pine-box">
+  <div class="pine-header">
+    <span>📋 Pine Script — ULTA SHORT ▼</span>
+    <button class="pine-close" onclick="document.getElementById('pine_SHORT_1').style.display='none'">✕</button>
+  </div>
+  <div class="pine-instructions">
+    <b>How to use:</b>&nbsp; 1. Open TradingView &nbsp;→&nbsp;
+    2. Open <b>ULTA</b> chart, Weekly (1W) &nbsp;→&nbsp;
+    3. Click <b>Pine Editor</b> at the bottom &nbsp;→&nbsp;
+    4. Paste the code below &nbsp;→&nbsp; Click <b>"Add to chart"</b><br>
+    → Entry (blue), Stop (red), T1/T2/T3 (green) lines appear automatically.
+  </div>
+  <textarea id="pine_SHORT_1_code" class="pine-code" readonly>//@version=5
+indicator("Cycles: ULTA", overlay=true, max_lines_count=100)
+// ─── HOW TO USE ───────────────────────────────────────────
+// 1. Open this stock/coin chart on TradingView (Weekly 1W)
+// 2. Click Pine Editor at the bottom
+// 3. Paste this code and click "Add to chart"
+// 4. Entry / Stop / Target lines appear automatically
+
+// SHORT ▼  ULTA
+// Entry : 461.33  |  Stop: 506.74  |  R:R: 2.4
+
+entry_price  = 461.33
+stop_price   = 506.74
+target1      = 352.4
+target2      = 285.0813
+target3      = 176.1513
+
+// Draw horizontal lines
+line.new(bar_index - 50, entry_price, bar_index + 20, entry_price,
+         color=color.new(color.blue,  0), width=2, style=line.style_solid)
+line.new(bar_index - 50, stop_price,  bar_index + 20, stop_price,
+         color=color.new(color.red,   0), width=2, style=line.style_dashed)
+line.new(bar_index - 50, target1,     bar_index + 20, target1,
+         color=color.new(color.green, 0), width=2, style=line.style_dashed)
+line.new(bar_index - 50, target2,     bar_index + 20, target2,
+         color=color.new(color.green,30), width=1, style=line.style_dashed)
+line.new(bar_index - 50, target3,     bar_index + 20, target3,
+         color=color.new(color.green,60), width=1, style=line.style_dotted)
+
+// Labels
+label.new(bar_index+1, entry_price, "Entry  $461.33",
+          color=color.blue,  textcolor=color.white, style=label.style_label_left, size=size.small)
+label.new(bar_index+1, stop_price,  "Stop   $506.74",
+          color=color.red,   textcolor=color.white, style=label.style_label_left, size=size.small)
+label.new(bar_index+1, target1,     "T1     $352.4",
+          color=color.green, textcolor=color.white, style=label.style_label_left, size=size.small)
+label.new(bar_index+1, target2,     "T2     $285.0813",
+          color=color.green, textcolor=color.white, style=label.style_label_left, size=size.small)
+label.new(bar_index+1, target3,     "T3     $176.1513",
+          color=color.green, textcolor=color.white, style=label.style_label_left, size=size.small)</textarea>
+  <button class="pine-copy-btn" onclick="copyPine('pine_SHORT_1')">📋 Copy to Clipboard</button>
+  <span id="pine_SHORT_1_copied" class="copied-msg" style="display:none">✓ Copied!</span>
+</div>
+  </div>
+
+  <div class="levels-grid">
+<div class="level-box">
+  <div class="level-label">Current Price</div>
+  <div class="level-value neutral">$461.33</div>
+</div>
+<div class="level-box">
+  <div class="level-label">Entry</div>
+  <div class="level-value blue">$461.33</div>
+</div>
+<div class="level-box">
+  <div class="level-label">Stop Loss</div>
+  <div class="level-value red">$506.74</div>
+</div>
+<div class="level-box">
+  <div class="level-label">Target T1</div>
+  <div class="level-value green">$352.4</div>
+</div>
+<div class="level-box">
+  <div class="level-label">T2 (Fib 161.8%)</div>
+  <div class="level-value green">$285.08</div>
+</div>
+<div class="level-box">
+  <div class="level-label">T3 (Fib 261.8%)</div>
+  <div class="level-value green">$176.15</div>
+</div>
+<div class="level-box">
+  <div class="level-label">R:R Ratio</div>
+  <div class="level-value neutral">1:2.4</div>
+</div>
+<div class="level-box">
+  <div class="level-label">RSI</div>
+  <div class="level-value neutral">41.5</div>
+</div>
+<div class="level-box">
+  <div class="level-label">Position $</div>
+  <div class="level-value neutral">$2,539</div>
+</div>
+  </div>
+
+  <div class="two-col">
+<div>
+  <h4>Profit / Loss Scenarios</h4>
+  <table class="scenario-table">
+    <tr><th>Scenario</th><th>Price</th><th>P&L</th><th>% Portfolio</th></tr>
+    <tr class="loss-row">
+      <td>Stop hit</td><td>$506.74</td>
+      <td>-$249.76</td><td class="red">-1.0%</td>
+    </tr>
+    <tr>
+      <td>Target T1</td><td>$352.4</td>
+      <td>+$599.12</td><td class="green">+2.4%</td>
+    </tr>
+    <tr>
+      <td>Target T2</td><td>$285.08</td>
+      <td>+$969.38</td><td class="green">+3.88%</td>
+    </tr>
+    <tr>
+      <td>Target T3</td><td>$176.15</td>
+      <td>+$1568.49</td><td class="green">+6.27%</td>
+    </tr>
+  </table>
+</div>
+<div>
+  <h4>4-Week Compounding</h4>
+  <table class="scenario-table">
+    <tr><th>Week</th><th>Portfolio</th><th>Total Gain</th></tr>
+    
+            <tr>
+              <td>Week 1</td>
+              <td>$31,000.00</td>
+              <td class="green">+$6,000.00</td>
+            </tr>
+            <tr>
+              <td>Week 2</td>
+              <td>$38,440.00</td>
+              <td class="green">+$13,440.00</td>
+            </tr>
+            <tr>
+              <td>Week 3</td>
+              <td>$47,665.60</td>
+              <td class="green">+$22,665.60</td>
+            </tr>
+            <tr>
+              <td>Week 4</td>
+              <td>$59,105.34</td>
+              <td class="green">+$34,105.34</td>
+            </tr>
+  </table>
+</div>
+  </div>
+
+  <!-- Top-Down Filter Analysis -->
+  <div class="topdown-section">
+<div class="topdown-title">📊 Top-Down Filter Analysis (Cycles Trading)</div>
+<div class="topdown-grid">
+  <div class="td-box">
+    <div class="td-label">Monthly Trend</div>
+    <div class="td-badge td-bear">▼ SHORT</div>
+    <div class="td-sub">STRONG BEAR (-10.6%)</div>
+  </div>
+  <div class="td-box">
+    <div class="td-label">Sector Relative Strength</div>
+    <div class="td-badge td-neut">—</div>
+    <div class="td-sub">N/A</div>
+  </div>
+  <div class="td-box">
+    <div class="td-label">Support Quality</div>
+    <div class="td-badge td-bull">STRONG</div>
+    <div class="td-sub">13 touches at level</div>
+  </div>
+</div>
+  </div>
+
+  <!-- Probability of Success -->
+  <div class="prob-section">
+<div class="prob-header">
+  <span class="prob-title">Estimated Success Probability (reach T1)</span>
+  <span class="prob-value" style="color:#3fb950">86% &nbsp;<small style="font-size:13px;font-weight:500">HIGH</small></span>
+</div>
+<div class="prob-bar-bg">
+  <div class="prob-bar-fill" style="width:86%;background:#3fb950"></div>
+</div>
+<div class="prob-factors">
+  <div class="prob-factor" title="RSI 41.5 — low, bearish case weaker"><span class="fname">RSI</span><span class="fdelta" style="color:#f85149">-8%</span></div><div class="prob-factor" title="R:R 1:2.4 — minimum threshold"><span class="fname">R:R Ratio</span><span class="fdelta" style="color:#3fb950">+2%</span></div><div class="prob-factor" title="Volume not declining — less conviction"><span class="fname">Volume</span><span class="fdelta" style="color:#f85149">-6%</span></div><div class="prob-factor" title="6.6% from key level — acceptable"><span class="fname">Entry Distance</span><span class="fdelta" style="color:#3fb950">+4%</span></div><div class="prob-factor" title="Next earnings: 2026-08-27 — safe window"><span class="fname">Earnings Risk</span><span class="fdelta" style="color:#3fb950">+3%</span></div><div class="prob-factor" title="Setup score 0.8 — weak signal"><span class="fname">Setup Quality</span><span class="fdelta" style="color:#f85149">-3%</span></div><div class="prob-factor" title="Stop 9.8% away — wide"><span class="fname">Stop Distance</span><span class="fdelta" style="color:#8b949e">+0%</span></div><div class="prob-factor" title="Monthly trend SHORT, last candle STRONG_BEAR — full alignment"><span class="fname">Monthly Trend</span><span class="fdelta" style="color:#3fb950">+18%</span></div><div class="prob-factor" title="Support tested 13x — proven level"><span class="fname">Support Quality</span><span class="fdelta" style="color:#3fb950">+10%</span></div><div class="prob-factor" title="ATR 7.7% — normal volatility"><span class="fname">Volatility (ATR)</span><span class="fdelta" style="color:#8b949e">+0%</span></div><div class="prob-factor" title="Analyst BUY (conf 75%) — Buy (24 analysts), target $627.25"><span class="fname">Fundamentals</span><span class="fdelta" style="color:#3fb950">+15%</span></div><div class="prob-factor" title="MACD below signal line — bearish trend"><span class="fname">MACD</span><span class="fdelta" style="color:#3fb950">+6%</span></div><div class="prob-factor" title="Mid-band (%B=0.23) — neutral"><span class="fname">Bollinger Bands</span><span class="fdelta" style="color:#8b949e">+0%</span></div><div class="prob-factor" title="Level tested once then held — moderate confidence"><span class="fname">Level Reliability</span><span class="fdelta" style="color:#3fb950">+4%</span></div><div class="prob-factor" title="6 competing levels nearby — unclear entry point (seek cleaner setup)"><span class="fname">Level Clarity</span><span class="fdelta" style="color:#f85149">-16%</span></div><div class="prob-factor" title="Minimal retracement (6%) — entering too early before a proper Fibonacci pullback"><span class="fname">Fib 6%: No Retrace</span><span class="fdelta" style="color:#f85149">-3%</span></div><div class="prob-factor" title="Trend structure confirmed — last swing high closed through"><span class="fname">TrendConf: CONFIRMED</span><span class="fdelta" style="color:#3fb950">+10%</span></div>
+</div>
+<div style="font-size:10px;color:#484f58;margin-top:8px">
+  * Algorithmic estimate based on 10 technical factors (incl. Monthly Trend, Sector RS, Support Quality). Not a guarantee. Always manage your risk.
+</div>
+  </div>
+
+</div>
+<div class="card short-card" data-horizon="MONTHLY">
+  <div class="card-header">
+<div class="card-title">
+  <span class="ticker">DKNG</span>
+  <span class="dir-badge short-badge">
+    ▼ SHORT
+  </span>
+  <span class="horizon-badge" style="background:#58a6ff22;color:#58a6ff;border:1px solid #58a6ff66;"
+        title="~3.0 weeks to T1 · 3–6 שבועות">
+    📅 חודשי
+  </span>
+  <span class="type-badge">STOCK</span>
+</div>
+<div class="card-meta">
+  <span class="badge ok">✓ Vol OK</span> <span class="badge earn-approaching">📅 APPROACHING</span> <span class="badge atr-high">🔥 ATR 10.45%</span>  <span class="badge ok">MACD ▲</span>  <span class="badge squeeze-med">⚠ Squeeze Risk — Short 8.4% / Inst 80.0%</span>
+  <a href="https://www.tradingview.com/chart/?symbol=NASDAQ:DKNG&interval=W" target="_blank" class="tv-link">📊 TradingView</a>
+  <button class="pine-btn" onclick="showPine('pine_SHORT_2')">📋 Pine Script</button>
+  <button class="colmex-btn" onclick="showColmex('pine_SHORT_2_cmx')">💹 Trade on Colmex</button>
+</div>
+  </div>
+  
+  <div class="squeeze-box medium">
+<strong>⚠ Squeeze Risk — MEDIUM</strong><br>
+Short Interest: <b>8.4%</b> &nbsp;|&nbsp; Institutional Ownership: <b>80.0%</b><br>
+<span style="color:#e6edf3">Elevated short interest. Manage position size carefully.</span>
+  </div>
+  <!-- Position Sizing Box -->
+  <div class="pos-size-box">
+<div class="pos-size-title">💼 Position Sizing</div>
+<div class="pos-size-grid">
+  <div class="ps-cell">
+    <div class="ps-label">סיכון לעסקה</div>
+    <div class="ps-val">$125</div>
+    <div class="ps-sub">1% של התיק (×0.5 — High Vol)</div>
+  </div>
+  <div class="ps-cell">
+    <div class="ps-label">גודל פוזיציה</div>
+    <div class="ps-val" style="color:#3fb950">$2,303</div>
+    <div class="ps-sub" style="color:#3fb950">9.2% מהתיק — SAFE </div>
+  </div>
+  <div class="ps-cell">
+    <div class="ps-label">כמות מניות</div>
+    <div class="ps-val">89.0</div>
+    <div class="ps-sub">@ $25.89</div>
+  </div>
+  <div class="ps-cell">
+    <div class="ps-label">מקסימום פוזיציות</div>
+    <div class="ps-val">6</div>
+    <div class="ps-sub">סה"כ בו זמנית</div>
+  </div>
+</div>
+<div class="ps-rule">📏 כלל: 1% סיכון × 6 פוזיציות = 6% חשיפה מקסימלית</div>
+  </div>
+  <!-- Fundamental Analysis Box (stock-analysis skill) -->
+  
+  <div class="fund-box" style="background:#0d2b0d;border:1px solid #3fb95044;">
+    <div class="fund-header">
+      <span class="fund-title">🔬 Fundamental Analysis</span>
+      <span class="fund-signal" style="color:#3fb950;border:1px solid #3fb95066;">📈 BUY &nbsp;·&nbsp; 75% confidence</span>
+    </div>
+    <div class="fund-grid">
+      <div class="fund-cell"><div class="fund-label">אנליסטים</div><div class="fund-val" style="color:#3fb950">Buy (35 analysts)</div></div>
+      <div class="fund-cell"><div class="fund-label">יעד מחיר</div><div class="fund-val">$34.91<span style="color:#3fb950;font-size:11px"> (+34.8%)</span></div></div>
+    </div>
+    <ul class="fund-bullets"><li>• Consumer Cyclical / Gambling — $12.8B market cap</li><li>• Analyst target $34.91 → +34.8% upside</li><li>• Revenue growth: 16.8%</li></ul>
+    <ul class="fund-caveats"><li>⚠ High P/E: 288x</li><li>⚠ High D/E ratio: 317%</li></ul>
+  </div>
+  <!-- Traffic Light Decision Box -->
+  <div class="tl-box" style="background:#2b0d0d;border:1px solid #f85149;">
+<div class="tl-signal">🔴 אל תיכנס</div>
+<div class="tl-lists">
+  
+  <ul class="tl-red"><li>⚠ Earnings approaching (15-30d)</li><li>⚠ High Volatility ATR 10.45%</li></ul>
+</div>
+  </div>
+  <!-- Colmex Trade Modal for DKNG -->
+  <div id="pine_SHORT_2_cmx" class="pine-modal" onclick="if(event.target===this)this.style.display='none'">
+<div class="pine-box cmx-box">
+  <div class="pine-header cmx-header">
+    <span>💹 ColmexPro Order — DKNG (Short)</span>
+    <button class="pine-close" onclick="document.getElementById('pine_SHORT_2_cmx').style.display='none'">✕</button>
+  </div>
+  <div class="cmx-instructions">
+    <div class="cmx-tip">💡 פתח ColmexPro בטאב נפרד והתחבר → חפש <b>DKNG</b> → מלא לפי הטופס למטה</div>
+    
+  </div>
+
+  <!-- ColmexPro-style order form -->
+  <div class="cmx-form">
+    <div class="cmx-form-title">Order entry DKNG</div>
+
+    <div class="cmx-field-row">
+      <span class="cmx-field-label">Symbol</span>
+      <div class="cmx-field-val">
+        <span class="cmx-eq-badge">EQ</span>
+        <b>DKNG</b>
+      </div>
+      <button class="cmx-copy" onclick="copyText('DKNG',this)">Copy</button>
+    </div>
+
+    <div class="cmx-field-row">
+      <span class="cmx-field-label">Side</span>
+      <div class="cmx-side-btns">
+        <span class="cmx-side-active cmx-side-sell">SELL</span>
+        <span class="cmx-side-inactive">Buy</span>
+      </div>
+      <button class="cmx-copy" onclick="copyText('SELL',this)">Copy</button>
+    </div>
+
+    <div class="cmx-field-row">
+      <span class="cmx-field-label">Quantity</span>
+      <div class="cmx-field-input">89.0</div>
+      <button class="cmx-copy" onclick="copyText('89.0',this)">Copy</button>
+    </div>
+
+    <div class="cmx-field-row">
+      <span class="cmx-field-label">Order type</span>
+      <div class="cmx-field-val">Limit</div>
+    </div>
+
+    <div class="cmx-field-row">
+      <span class="cmx-field-label">Validity</span>
+      <div class="cmx-field-val">GTC</div>
+    </div>
+
+    <div class="cmx-field-row">
+      <span class="cmx-field-label">Limit price</span>
+      <div class="cmx-field-input cmx-price-blue">25.89</div>
+      <button class="cmx-copy" onclick="copyText('25.89',this)">Copy</button>
+    </div>
+
+    <div class="cmx-field-row">
+      <span class="cmx-field-label">SL price</span>
+      <div class="cmx-field-input cmx-price-red">27.3</div>
+      <button class="cmx-copy" onclick="copyText('27.3',this)">Copy</button>
+    </div>
+
+    <div class="cmx-field-row">
+      <span class="cmx-field-label">TP price <small>(T1)</small></span>
+      <div class="cmx-field-input cmx-price-green">21.01</div>
+      <button class="cmx-copy" onclick="copyText('21.01',this)">Copy</button>
+    </div>
+
+    <div class="cmx-field-row cmx-fib-row">
+      <span class="cmx-field-label">TP <small>(T2 Fib)</small></span>
+      <div class="cmx-field-input cmx-price-green">17.99</div>
+      <button class="cmx-copy" onclick="copyText('17.99',this)">Copy</button>
+    </div>
+
+    <div class="cmx-field-row cmx-fib-row">
+      <span class="cmx-field-label">TP <small>(T3 Fib)</small></span>
+      <div class="cmx-field-input cmx-price-green">13.11</div>
+      <button class="cmx-copy" onclick="copyText('13.11',this)">Copy</button>
+    </div>
+
+    <div class="cmx-price-bar">
+      <span class="cmx-price-blue">25.89</span>
+      <span class="cmx-bar-mid">89.0 units · $2,303 · R:R 1:3.47</span>
+      <span class="cmx-price-red">21.01</span>
+    </div>
+
+    <a href="https://webplatform.colmex.com/" target="_blank" class="cmx-place-btn">
+      🔴 Place SELL Order
+    </a>
+  </div>
+</div>
+  </div>
+
+  <!-- Pine Script modal for DKNG -->
+  <div id="pine_SHORT_2" class="pine-modal" onclick="if(event.target===this)this.style.display='none'">
+<div class="pine-box">
+  <div class="pine-header">
+    <span>📋 Pine Script — DKNG SHORT ▼</span>
+    <button class="pine-close" onclick="document.getElementById('pine_SHORT_2').style.display='none'">✕</button>
+  </div>
+  <div class="pine-instructions">
+    <b>How to use:</b>&nbsp; 1. Open TradingView &nbsp;→&nbsp;
+    2. Open <b>DKNG</b> chart, Weekly (1W) &nbsp;→&nbsp;
+    3. Click <b>Pine Editor</b> at the bottom &nbsp;→&nbsp;
+    4. Paste the code below &nbsp;→&nbsp; Click <b>"Add to chart"</b><br>
+    → Entry (blue), Stop (red), T1/T2/T3 (green) lines appear automatically.
+  </div>
+  <textarea id="pine_SHORT_2_code" class="pine-code" readonly>//@version=5
+indicator("Cycles: DKNG", overlay=true, max_lines_count=100)
+// ─── HOW TO USE ───────────────────────────────────────────
+// 1. Open this stock/coin chart on TradingView (Weekly 1W)
+// 2. Click Pine Editor at the bottom
+// 3. Paste this code and click "Add to chart"
+// 4. Entry / Stop / Target lines appear automatically
+
+// SHORT ▼  DKNG
+// Entry : 25.89  |  Stop: 27.3  |  R:R: 3.47
+
+entry_price  = 25.89
+stop_price   = 27.3
+target1      = 21.01
+target2      = 17.9942
+target3      = 13.1142
+
+// Draw horizontal lines
+line.new(bar_index - 50, entry_price, bar_index + 20, entry_price,
+         color=color.new(color.blue,  0), width=2, style=line.style_solid)
+line.new(bar_index - 50, stop_price,  bar_index + 20, stop_price,
+         color=color.new(color.red,   0), width=2, style=line.style_dashed)
+line.new(bar_index - 50, target1,     bar_index + 20, target1,
+         color=color.new(color.green, 0), width=2, style=line.style_dashed)
+line.new(bar_index - 50, target2,     bar_index + 20, target2,
+         color=color.new(color.green,30), width=1, style=line.style_dashed)
+line.new(bar_index - 50, target3,     bar_index + 20, target3,
+         color=color.new(color.green,60), width=1, style=line.style_dotted)
+
+// Labels
+label.new(bar_index+1, entry_price, "Entry  $25.89",
+          color=color.blue,  textcolor=color.white, style=label.style_label_left, size=size.small)
+label.new(bar_index+1, stop_price,  "Stop   $27.3",
+          color=color.red,   textcolor=color.white, style=label.style_label_left, size=size.small)
+label.new(bar_index+1, target1,     "T1     $21.01",
+          color=color.green, textcolor=color.white, style=label.style_label_left, size=size.small)
+label.new(bar_index+1, target2,     "T2     $17.9942",
+          color=color.green, textcolor=color.white, style=label.style_label_left, size=size.small)
+label.new(bar_index+1, target3,     "T3     $13.1142",
+          color=color.green, textcolor=color.white, style=label.style_label_left, size=size.small)</textarea>
+  <button class="pine-copy-btn" onclick="copyPine('pine_SHORT_2')">📋 Copy to Clipboard</button>
+  <span id="pine_SHORT_2_copied" class="copied-msg" style="display:none">✓ Copied!</span>
+</div>
+  </div>
+
+  <div class="levels-grid">
+<div class="level-box">
+  <div class="level-label">Current Price</div>
+  <div class="level-value neutral">$25.89</div>
+</div>
+<div class="level-box">
+  <div class="level-label">Entry</div>
+  <div class="level-value blue">$25.89</div>
+</div>
+<div class="level-box">
+  <div class="level-label">Stop Loss</div>
+  <div class="level-value red">$27.3</div>
+</div>
+<div class="level-box">
+  <div class="level-label">Target T1</div>
+  <div class="level-value green">$21.01</div>
+</div>
+<div class="level-box">
+  <div class="level-label">T2 (Fib 161.8%)</div>
+  <div class="level-value green">$17.99</div>
+</div>
+<div class="level-box">
+  <div class="level-label">T3 (Fib 261.8%)</div>
+  <div class="level-value green">$13.11</div>
+</div>
+<div class="level-box">
+  <div class="level-label">R:R Ratio</div>
+  <div class="level-value green">1:3.47</div>
+</div>
+<div class="level-box">
+  <div class="level-label">RSI</div>
+  <div class="level-value red">65.9</div>
+</div>
+<div class="level-box">
+  <div class="level-label">Position $</div>
+  <div class="level-value neutral">$2,303</div>
+</div>
+  </div>
+
+  <div class="two-col">
+<div>
+  <h4>Profit / Loss Scenarios</h4>
+  <table class="scenario-table">
+    <tr><th>Scenario</th><th>Price</th><th>P&L</th><th>% Portfolio</th></tr>
+    <tr class="loss-row">
+      <td>Stop hit</td><td>$27.3</td>
+      <td>-$125.49</td><td class="red">-0.5%</td>
+    </tr>
+    <tr>
+      <td>Target T1</td><td>$21.01</td>
+      <td>+$434.32</td><td class="green">+1.74%</td>
+    </tr>
+    <tr>
+      <td>Target T2</td><td>$17.99</td>
+      <td>+$703.1</td><td class="green">+2.81%</td>
+    </tr>
+    <tr>
+      <td>Target T3</td><td>$13.11</td>
+      <td>+$1137.42</td><td class="green">+4.55%</td>
+    </tr>
+  </table>
+</div>
+<div>
+  <h4>4-Week Compounding</h4>
+  <table class="scenario-table">
+    <tr><th>Week</th><th>Portfolio</th><th>Total Gain</th></tr>
+    
+            <tr>
+              <td>Week 1</td>
+              <td>$33,675.00</td>
+              <td class="green">+$8,675.00</td>
+            </tr>
+            <tr>
+              <td>Week 2</td>
+              <td>$45,360.22</td>
+              <td class="green">+$20,360.22</td>
+            </tr>
+            <tr>
+              <td>Week 3</td>
+              <td>$61,100.22</td>
+              <td class="green">+$36,100.22</td>
+            </tr>
+            <tr>
+              <td>Week 4</td>
+              <td>$82,302.00</td>
+              <td class="green">+$57,302.00</td>
+            </tr>
+  </table>
+</div>
+  </div>
+
+  <!-- Top-Down Filter Analysis -->
+  <div class="topdown-section">
+<div class="topdown-title">📊 Top-Down Filter Analysis (Cycles Trading)</div>
+<div class="topdown-grid">
+  <div class="td-box">
+    <div class="td-label">Monthly Trend</div>
+    <div class="td-badge td-bear">▼ SHORT</div>
+    <div class="td-sub">NEUTRAL (+2.1%)</div>
+  </div>
+  <div class="td-box">
+    <div class="td-label">Sector Relative Strength</div>
+    <div class="td-badge td-neut">—</div>
+    <div class="td-sub">N/A</div>
+  </div>
+  <div class="td-box">
+    <div class="td-label">Support Quality</div>
+    <div class="td-badge td-ok">MEDIUM</div>
+    <div class="td-sub">2 touches at level</div>
+  </div>
+</div>
+  </div>
+
+  <!-- Probability of Success -->
+  <div class="prob-section">
+<div class="prob-header">
+  <span class="prob-title">Estimated Success Probability (reach T1)</span>
+  <span class="prob-value" style="color:#d29922">69% &nbsp;<small style="font-size:13px;font-weight:500">MEDIUM</small></span>
+</div>
+<div class="prob-bar-bg">
+  <div class="prob-bar-fill" style="width:69%;background:#d29922"></div>
+</div>
+<div class="prob-factors">
+  <div class="prob-factor" title="RSI 65.9 — ideal bounce zone (55–72)"><span class="fname">RSI</span><span class="fdelta" style="color:#3fb950">+16%</span></div><div class="prob-factor" title="R:R 1:3.47 — strong setup"><span class="fname">R:R Ratio</span><span class="fdelta" style="color:#3fb950">+10%</span></div><div class="prob-factor" title="Volume declining near level — accumulation signal"><span class="fname">Volume</span><span class="fdelta" style="color:#3fb950">+10%</span></div><div class="prob-factor" title="2.4% from key level — good entry"><span class="fname">Entry Distance</span><span class="fdelta" style="color:#3fb950">+9%</span></div><div class="prob-factor" title="Next earnings: APPROACHING — safe window"><span class="fname">Earnings Risk</span><span class="fdelta" style="color:#3fb950">+3%</span></div><div class="prob-factor" title="Setup score 4.1 — good signal"><span class="fname">Setup Quality</span><span class="fdelta" style="color:#3fb950">+4%</span></div><div class="prob-factor" title="Stop 5.4% away — normal"><span class="fname">Stop Distance</span><span class="fdelta" style="color:#3fb950">+3%</span></div><div class="prob-factor" title="Monthly trend SHORT, last candle NEUTRAL — full alignment"><span class="fname">Monthly Trend</span><span class="fdelta" style="color:#3fb950">+18%</span></div><div class="prob-factor" title="Support tested 2x — reasonable level"><span class="fname">Support Quality</span><span class="fdelta" style="color:#3fb950">+4%</span></div><div class="prob-factor" title="ATR 10.4% — high volatility, smaller position"><span class="fname">Volatility (ATR)</span><span class="fdelta" style="color:#f85149">-10%</span></div><div class="prob-factor" title="Earnings in 30 days — event risk (15–30d zone)"><span class="fname">Earnings Zone</span><span class="fdelta" style="color:#f85149">-8%</span></div><div class="prob-factor" title="Analyst BUY (conf 75%) — Buy (35 analysts), target $34.91143"><span class="fname">Fundamentals</span><span class="fdelta" style="color:#3fb950">+15%</span></div><div class="prob-factor" title="MACD neutral"><span class="fname">MACD</span><span class="fdelta" style="color:#8b949e">+0%</span></div><div class="prob-factor" title="Mid-band (%B=0.70) — neutral"><span class="fname">Bollinger Bands</span><span class="fdelta" style="color:#8b949e">+0%</span></div><div class="prob-factor" title="Level broken both directions — market never respected it"><span class="fname">Level Reliability</span><span class="fdelta" style="color:#f85149">-18%</span></div><div class="prob-factor" title="7 competing levels nearby — unclear entry point (seek cleaner setup)"><span class="fname">Level Clarity</span><span class="fdelta" style="color:#f85149">-16%</span></div><div class="prob-factor" title="Minimal retracement (19%) — entering too early before a proper Fibonacci pullback"><span class="fname">Fib 19%: No Retrace</span><span class="fdelta" style="color:#f85149">-3%</span></div><div class="prob-factor" title="Last swing high not closed through — may be a correction; wait for weekly close confirmation before entering"><span class="fname">TrendConf: UNCONFIRMED</span><span class="fdelta" style="color:#f85149">-18%</span></div>
+</div>
+<div style="font-size:10px;color:#484f58;margin-top:8px">
+  * Algorithmic estimate based on 10 technical factors (incl. Monthly Trend, Sector RS, Support Quality). Not a guarantee. Always manage your risk.
+</div>
+  </div>
+
+</div>
+  <div class="watchlist-title">👁 Watchlist — SHORT (Prob &lt; 65% — נצפה בלבד, אל תיכנס)</div>
+  
+<div class="card short-card" data-horizon="WEEKLY">
+  <div class="card-header">
+<div class="card-title">
+  <span class="ticker">TON</span>
+  <span class="dir-badge short-badge">
+    ▼ SHORT
+  </span>
+  <span class="horizon-badge" style="background:#3fb95022;color:#3fb950;border:1px solid #3fb95066;"
+        title="~0.0 weeks to T1 · 1–2 שבועות">
+    ⚡ שבועי
+  </span>
+  <span class="type-badge">CRYPTO</span>
+</div>
+<div class="card-meta">
+  <span class="badge warn">⚠ Vol</span> <span class="badge ok">-</span> <span class="badge atr-high">🔥 ATR 10.66%</span>  <span class="badge macd-bull">📈 MACD Bull Divergence</span>  
+  <a href="https://www.tradingview.com/chart/?symbol=BINANCE:TONUSDT&interval=W" target="_blank" class="tv-link">📊 TradingView</a>
+  <button class="pine-btn" onclick="showPine('pine_SHORT_0')">📋 Pine Script</button>
+  <button class="colmex-btn" onclick="showColmex('pine_SHORT_0_cmx')">💹 Trade on Colmex</button>
+</div>
+  </div>
+  
+  <!-- Position Sizing Box -->
+  <div class="pos-size-box">
+<div class="pos-size-title">💼 Position Sizing</div>
+<div class="pos-size-grid">
+  <div class="ps-cell">
+    <div class="ps-label">סיכון לעסקה</div>
+    <div class="ps-val">$125</div>
+    <div class="ps-sub">1% של התיק (×0.5 — High Vol)</div>
+  </div>
+  <div class="ps-cell">
+    <div class="ps-label">גודל פוזיציה</div>
+    <div class="ps-val" style="color:#3fb950">$2,440</div>
+    <div class="ps-sub" style="color:#3fb950">9.8% מהתיק — SAFE </div>
+  </div>
+  <div class="ps-cell">
+    <div class="ps-label">כמות מניות</div>
+    <div class="ps-val">324770.1</div>
+    <div class="ps-sub">@ $0.01</div>
+  </div>
+  <div class="ps-cell">
+    <div class="ps-label">מקסימום פוזיציות</div>
+    <div class="ps-val">6</div>
+    <div class="ps-sub">סה"כ בו זמנית</div>
+  </div>
+</div>
+<div class="ps-rule">📏 כלל: 1% סיכון × 6 פוזיציות = 6% חשיפה מקסימלית</div>
+  </div>
+  <!-- Fundamental Analysis Box (stock-analysis skill) -->
+  
+  <!-- Traffic Light Decision Box -->
+  <div class="tl-box" style="background:#2b0d0d;border:1px solid #f85149;">
+<div class="tl-signal">🔴 אל תיכנס</div>
+<div class="tl-lists">
+  <ul class="tl-green"><li>✅ Strong support level</li></ul>
+  <ul class="tl-red"><li>⚠ High Volatility ATR 10.66%</li></ul>
+</div>
+  </div>
+  <!-- Colmex Trade Modal for TON -->
+  <div id="pine_SHORT_0_cmx" class="pine-modal" onclick="if(event.target===this)this.style.display='none'">
+<div class="pine-box cmx-box">
+  <div class="pine-header cmx-header">
+    <span>💹 ColmexPro Order — TON (Short)</span>
+    <button class="pine-close" onclick="document.getElementById('pine_SHORT_0_cmx').style.display='none'">✕</button>
+  </div>
+  <div class="cmx-instructions">
+    <div class="cmx-tip">💡 פתח ColmexPro בטאב נפרד והתחבר → חפש <b>TONUSD</b> → מלא לפי הטופס למטה</div>
+    <div class="cmx-note">⚠ Note: Crypto traded as CFD (no actual coin ownership).</div>
+  </div>
+
+  <!-- ColmexPro-style order form -->
+  <div class="cmx-form">
+    <div class="cmx-form-title">Order entry TONUSD</div>
+
+    <div class="cmx-field-row">
+      <span class="cmx-field-label">Symbol</span>
+      <div class="cmx-field-val">
+        <span class="cmx-eq-badge">EQ</span>
+        <b>TONUSD</b>
+      </div>
+      <button class="cmx-copy" onclick="copyText('TONUSD',this)">Copy</button>
+    </div>
+
+    <div class="cmx-field-row">
+      <span class="cmx-field-label">Side</span>
+      <div class="cmx-side-btns">
+        <span class="cmx-side-active cmx-side-sell">SELL</span>
+        <span class="cmx-side-inactive">Buy</span>
+      </div>
+      <button class="cmx-copy" onclick="copyText('SELL',this)">Copy</button>
+    </div>
+
+    <div class="cmx-field-row">
+      <span class="cmx-field-label">Quantity</span>
+      <div class="cmx-field-input">324770.1</div>
+      <button class="cmx-copy" onclick="copyText('324770.1',this)">Copy</button>
+    </div>
+
+    <div class="cmx-field-row">
+      <span class="cmx-field-label">Order type</span>
+      <div class="cmx-field-val">Limit</div>
+    </div>
+
+    <div class="cmx-field-row">
+      <span class="cmx-field-label">Validity</span>
+      <div class="cmx-field-val">GTC</div>
+    </div>
+
+    <div class="cmx-field-row">
+      <span class="cmx-field-label">Limit price</span>
+      <div class="cmx-field-input cmx-price-blue">0.01</div>
+      <button class="cmx-copy" onclick="copyText('0.01',this)">Copy</button>
+    </div>
+
+    <div class="cmx-field-row">
+      <span class="cmx-field-label">SL price</span>
+      <div class="cmx-field-input cmx-price-red">0.01</div>
+      <button class="cmx-copy" onclick="copyText('0.01',this)">Copy</button>
+    </div>
+
+    <div class="cmx-field-row">
+      <span class="cmx-field-label">TP price <small>(T1)</small></span>
+      <div class="cmx-field-input cmx-price-green">0.01</div>
+      <button class="cmx-copy" onclick="copyText('0.01',this)">Copy</button>
+    </div>
+
+    <div class="cmx-field-row cmx-fib-row">
+      <span class="cmx-field-label">TP <small>(T2 Fib)</small></span>
+      <div class="cmx-field-input cmx-price-green">0.01</div>
+      <button class="cmx-copy" onclick="copyText('0.01',this)">Copy</button>
+    </div>
+
+    <div class="cmx-field-row cmx-fib-row">
+      <span class="cmx-field-label">TP <small>(T3 Fib)</small></span>
+      <div class="cmx-field-input cmx-price-green">0.01</div>
+      <button class="cmx-copy" onclick="copyText('0.01',this)">Copy</button>
+    </div>
+
+    <div class="cmx-price-bar">
+      <span class="cmx-price-blue">0.01</span>
+      <span class="cmx-bar-mid">324770.1 units · $2,440 · R:R 1:2.64</span>
+      <span class="cmx-price-red">0.01</span>
+    </div>
+
+    <a href="https://webplatform.colmex.com/" target="_blank" class="cmx-place-btn">
+      🔴 Place SELL Order
+    </a>
+  </div>
+</div>
+  </div>
+
+  <!-- Pine Script modal for TON -->
+  <div id="pine_SHORT_0" class="pine-modal" onclick="if(event.target===this)this.style.display='none'">
+<div class="pine-box">
+  <div class="pine-header">
+    <span>📋 Pine Script — TON SHORT ▼</span>
+    <button class="pine-close" onclick="document.getElementById('pine_SHORT_0').style.display='none'">✕</button>
+  </div>
+  <div class="pine-instructions">
+    <b>How to use:</b>&nbsp; 1. Open TradingView &nbsp;→&nbsp;
+    2. Open <b>TON</b> chart, Weekly (1W) &nbsp;→&nbsp;
+    3. Click <b>Pine Editor</b> at the bottom &nbsp;→&nbsp;
+    4. Paste the code below &nbsp;→&nbsp; Click <b>"Add to chart"</b><br>
+    → Entry (blue), Stop (red), T1/T2/T3 (green) lines appear automatically.
+  </div>
+  <textarea id="pine_SHORT_0_code" class="pine-code" readonly>//@version=5
+indicator("Cycles: TON", overlay=true, max_lines_count=100)
+// ─── HOW TO USE ───────────────────────────────────────────
+// 1. Open this stock/coin chart on TradingView (Weekly 1W)
+// 2. Click Pine Editor at the bottom
+// 3. Paste this code and click "Add to chart"
+// 4. Entry / Stop / Target lines appear automatically
+
+// SHORT ▼  TON
+// Entry : 0.01  |  Stop: 0.01  |  R:R: 2.64
+
+entry_price  = 0.01
+stop_price   = 0.01
+target1      = 0.01
+target2      = 0.01
+target3      = 0.01
+
+// Draw horizontal lines
+line.new(bar_index - 50, entry_price, bar_index + 20, entry_price,
+         color=color.new(color.blue,  0), width=2, style=line.style_solid)
+line.new(bar_index - 50, stop_price,  bar_index + 20, stop_price,
+         color=color.new(color.red,   0), width=2, style=line.style_dashed)
+line.new(bar_index - 50, target1,     bar_index + 20, target1,
+         color=color.new(color.green, 0), width=2, style=line.style_dashed)
+line.new(bar_index - 50, target2,     bar_index + 20, target2,
+         color=color.new(color.green,30), width=1, style=line.style_dashed)
+line.new(bar_index - 50, target3,     bar_index + 20, target3,
+         color=color.new(color.green,60), width=1, style=line.style_dotted)
+
+// Labels
+label.new(bar_index+1, entry_price, "Entry  $0.01",
+          color=color.blue,  textcolor=color.white, style=label.style_label_left, size=size.small)
+label.new(bar_index+1, stop_price,  "Stop   $0.01",
+          color=color.red,   textcolor=color.white, style=label.style_label_left, size=size.small)
+label.new(bar_index+1, target1,     "T1     $0.01",
+          color=color.green, textcolor=color.white, style=label.style_label_left, size=size.small)
+label.new(bar_index+1, target2,     "T2     $0.01",
+          color=color.green, textcolor=color.white, style=label.style_label_left, size=size.small)
+label.new(bar_index+1, target3,     "T3     $0.01",
+          color=color.green, textcolor=color.white, style=label.style_label_left, size=size.small)</textarea>
+  <button class="pine-copy-btn" onclick="copyPine('pine_SHORT_0')">📋 Copy to Clipboard</button>
+  <span id="pine_SHORT_0_copied" class="copied-msg" style="display:none">✓ Copied!</span>
+</div>
+  </div>
+
+  <div class="levels-grid">
+<div class="level-box">
+  <div class="level-label">Current Price</div>
+  <div class="level-value neutral">$0.01</div>
+</div>
+<div class="level-box">
+  <div class="level-label">Entry</div>
+  <div class="level-value blue">$0.01</div>
+</div>
+<div class="level-box">
+  <div class="level-label">Stop Loss</div>
+  <div class="level-value red">$0.01</div>
+</div>
+<div class="level-box">
+  <div class="level-label">Target T1</div>
+  <div class="level-value green">$0.01</div>
+</div>
+<div class="level-box">
+  <div class="level-label">T2 (Fib 161.8%)</div>
+  <div class="level-value green">$0.01</div>
+</div>
+<div class="level-box">
+  <div class="level-label">T3 (Fib 261.8%)</div>
+  <div class="level-value green">$0.01</div>
+</div>
+<div class="level-box">
+  <div class="level-label">R:R Ratio</div>
+  <div class="level-value green">1:2.64</div>
+</div>
+<div class="level-box">
+  <div class="level-label">RSI</div>
+  <div class="level-value red">70.5</div>
+</div>
+<div class="level-box">
+  <div class="level-label">Position $</div>
+  <div class="level-value neutral">$2,440</div>
+</div>
+  </div>
+
+  <div class="two-col">
+<div>
+  <h4>Profit / Loss Scenarios</h4>
+  <table class="scenario-table">
+    <tr><th>Scenario</th><th>Price</th><th>P&L</th><th>% Portfolio</th></tr>
+    <tr class="loss-row">
+      <td>Stop hit</td><td>$0.01</td>
+      <td>-$0.0</td><td class="red">-0.0%</td>
+    </tr>
+    <tr>
+      <td>Target T1</td><td>$0.01</td>
+      <td>+$0.0</td><td class="green">+0.0%</td>
+    </tr>
+    <tr>
+      <td>Target T2</td><td>$0.01</td>
+      <td>+$0.0</td><td class="green">+0.0%</td>
+    </tr>
+    <tr>
+      <td>Target T3</td><td>$0.01</td>
+      <td>+$0.0</td><td class="green">+0.0%</td>
+    </tr>
+  </table>
+</div>
+<div>
+  <h4>4-Week Compounding</h4>
+  <table class="scenario-table">
+    <tr><th>Week</th><th>Portfolio</th><th>Total Gain</th></tr>
+    
+            <tr>
+              <td>Week 1</td>
+              <td>$31,600.00</td>
+              <td class="green">+$6,600.00</td>
+            </tr>
+            <tr>
+              <td>Week 2</td>
+              <td>$39,942.40</td>
+              <td class="green">+$14,942.40</td>
+            </tr>
+            <tr>
+              <td>Week 3</td>
+              <td>$50,487.19</td>
+              <td class="green">+$25,487.19</td>
+            </tr>
+            <tr>
+              <td>Week 4</td>
+              <td>$63,815.81</td>
+              <td class="green">+$38,815.81</td>
+            </tr>
+  </table>
+</div>
+  </div>
+
+  <!-- Top-Down Filter Analysis -->
+  <div class="topdown-section">
+<div class="topdown-title">📊 Top-Down Filter Analysis (Cycles Trading)</div>
+<div class="topdown-grid">
+  <div class="td-box">
+    <div class="td-label">Monthly Trend</div>
+    <div class="td-badge td-neut">N/A</div>
+    <div class="td-sub">—</div>
+  </div>
+  <div class="td-box">
+    <div class="td-label">Sector Relative Strength</div>
+    <div class="td-badge td-neut">—</div>
+    <div class="td-sub">N/A</div>
+  </div>
+  <div class="td-box">
+    <div class="td-label">Support Quality</div>
+    <div class="td-badge td-bull">STRONG</div>
+    <div class="td-sub">3 touches at level</div>
+  </div>
+</div>
+  </div>
+
+  <!-- Probability of Success -->
+  <div class="prob-section">
+<div class="prob-header">
+  <span class="prob-title">Estimated Success Probability (reach T1)</span>
+  <span class="prob-value" style="color:#d29922">64% &nbsp;<small style="font-size:13px;font-weight:500">MEDIUM</small></span>
+</div>
+<div class="prob-bar-bg">
+  <div class="prob-bar-fill" style="width:64%;background:#d29922"></div>
+</div>
+<div class="prob-factors">
+  <div class="prob-factor" title="RSI 70.5 — ideal bounce zone (55–72)"><span class="fname">RSI</span><span class="fdelta" style="color:#3fb950">+16%</span></div><div class="prob-factor" title="R:R 1:2.64 — solid"><span class="fname">R:R Ratio</span><span class="fdelta" style="color:#3fb950">+6%</span></div><div class="prob-factor" title="Volume not declining — less conviction"><span class="fname">Volume</span><span class="fdelta" style="color:#f85149">-6%</span></div><div class="prob-factor" title="Only 0.0% from key level — near-perfect entry"><span class="fname">Entry Distance</span><span class="fdelta" style="color:#3fb950">+14%</span></div><div class="prob-factor" title="No earnings concern"><span class="fname">Earnings Risk</span><span class="fdelta" style="color:#3fb950">+5%</span></div><div class="prob-factor" title="Setup score 4.0 — good signal"><span class="fname">Setup Quality</span><span class="fdelta" style="color:#3fb950">+4%</span></div><div class="prob-factor" title="Stop 0.0% away — tight, controlled risk"><span class="fname">Stop Distance</span><span class="fdelta" style="color:#3fb950">+6%</span></div><div class="prob-factor" title="Support tested 3x — proven level"><span class="fname">Support Quality</span><span class="fdelta" style="color:#3fb950">+10%</span></div><div class="prob-factor" title="ATR 10.7% — high volatility, smaller position"><span class="fname">Volatility (ATR)</span><span class="fdelta" style="color:#f85149">-10%</span></div><div class="prob-factor" title="MACD neutral"><span class="fname">MACD</span><span class="fdelta" style="color:#8b949e">+0%</span></div><div class="prob-factor" title="Mid-band (%B=0.74) — neutral"><span class="fname">Bollinger Bands</span><span class="fdelta" style="color:#8b949e">+0%</span></div><div class="prob-factor" title="Level broken both directions — market never respected it"><span class="fname">Level Reliability</span><span class="fdelta" style="color:#f85149">-18%</span></div><div class="prob-factor" title="Single clear entry level — no competing levels nearby (1 other)"><span class="fname">Level Clarity</span><span class="fdelta" style="color:#3fb950">+8%</span></div><div class="prob-factor" title="Minimal retracement (0%) — entering too early before a proper Fibonacci pullback"><span class="fname">Fib 0%: No Retrace</span><span class="fdelta" style="color:#f85149">-3%</span></div><div class="prob-factor" title="Last swing high not closed through — may be a correction; wait for weekly close confirmation before entering"><span class="fname">TrendConf: UNCONFIRMED</span><span class="fdelta" style="color:#f85149">-18%</span></div>
+</div>
+<div style="font-size:10px;color:#484f58;margin-top:8px">
+  * Algorithmic estimate based on 10 technical factors (incl. Monthly Trend, Sector RS, Support Quality). Not a guarantee. Always manage your risk.
+</div>
+  </div>
+
+</div>
+<div class="card short-card" data-horizon="WEEKLY">
+  <div class="card-header">
+<div class="card-title">
+  <span class="ticker">MARA</span>
+  <span class="dir-badge short-badge">
+    ▼ SHORT
+  </span>
+  <span class="horizon-badge" style="background:#3fb95022;color:#3fb950;border:1px solid #3fb95066;"
+        title="~1.9 weeks to T1 · 1–2 שבועות">
+    ⚡ שבועי
+  </span>
+  <span class="type-badge">STOCK</span>
+</div>
+<div class="card-meta">
+  <span class="badge warn">⚠ Vol</span> <span class="badge earn-approaching">📅 APPROACHING</span> <span class="badge atr-high">🔥 ATR 17.89%</span>  <span class="badge ok">MACD ▲</span>  <span class="badge squeeze-high">🚨 SQUEEZE RISK HIGH — Short 30.8% / Inst 69.6%</span>
+  <a href="https://www.tradingview.com/chart/?symbol=NASDAQ:MARA&interval=W" target="_blank" class="tv-link">📊 TradingView</a>
+  <button class="pine-btn" onclick="showPine('pine_SHORT_1')">📋 Pine Script</button>
+  <button class="colmex-btn" onclick="showColmex('pine_SHORT_1_cmx')">💹 Trade on Colmex</button>
+</div>
+  </div>
+  
+  <div class="squeeze-box high">
+<strong>🚨 SHORT SQUEEZE WARNING — HIGH RISK</strong><br>
+Short Interest: <b>30.8%</b> &nbsp;|&nbsp; Institutional Ownership: <b>69.6%</b><br>
+<span style="color:#f0f6fc">
+  30.8% of the float is already shorted. Institutional ownership at 69.6% means
+  very few shares are available. Any positive news can trigger a violent squeeze upward.
+  <b>Consider skipping this SHORT.</b>
+</span>
+  </div>
+  <!-- Position Sizing Box -->
+  <div class="pos-size-box">
+<div class="pos-size-title">💼 Position Sizing</div>
+<div class="pos-size-grid">
+  <div class="ps-cell">
+    <div class="ps-label">סיכון לעסקה</div>
+    <div class="ps-val">$125</div>
+    <div class="ps-sub">1% של התיק (×0.5 — High Vol)</div>
+  </div>
+  <div class="ps-cell">
+    <div class="ps-label">גודל פוזיציה</div>
+    <div class="ps-val" style="color:#3fb950">$1,810</div>
+    <div class="ps-sub" style="color:#3fb950">7.2% מהתיק — SAFE </div>
+  </div>
+  <div class="ps-cell">
+    <div class="ps-label">כמות מניות</div>
+    <div class="ps-val">146.0</div>
+    <div class="ps-sub">@ $12.4</div>
+  </div>
+  <div class="ps-cell">
+    <div class="ps-label">מקסימום פוזיציות</div>
+    <div class="ps-val">6</div>
+    <div class="ps-sub">סה"כ בו זמנית</div>
+  </div>
+</div>
+<div class="ps-rule">📏 כלל: 1% סיכון × 6 פוזיציות = 6% חשיפה מקסימלית</div>
+  </div>
+  <!-- Fundamental Analysis Box (stock-analysis skill) -->
+  
+  <div class="fund-box" style="background:#0d2b0d;border:1px solid #3fb95044;">
+    <div class="fund-header">
+      <span class="fund-title">🔬 Fundamental Analysis</span>
+      <span class="fund-signal" style="color:#3fb950;border:1px solid #3fb95066;">📈 BUY &nbsp;·&nbsp; 75% confidence</span>
+    </div>
+    <div class="fund-grid">
+      <div class="fund-cell"><div class="fund-label">אנליסטים</div><div class="fund-val" style="color:#3fb950">Buy (11 analysts)</div></div>
+      <div class="fund-cell"><div class="fund-label">יעד מחיר</div><div class="fund-val">$18.54<span style="color:#3fb950;font-size:11px"> (+49.5%)</span></div></div>
+    </div>
+    <ul class="fund-bullets"><li>• Financial Services / Capital Markets — $4.7B market cap</li><li>• Analyst target $18.54 → +49.5% upside</li><li>• Revenue growth: -18.4%</li></ul>
+    <ul class="fund-caveats"><li>⚠ High short interest: 31%</li></ul>
+  </div>
+  <!-- Traffic Light Decision Box -->
+  <div class="tl-box" style="background:#2b0d0d;border:1px solid #f85149;">
+<div class="tl-signal">🔴 אל תיכנס</div>
+<div class="tl-lists">
+  <ul class="tl-green"><li>✅ Strong support level</li></ul>
+  <ul class="tl-red"><li>⚠ Earnings approaching (15-30d)</li><li>⚠ High Volatility ATR 17.89%</li></ul>
+</div>
+  </div>
+  <!-- Colmex Trade Modal for MARA -->
+  <div id="pine_SHORT_1_cmx" class="pine-modal" onclick="if(event.target===this)this.style.display='none'">
+<div class="pine-box cmx-box">
+  <div class="pine-header cmx-header">
+    <span>💹 ColmexPro Order — MARA (Short)</span>
+    <button class="pine-close" onclick="document.getElementById('pine_SHORT_1_cmx').style.display='none'">✕</button>
+  </div>
+  <div class="cmx-instructions">
+    <div class="cmx-tip">💡 פתח ColmexPro בטאב נפרד והתחבר → חפש <b>MARA</b> → מלא לפי הטופס למטה</div>
+    
+  </div>
+
+  <!-- ColmexPro-style order form -->
+  <div class="cmx-form">
+    <div class="cmx-form-title">Order entry MARA</div>
+
+    <div class="cmx-field-row">
+      <span class="cmx-field-label">Symbol</span>
+      <div class="cmx-field-val">
+        <span class="cmx-eq-badge">EQ</span>
+        <b>MARA</b>
+      </div>
+      <button class="cmx-copy" onclick="copyText('MARA',this)">Copy</button>
+    </div>
+
+    <div class="cmx-field-row">
+      <span class="cmx-field-label">Side</span>
+      <div class="cmx-side-btns">
+        <span class="cmx-side-active cmx-side-sell">SELL</span>
+        <span class="cmx-side-inactive">Buy</span>
+      </div>
+      <button class="cmx-copy" onclick="copyText('SELL',this)">Copy</button>
+    </div>
+
+    <div class="cmx-field-row">
+      <span class="cmx-field-label">Quantity</span>
+      <div class="cmx-field-input">146.0</div>
+      <button class="cmx-copy" onclick="copyText('146.0',this)">Copy</button>
+    </div>
+
+    <div class="cmx-field-row">
+      <span class="cmx-field-label">Order type</span>
+      <div class="cmx-field-val">Limit</div>
+    </div>
+
+    <div class="cmx-field-row">
+      <span class="cmx-field-label">Validity</span>
+      <div class="cmx-field-val">GTC</div>
+    </div>
+
+    <div class="cmx-field-row">
+      <span class="cmx-field-label">Limit price</span>
+      <div class="cmx-field-input cmx-price-blue">12.4</div>
+      <button class="cmx-copy" onclick="copyText('12.4',this)">Copy</button>
+    </div>
+
+    <div class="cmx-field-row">
+      <span class="cmx-field-label">SL price</span>
+      <div class="cmx-field-input cmx-price-red">13.26</div>
+      <button class="cmx-copy" onclick="copyText('13.26',this)">Copy</button>
+    </div>
+
+    <div class="cmx-field-row">
+      <span class="cmx-field-label">TP price <small>(T1)</small></span>
+      <div class="cmx-field-input cmx-price-green">9.81</div>
+      <button class="cmx-copy" onclick="copyText('9.81',this)">Copy</button>
+    </div>
+
+    <div class="cmx-field-row cmx-fib-row">
+      <span class="cmx-field-label">TP <small>(T2 Fib)</small></span>
+      <div class="cmx-field-input cmx-price-green">8.21</div>
+      <button class="cmx-copy" onclick="copyText('8.21',this)">Copy</button>
+    </div>
+
+    <div class="cmx-field-row cmx-fib-row">
+      <span class="cmx-field-label">TP <small>(T3 Fib)</small></span>
+      <div class="cmx-field-input cmx-price-green">5.62</div>
+      <button class="cmx-copy" onclick="copyText('5.62',this)">Copy</button>
+    </div>
+
+    <div class="cmx-price-bar">
+      <span class="cmx-price-blue">12.4</span>
+      <span class="cmx-bar-mid">146.0 units · $1,810 · R:R 1:3.03</span>
+      <span class="cmx-price-red">9.81</span>
+    </div>
+
+    <a href="https://webplatform.colmex.com/" target="_blank" class="cmx-place-btn">
+      🔴 Place SELL Order
+    </a>
+  </div>
+</div>
+  </div>
+
+  <!-- Pine Script modal for MARA -->
+  <div id="pine_SHORT_1" class="pine-modal" onclick="if(event.target===this)this.style.display='none'">
+<div class="pine-box">
+  <div class="pine-header">
+    <span>📋 Pine Script — MARA SHORT ▼</span>
+    <button class="pine-close" onclick="document.getElementById('pine_SHORT_1').style.display='none'">✕</button>
+  </div>
+  <div class="pine-instructions">
+    <b>How to use:</b>&nbsp; 1. Open TradingView &nbsp;→&nbsp;
+    2. Open <b>MARA</b> chart, Weekly (1W) &nbsp;→&nbsp;
+    3. Click <b>Pine Editor</b> at the bottom &nbsp;→&nbsp;
+    4. Paste the code below &nbsp;→&nbsp; Click <b>"Add to chart"</b><br>
+    → Entry (blue), Stop (red), T1/T2/T3 (green) lines appear automatically.
+  </div>
+  <textarea id="pine_SHORT_1_code" class="pine-code" readonly>//@version=5
+indicator("Cycles: MARA", overlay=true, max_lines_count=100)
+// ─── HOW TO USE ───────────────────────────────────────────
+// 1. Open this stock/coin chart on TradingView (Weekly 1W)
+// 2. Click Pine Editor at the bottom
+// 3. Paste this code and click "Add to chart"
+// 4. Entry / Stop / Target lines appear automatically
+
+// SHORT ▼  MARA
+// Entry : 12.4  |  Stop: 13.26  |  R:R: 3.03
+
+entry_price  = 12.4
+stop_price   = 13.26
+target1      = 9.81
+target2      = 8.2094
+target3      = 5.6194
+
+// Draw horizontal lines
+line.new(bar_index - 50, entry_price, bar_index + 20, entry_price,
+         color=color.new(color.blue,  0), width=2, style=line.style_solid)
+line.new(bar_index - 50, stop_price,  bar_index + 20, stop_price,
+         color=color.new(color.red,   0), width=2, style=line.style_dashed)
+line.new(bar_index - 50, target1,     bar_index + 20, target1,
+         color=color.new(color.green, 0), width=2, style=line.style_dashed)
+line.new(bar_index - 50, target2,     bar_index + 20, target2,
+         color=color.new(color.green,30), width=1, style=line.style_dashed)
+line.new(bar_index - 50, target3,     bar_index + 20, target3,
+         color=color.new(color.green,60), width=1, style=line.style_dotted)
+
+// Labels
+label.new(bar_index+1, entry_price, "Entry  $12.4",
+          color=color.blue,  textcolor=color.white, style=label.style_label_left, size=size.small)
+label.new(bar_index+1, stop_price,  "Stop   $13.26",
+          color=color.red,   textcolor=color.white, style=label.style_label_left, size=size.small)
+label.new(bar_index+1, target1,     "T1     $9.81",
+          color=color.green, textcolor=color.white, style=label.style_label_left, size=size.small)
+label.new(bar_index+1, target2,     "T2     $8.2094",
+          color=color.green, textcolor=color.white, style=label.style_label_left, size=size.small)
+label.new(bar_index+1, target3,     "T3     $5.6194",
+          color=color.green, textcolor=color.white, style=label.style_label_left, size=size.small)</textarea>
+  <button class="pine-copy-btn" onclick="copyPine('pine_SHORT_1')">📋 Copy to Clipboard</button>
+  <span id="pine_SHORT_1_copied" class="copied-msg" style="display:none">✓ Copied!</span>
+</div>
+  </div>
+
+  <div class="levels-grid">
+<div class="level-box">
+  <div class="level-label">Current Price</div>
+  <div class="level-value neutral">$12.4</div>
+</div>
+<div class="level-box">
+  <div class="level-label">Entry</div>
+  <div class="level-value blue">$12.4</div>
+</div>
+<div class="level-box">
+  <div class="level-label">Stop Loss</div>
+  <div class="level-value red">$13.26</div>
+</div>
+<div class="level-box">
+  <div class="level-label">Target T1</div>
+  <div class="level-value green">$9.81</div>
+</div>
+<div class="level-box">
+  <div class="level-label">T2 (Fib 161.8%)</div>
+  <div class="level-value green">$8.21</div>
+</div>
+<div class="level-box">
+  <div class="level-label">T3 (Fib 261.8%)</div>
+  <div class="level-value green">$5.62</div>
+</div>
+<div class="level-box">
+  <div class="level-label">R:R Ratio</div>
+  <div class="level-value green">1:3.03</div>
+</div>
+<div class="level-box">
+  <div class="level-label">RSI</div>
+  <div class="level-value red">65.5</div>
+</div>
+<div class="level-box">
+  <div class="level-label">Position $</div>
+  <div class="level-value neutral">$1,810</div>
+</div>
+  </div>
+
+  <div class="two-col">
+<div>
+  <h4>Profit / Loss Scenarios</h4>
+  <table class="scenario-table">
+    <tr><th>Scenario</th><th>Price</th><th>P&L</th><th>% Portfolio</th></tr>
+    <tr class="loss-row">
+      <td>Stop hit</td><td>$13.26</td>
+      <td>-$125.56</td><td class="red">-0.5%</td>
+    </tr>
+    <tr>
+      <td>Target T1</td><td>$9.81</td>
+      <td>+$378.14</td><td class="green">+1.51%</td>
+    </tr>
+    <tr>
+      <td>Target T2</td><td>$8.21</td>
+      <td>+$611.74</td><td class="green">+2.45%</td>
+    </tr>
+    <tr>
+      <td>Target T3</td><td>$5.62</td>
+      <td>+$989.88</td><td class="green">+3.96%</td>
+    </tr>
+  </table>
+</div>
+<div>
+  <h4>4-Week Compounding</h4>
+  <table class="scenario-table">
+    <tr><th>Week</th><th>Portfolio</th><th>Total Gain</th></tr>
+    
+            <tr>
+              <td>Week 1</td>
+              <td>$32,575.00</td>
+              <td class="green">+$7,575.00</td>
+            </tr>
+            <tr>
+              <td>Week 2</td>
+              <td>$42,445.22</td>
+              <td class="green">+$17,445.22</td>
+            </tr>
+            <tr>
+              <td>Week 3</td>
+              <td>$55,306.12</td>
+              <td class="green">+$30,306.12</td>
+            </tr>
+            <tr>
+              <td>Week 4</td>
+              <td>$72,063.87</td>
+              <td class="green">+$47,063.87</td>
+            </tr>
+  </table>
+</div>
+  </div>
+
+  <!-- Top-Down Filter Analysis -->
+  <div class="topdown-section">
+<div class="topdown-title">📊 Top-Down Filter Analysis (Cycles Trading)</div>
+<div class="topdown-grid">
+  <div class="td-box">
+    <div class="td-label">Monthly Trend</div>
+    <div class="td-badge td-bear">▼ SHORT</div>
+    <div class="td-sub">NEUTRAL (-1.1%)</div>
+  </div>
+  <div class="td-box">
+    <div class="td-label">Sector Relative Strength</div>
+    <div class="td-badge td-neut">—</div>
+    <div class="td-sub">N/A</div>
+  </div>
+  <div class="td-box">
+    <div class="td-label">Support Quality</div>
+    <div class="td-badge td-bull">STRONG</div>
+    <div class="td-sub">6 touches at level</div>
+  </div>
+</div>
+  </div>
+
+  <!-- Probability of Success -->
+  <div class="prob-section">
+<div class="prob-header">
+  <span class="prob-title">Estimated Success Probability (reach T1)</span>
+  <span class="prob-value" style="color:#f85149">47% &nbsp;<small style="font-size:13px;font-weight:500">LOW</small></span>
+</div>
+<div class="prob-bar-bg">
+  <div class="prob-bar-fill" style="width:47%;background:#f85149"></div>
+</div>
+<div class="prob-factors">
+  <div class="prob-factor" title="RSI 65.5 — ideal bounce zone (55–72)"><span class="fname">RSI</span><span class="fdelta" style="color:#3fb950">+16%</span></div><div class="prob-factor" title="R:R 1:3.03 — strong setup"><span class="fname">R:R Ratio</span><span class="fdelta" style="color:#3fb950">+10%</span></div><div class="prob-factor" title="Volume not declining — less conviction"><span class="fname">Volume</span><span class="fdelta" style="color:#f85149">-6%</span></div><div class="prob-factor" title="3.8% from key level — good entry"><span class="fname">Entry Distance</span><span class="fdelta" style="color:#3fb950">+9%</span></div><div class="prob-factor" title="Next earnings: APPROACHING — safe window"><span class="fname">Earnings Risk</span><span class="fdelta" style="color:#3fb950">+3%</span></div><div class="prob-factor" title="Setup score 1.4 — weak signal"><span class="fname">Setup Quality</span><span class="fdelta" style="color:#f85149">-3%</span></div><div class="prob-factor" title="Stop 6.9% away — normal"><span class="fname">Stop Distance</span><span class="fdelta" style="color:#3fb950">+3%</span></div><div class="prob-factor" title="Monthly trend SHORT, last candle NEUTRAL — full alignment"><span class="fname">Monthly Trend</span><span class="fdelta" style="color:#3fb950">+18%</span></div><div class="prob-factor" title="Support tested 6x — proven level"><span class="fname">Support Quality</span><span class="fdelta" style="color:#3fb950">+10%</span></div><div class="prob-factor" title="ATR 17.9% — extreme volatility"><span class="fname">Volatility (ATR)</span><span class="fdelta" style="color:#f85149">-18%</span></div><div class="prob-factor" title="Earnings in 22 days — event risk (15–30d zone)"><span class="fname">Earnings Zone</span><span class="fdelta" style="color:#f85149">-8%</span></div><div class="prob-factor" title="Analyst BUY (conf 75%) — Buy (11 analysts), target $18.53818"><span class="fname">Fundamentals</span><span class="fdelta" style="color:#3fb950">+15%</span></div><div class="prob-factor" title="MACD neutral"><span class="fname">MACD</span><span class="fdelta" style="color:#8b949e">+0%</span></div><div class="prob-factor" title="Mid-band (%B=0.62) — neutral"><span class="fname">Bollinger Bands</span><span class="fdelta" style="color:#8b949e">+0%</span></div><div class="prob-factor" title="Level broken both directions — market never respected it"><span class="fname">Level Reliability</span><span class="fdelta" style="color:#f85149">-18%</span></div><div class="prob-factor" title="9 competing levels nearby — unclear entry point (seek cleaner setup)"><span class="fname">Level Clarity</span><span class="fdelta" style="color:#f85149">-16%</span></div><div class="prob-factor" title="Shallow retracement (34%) — price hasn't pulled back to fib levels yet; consider waiting"><span class="fname">Fib 34%: Shallow</span><span class="fdelta" style="color:#8b949e">+0%</span></div><div class="prob-factor" title="Last swing high not closed through — may be a correction; wait for weekly close confirmation before entering"><span class="fname">TrendConf: UNCONFIRMED</span><span class="fdelta" style="color:#f85149">-18%</span></div>
+</div>
+<div style="font-size:10px;color:#484f58;margin-top:8px">
+  * Algorithmic estimate based on 10 technical factors (incl. Monthly Trend, Sector RS, Support Quality). Not a guarantee. Always manage your risk.
+</div>
+  </div>
+
+</div>
+<div class="card short-card" data-horizon="MONTHLY">
+  <div class="card-header">
+<div class="card-title">
+  <span class="ticker">SOFI</span>
+  <span class="dir-badge short-badge">
+    ▼ SHORT
+  </span>
+  <span class="horizon-badge" style="background:#58a6ff22;color:#58a6ff;border:1px solid #58a6ff66;"
+        title="~2.6 weeks to T1 · 3–6 שבועות">
+    📅 חודשי
+  </span>
+  <span class="type-badge">STOCK</span>
+</div>
+<div class="card-meta">
+  <span class="badge warn">⚠ Vol</span> <span class="badge earn-approaching">📅 APPROACHING</span> <span class="badge atr-high">🔥 ATR 11.71%</span>  <span class="badge ok">MACD ▲</span>  <span class="badge squeeze-high">🚨 SQUEEZE RISK HIGH — Short 15.5% / Inst 56.7%</span>
+  <a href="https://www.tradingview.com/chart/?symbol=NASDAQ:SOFI&interval=W" target="_blank" class="tv-link">📊 TradingView</a>
+  <button class="pine-btn" onclick="showPine('pine_SHORT_2')">📋 Pine Script</button>
+  <button class="colmex-btn" onclick="showColmex('pine_SHORT_2_cmx')">💹 Trade on Colmex</button>
+</div>
+  </div>
+  
+  <div class="squeeze-box high">
+<strong>🚨 SHORT SQUEEZE WARNING — HIGH RISK</strong><br>
+Short Interest: <b>15.5%</b> &nbsp;|&nbsp; Institutional Ownership: <b>56.7%</b><br>
+<span style="color:#f0f6fc">
+  15.5% of the float is already shorted. Institutional ownership at 56.7% means
+  very few shares are available. Any positive news can trigger a violent squeeze upward.
+  <b>Consider skipping this SHORT.</b>
+</span>
+  </div>
+  <!-- Position Sizing Box -->
+  <div class="pos-size-box">
+<div class="pos-size-title">💼 Position Sizing</div>
+<div class="pos-size-grid">
+  <div class="ps-cell">
+    <div class="ps-label">סיכון לעסקה</div>
+    <div class="ps-val">$125</div>
+    <div class="ps-sub">1% של התיק (×0.5 — High Vol)</div>
+  </div>
+  <div class="ps-cell">
+    <div class="ps-label">גודל פוזיציה</div>
+    <div class="ps-val" style="color:#3fb950">$2,037</div>
+    <div class="ps-sub" style="color:#3fb950">8.2% מהתיק — SAFE </div>
+  </div>
+  <div class="ps-cell">
+    <div class="ps-label">כמות מניות</div>
+    <div class="ps-val">111.7</div>
+    <div class="ps-sub">@ $18.24</div>
+  </div>
+  <div class="ps-cell">
+    <div class="ps-label">מקסימום פוזיציות</div>
+    <div class="ps-val">6</div>
+    <div class="ps-sub">סה"כ בו זמנית</div>
+  </div>
+</div>
+<div class="ps-rule">📏 כלל: 1% סיכון × 6 פוזיציות = 6% חשיפה מקסימלית</div>
+  </div>
+  <!-- Fundamental Analysis Box (stock-analysis skill) -->
+  
+  <div class="fund-box" style="background:#2b1f0d;border:1px solid #d2992244;">
+    <div class="fund-header">
+      <span class="fund-title">🔬 Fundamental Analysis</span>
+      <span class="fund-signal" style="color:#d29922;border:1px solid #d2992266;">⏸ HOLD &nbsp;·&nbsp; 55% confidence</span>
+    </div>
+    <div class="fund-grid">
+      <div class="fund-cell"><div class="fund-label">אנליסטים</div><div class="fund-val" style="color:#d29922">Hold (20 analysts)</div></div>
+      <div class="fund-cell"><div class="fund-label">יעד מחיר</div><div class="fund-val">$20.90<span style="color:#3fb950;font-size:11px"> (+14.6%)</span></div></div>
+    </div>
+    <ul class="fund-bullets"><li>• Financial Services / Credit Services — $23.4B market cap</li><li>• Analyst target $20.90 → +14.6% upside</li><li>• Revenue growth: 42.5%</li></ul>
+    
+  </div>
+  <!-- Traffic Light Decision Box -->
+  <div class="tl-box" style="background:#2b0d0d;border:1px solid #f85149;">
+<div class="tl-signal">🔴 אל תיכנס</div>
+<div class="tl-lists">
+  <ul class="tl-green"><li>✅ Strong support level</li></ul>
+  <ul class="tl-red"><li>⚠ Earnings approaching (15-30d)</li><li>⚠ High Volatility ATR 11.71%</li></ul>
+</div>
+  </div>
+  <!-- Colmex Trade Modal for SOFI -->
+  <div id="pine_SHORT_2_cmx" class="pine-modal" onclick="if(event.target===this)this.style.display='none'">
+<div class="pine-box cmx-box">
+  <div class="pine-header cmx-header">
+    <span>💹 ColmexPro Order — SOFI (Short)</span>
+    <button class="pine-close" onclick="document.getElementById('pine_SHORT_2_cmx').style.display='none'">✕</button>
+  </div>
+  <div class="cmx-instructions">
+    <div class="cmx-tip">💡 פתח ColmexPro בטאב נפרד והתחבר → חפש <b>SOFI</b> → מלא לפי הטופס למטה</div>
+    
+  </div>
+
+  <!-- ColmexPro-style order form -->
+  <div class="cmx-form">
+    <div class="cmx-form-title">Order entry SOFI</div>
+
+    <div class="cmx-field-row">
+      <span class="cmx-field-label">Symbol</span>
+      <div class="cmx-field-val">
+        <span class="cmx-eq-badge">EQ</span>
+        <b>SOFI</b>
+      </div>
+      <button class="cmx-copy" onclick="copyText('SOFI',this)">Copy</button>
+    </div>
+
+    <div class="cmx-field-row">
+      <span class="cmx-field-label">Side</span>
+      <div class="cmx-side-btns">
+        <span class="cmx-side-active cmx-side-sell">SELL</span>
+        <span class="cmx-side-inactive">Buy</span>
+      </div>
+      <button class="cmx-copy" onclick="copyText('SELL',this)">Copy</button>
+    </div>
+
+    <div class="cmx-field-row">
+      <span class="cmx-field-label">Quantity</span>
+      <div class="cmx-field-input">111.7</div>
+      <button class="cmx-copy" onclick="copyText('111.7',this)">Copy</button>
+    </div>
+
+    <div class="cmx-field-row">
+      <span class="cmx-field-label">Order type</span>
+      <div class="cmx-field-val">Limit</div>
+    </div>
+
+    <div class="cmx-field-row">
+      <span class="cmx-field-label">Validity</span>
+      <div class="cmx-field-val">GTC</div>
+    </div>
+
+    <div class="cmx-field-row">
+      <span class="cmx-field-label">Limit price</span>
+      <div class="cmx-field-input cmx-price-blue">18.24</div>
+      <button class="cmx-copy" onclick="copyText('18.24',this)">Copy</button>
+    </div>
+
+    <div class="cmx-field-row">
+      <span class="cmx-field-label">SL price</span>
+      <div class="cmx-field-input cmx-price-red">19.36</div>
+      <button class="cmx-copy" onclick="copyText('19.36',this)">Copy</button>
+    </div>
+
+    <div class="cmx-field-row">
+      <span class="cmx-field-label">TP price <small>(T1)</small></span>
+      <div class="cmx-field-input cmx-price-green">14.93</div>
+      <button class="cmx-copy" onclick="copyText('14.93',this)">Copy</button>
+    </div>
+
+    <div class="cmx-field-row cmx-fib-row">
+      <span class="cmx-field-label">TP <small>(T2 Fib)</small></span>
+      <div class="cmx-field-input cmx-price-green">12.88</div>
+      <button class="cmx-copy" onclick="copyText('12.88',this)">Copy</button>
+    </div>
+
+    <div class="cmx-field-row cmx-fib-row">
+      <span class="cmx-field-label">TP <small>(T3 Fib)</small></span>
+      <div class="cmx-field-input cmx-price-green">9.57</div>
+      <button class="cmx-copy" onclick="copyText('9.57',this)">Copy</button>
+    </div>
+
+    <div class="cmx-price-bar">
+      <span class="cmx-price-blue">18.24</span>
+      <span class="cmx-bar-mid">111.7 units · $2,037 · R:R 1:2.96</span>
+      <span class="cmx-price-red">14.93</span>
+    </div>
+
+    <a href="https://webplatform.colmex.com/" target="_blank" class="cmx-place-btn">
+      🔴 Place SELL Order
+    </a>
+  </div>
+</div>
+  </div>
+
+  <!-- Pine Script modal for SOFI -->
+  <div id="pine_SHORT_2" class="pine-modal" onclick="if(event.target===this)this.style.display='none'">
+<div class="pine-box">
+  <div class="pine-header">
+    <span>📋 Pine Script — SOFI SHORT ▼</span>
+    <button class="pine-close" onclick="document.getElementById('pine_SHORT_2').style.display='none'">✕</button>
+  </div>
+  <div class="pine-instructions">
+    <b>How to use:</b>&nbsp; 1. Open TradingView &nbsp;→&nbsp;
+    2. Open <b>SOFI</b> chart, Weekly (1W) &nbsp;→&nbsp;
+    3. Click <b>Pine Editor</b> at the bottom &nbsp;→&nbsp;
+    4. Paste the code below &nbsp;→&nbsp; Click <b>"Add to chart"</b><br>
+    → Entry (blue), Stop (red), T1/T2/T3 (green) lines appear automatically.
+  </div>
+  <textarea id="pine_SHORT_2_code" class="pine-code" readonly>//@version=5
+indicator("Cycles: SOFI", overlay=true, max_lines_count=100)
+// ─── HOW TO USE ───────────────────────────────────────────
+// 1. Open this stock/coin chart on TradingView (Weekly 1W)
+// 2. Click Pine Editor at the bottom
+// 3. Paste this code and click "Add to chart"
+// 4. Entry / Stop / Target lines appear automatically
+
+// SHORT ▼  SOFI
+// Entry : 18.24  |  Stop: 19.36  |  R:R: 2.96
+
+entry_price  = 18.24
+stop_price   = 19.36
+target1      = 14.93
+target2      = 12.8844
+target3      = 9.5744
+
+// Draw horizontal lines
+line.new(bar_index - 50, entry_price, bar_index + 20, entry_price,
+         color=color.new(color.blue,  0), width=2, style=line.style_solid)
+line.new(bar_index - 50, stop_price,  bar_index + 20, stop_price,
+         color=color.new(color.red,   0), width=2, style=line.style_dashed)
+line.new(bar_index - 50, target1,     bar_index + 20, target1,
+         color=color.new(color.green, 0), width=2, style=line.style_dashed)
+line.new(bar_index - 50, target2,     bar_index + 20, target2,
+         color=color.new(color.green,30), width=1, style=line.style_dashed)
+line.new(bar_index - 50, target3,     bar_index + 20, target3,
+         color=color.new(color.green,60), width=1, style=line.style_dotted)
+
+// Labels
+label.new(bar_index+1, entry_price, "Entry  $18.24",
+          color=color.blue,  textcolor=color.white, style=label.style_label_left, size=size.small)
+label.new(bar_index+1, stop_price,  "Stop   $19.36",
+          color=color.red,   textcolor=color.white, style=label.style_label_left, size=size.small)
+label.new(bar_index+1, target1,     "T1     $14.93",
+          color=color.green, textcolor=color.white, style=label.style_label_left, size=size.small)
+label.new(bar_index+1, target2,     "T2     $12.8844",
+          color=color.green, textcolor=color.white, style=label.style_label_left, size=size.small)
+label.new(bar_index+1, target3,     "T3     $9.5744",
+          color=color.green, textcolor=color.white, style=label.style_label_left, size=size.small)</textarea>
+  <button class="pine-copy-btn" onclick="copyPine('pine_SHORT_2')">📋 Copy to Clipboard</button>
+  <span id="pine_SHORT_2_copied" class="copied-msg" style="display:none">✓ Copied!</span>
+</div>
+  </div>
+
+  <div class="levels-grid">
+<div class="level-box">
+  <div class="level-label">Current Price</div>
+  <div class="level-value neutral">$18.24</div>
+</div>
+<div class="level-box">
+  <div class="level-label">Entry</div>
+  <div class="level-value blue">$18.24</div>
+</div>
+<div class="level-box">
+  <div class="level-label">Stop Loss</div>
+  <div class="level-value red">$19.36</div>
+</div>
+<div class="level-box">
+  <div class="level-label">Target T1</div>
+  <div class="level-value green">$14.93</div>
+</div>
+<div class="level-box">
+  <div class="level-label">T2 (Fib 161.8%)</div>
+  <div class="level-value green">$12.88</div>
+</div>
+<div class="level-box">
+  <div class="level-label">T3 (Fib 261.8%)</div>
+  <div class="level-value green">$9.57</div>
+</div>
+<div class="level-box">
+  <div class="level-label">R:R Ratio</div>
+  <div class="level-value green">1:2.96</div>
+</div>
+<div class="level-box">
+  <div class="level-label">RSI</div>
+  <div class="level-value neutral">60.0</div>
+</div>
+<div class="level-box">
+  <div class="level-label">Position $</div>
+  <div class="level-value neutral">$2,037</div>
+</div>
+  </div>
+
+  <div class="two-col">
+<div>
+  <h4>Profit / Loss Scenarios</h4>
+  <table class="scenario-table">
+    <tr><th>Scenario</th><th>Price</th><th>P&L</th><th>% Portfolio</th></tr>
+    <tr class="loss-row">
+      <td>Stop hit</td><td>$19.36</td>
+      <td>-$125.1</td><td class="red">-0.5%</td>
+    </tr>
+    <tr>
+      <td>Target T1</td><td>$14.93</td>
+      <td>+$369.73</td><td class="green">+1.48%</td>
+    </tr>
+    <tr>
+      <td>Target T2</td><td>$12.88</td>
+      <td>+$598.71</td><td class="green">+2.39%</td>
+    </tr>
+    <tr>
+      <td>Target T3</td><td>$9.57</td>
+      <td>+$968.44</td><td class="green">+3.87%</td>
+    </tr>
+  </table>
+</div>
+<div>
+  <h4>4-Week Compounding</h4>
+  <table class="scenario-table">
+    <tr><th>Week</th><th>Portfolio</th><th>Total Gain</th></tr>
+    
+            <tr>
+              <td>Week 1</td>
+              <td>$32,400.00</td>
+              <td class="green">+$7,400.00</td>
+            </tr>
+            <tr>
+              <td>Week 2</td>
+              <td>$41,990.40</td>
+              <td class="green">+$16,990.40</td>
+            </tr>
+            <tr>
+              <td>Week 3</td>
+              <td>$54,419.56</td>
+              <td class="green">+$29,419.56</td>
+            </tr>
+            <tr>
+              <td>Week 4</td>
+              <td>$70,527.75</td>
+              <td class="green">+$45,527.75</td>
+            </tr>
+  </table>
+</div>
+  </div>
+
+  <!-- Top-Down Filter Analysis -->
+  <div class="topdown-section">
+<div class="topdown-title">📊 Top-Down Filter Analysis (Cycles Trading)</div>
+<div class="topdown-grid">
+  <div class="td-box">
+    <div class="td-label">Monthly Trend</div>
+    <div class="td-badge td-bear">▼ SHORT</div>
+    <div class="td-sub">NEUTRAL (-1.2%)</div>
+  </div>
+  <div class="td-box">
+    <div class="td-label">Sector Relative Strength</div>
+    <div class="td-badge td-neut">—</div>
+    <div class="td-sub">N/A</div>
+  </div>
+  <div class="td-box">
+    <div class="td-label">Support Quality</div>
+    <div class="td-badge td-bull">STRONG</div>
+    <div class="td-sub">4 touches at level</div>
+  </div>
+</div>
+  </div>
+
+  <!-- Probability of Success -->
+  <div class="prob-section">
+<div class="prob-header">
+  <span class="prob-title">Estimated Success Probability (reach T1)</span>
+  <span class="prob-value" style="color:#f85149">33% &nbsp;<small style="font-size:13px;font-weight:500">LOW</small></span>
+</div>
+<div class="prob-bar-bg">
+  <div class="prob-bar-fill" style="width:33%;background:#f85149"></div>
+</div>
+<div class="prob-factors">
+  <div class="prob-factor" title="RSI 60.0 — ideal bounce zone (55–72)"><span class="fname">RSI</span><span class="fdelta" style="color:#3fb950">+16%</span></div><div class="prob-factor" title="R:R 1:2.96 — solid"><span class="fname">R:R Ratio</span><span class="fdelta" style="color:#3fb950">+6%</span></div><div class="prob-factor" title="Volume not declining — less conviction"><span class="fname">Volume</span><span class="fdelta" style="color:#f85149">-6%</span></div><div class="prob-factor" title="3.1% from key level — good entry"><span class="fname">Entry Distance</span><span class="fdelta" style="color:#3fb950">+9%</span></div><div class="prob-factor" title="Next earnings: APPROACHING — safe window"><span class="fname">Earnings Risk</span><span class="fdelta" style="color:#3fb950">+3%</span></div><div class="prob-factor" title="Setup score 1.1 — weak signal"><span class="fname">Setup Quality</span><span class="fdelta" style="color:#f85149">-3%</span></div><div class="prob-factor" title="Stop 6.1% away — normal"><span class="fname">Stop Distance</span><span class="fdelta" style="color:#3fb950">+3%</span></div><div class="prob-factor" title="Monthly trend SHORT, last candle NEUTRAL — full alignment"><span class="fname">Monthly Trend</span><span class="fdelta" style="color:#3fb950">+18%</span></div><div class="prob-factor" title="Support tested 4x — proven level"><span class="fname">Support Quality</span><span class="fdelta" style="color:#3fb950">+10%</span></div><div class="prob-factor" title="ATR 11.7% — high volatility, smaller position"><span class="fname">Volatility (ATR)</span><span class="fdelta" style="color:#f85149">-10%</span></div><div class="prob-factor" title="Earnings in 23 days — event risk (15–30d zone)"><span class="fname">Earnings Zone</span><span class="fdelta" style="color:#f85149">-8%</span></div><div class="prob-factor" title="Analyst HOLD — Hold (20 analysts)"><span class="fname">Fundamentals</span><span class="fdelta" style="color:#8b949e">+0%</span></div><div class="prob-factor" title="MACD neutral"><span class="fname">MACD</span><span class="fdelta" style="color:#8b949e">+0%</span></div><div class="prob-factor" title="Mid-band (%B=0.70) — neutral"><span class="fname">Bollinger Bands</span><span class="fdelta" style="color:#8b949e">+0%</span></div><div class="prob-factor" title="Level broken both directions — market never respected it"><span class="fname">Level Reliability</span><span class="fdelta" style="color:#f85149">-18%</span></div><div class="prob-factor" title="5 competing levels nearby — unclear entry point (seek cleaner setup)"><span class="fname">Level Clarity</span><span class="fdelta" style="color:#f85149">-16%</span></div><div class="prob-factor" title="Minimal retracement (19%) — entering too early before a proper Fibonacci pullback"><span class="fname">Fib 19%: No Retrace</span><span class="fdelta" style="color:#f85149">-3%</span></div><div class="prob-factor" title="Last swing high not closed through — may be a correction; wait for weekly close confirmation before entering"><span class="fname">TrendConf: UNCONFIRMED</span><span class="fdelta" style="color:#f85149">-18%</span></div>
+</div>
+<div style="font-size:10px;color:#484f58;margin-top:8px">
+  * Algorithmic estimate based on 10 technical factors (incl. Monthly Trend, Sector RS, Support Quality). Not a guarantee. Always manage your risk.
+</div>
+  </div>
+
+</div>
+<div class="card short-card" data-horizon="WEEKLY">
+  <div class="card-header">
+<div class="card-title">
+  <span class="ticker">AMC</span>
+  <span class="dir-badge short-badge">
+    ▼ SHORT
+  </span>
+  <span class="horizon-badge" style="background:#3fb95022;color:#3fb950;border:1px solid #3fb95066;"
+        title="~2.3 weeks to T1 · 1–2 שבועות">
+    ⚡ שבועי
+  </span>
+  <span class="type-badge">STOCK</span>
+</div>
+<div class="card-meta">
+  <span class="badge warn">⚠ Vol</span> <span class="badge ok">2026-05-05</span> <span class="badge atr-high">🔥 ATR 24.79%</span>  <span class="badge ok">MACD ▲</span>  
+  <a href="https://www.tradingview.com/chart/?symbol=NASDAQ:AMC&interval=W" target="_blank" class="tv-link">📊 TradingView</a>
+  <button class="pine-btn" onclick="showPine('pine_SHORT_3')">📋 Pine Script</button>
+  <button class="colmex-btn" onclick="showColmex('pine_SHORT_3_cmx')">💹 Trade on Colmex</button>
+</div>
+  </div>
+  
+  <!-- Position Sizing Box -->
+  <div class="pos-size-box">
+<div class="pos-size-title">💼 Position Sizing</div>
+<div class="pos-size-grid">
+  <div class="ps-cell">
+    <div class="ps-label">סיכון לעסקה</div>
+    <div class="ps-val">$125</div>
+    <div class="ps-sub">1% של התיק (×0.5 — High Vol)</div>
+  </div>
+  <div class="ps-cell">
+    <div class="ps-label">גודל פוזיציה</div>
+    <div class="ps-val" style="color:#3fb950">$2,183</div>
+    <div class="ps-sub" style="color:#3fb950">8.7% מהתיק — SAFE </div>
+  </div>
+  <div class="ps-cell">
+    <div class="ps-label">כמות מניות</div>
+    <div class="ps-val">1155.3</div>
+    <div class="ps-sub">@ $1.89</div>
+  </div>
+  <div class="ps-cell">
+    <div class="ps-label">מקסימום פוזיציות</div>
+    <div class="ps-val">6</div>
+    <div class="ps-sub">סה"כ בו זמנית</div>
+  </div>
+</div>
+<div class="ps-rule">📏 כלל: 1% סיכון × 6 פוזיציות = 6% חשיפה מקסימלית</div>
+  </div>
+  <!-- Fundamental Analysis Box (stock-analysis skill) -->
+  
+  <div class="fund-box" style="background:#2b1f0d;border:1px solid #d2992244;">
+    <div class="fund-header">
+      <span class="fund-title">🔬 Fundamental Analysis</span>
+      <span class="fund-signal" style="color:#d29922;border:1px solid #d2992266;">⏸ HOLD &nbsp;·&nbsp; 50% confidence</span>
+    </div>
+    <div class="fund-grid">
+      <div class="fund-cell"><div class="fund-label">אנליסטים</div><div class="fund-val" style="color:#d29922">None (6 analysts)</div></div>
+      <div class="fund-cell"><div class="fund-label">יעד מחיר</div><div class="fund-val">$2.16<span style="color:#3fb950;font-size:11px"> (+14.2%)</span></div></div>
+    </div>
+    <ul class="fund-bullets"><li>• Communication Services / Entertainment — $1.7B market cap</li><li>• Analyst target $2.16 → +14.2% upside</li><li>• Revenue growth: 21.2%</li></ul>
+    
+  </div>
+  <!-- Traffic Light Decision Box -->
+  <div class="tl-box" style="background:#2b0d0d;border:1px solid #f85149;">
+<div class="tl-signal">🔴 אל תיכנס</div>
+<div class="tl-lists">
+  
+  <ul class="tl-red"><li>⚠ High Volatility ATR 24.79%</li></ul>
+</div>
+  </div>
+  <!-- Colmex Trade Modal for AMC -->
+  <div id="pine_SHORT_3_cmx" class="pine-modal" onclick="if(event.target===this)this.style.display='none'">
+<div class="pine-box cmx-box">
+  <div class="pine-header cmx-header">
+    <span>💹 ColmexPro Order — AMC (Short)</span>
+    <button class="pine-close" onclick="document.getElementById('pine_SHORT_3_cmx').style.display='none'">✕</button>
+  </div>
+  <div class="cmx-instructions">
+    <div class="cmx-tip">💡 פתח ColmexPro בטאב נפרד והתחבר → חפש <b>AMC</b> → מלא לפי הטופס למטה</div>
+    
+  </div>
+
+  <!-- ColmexPro-style order form -->
+  <div class="cmx-form">
+    <div class="cmx-form-title">Order entry AMC</div>
+
+    <div class="cmx-field-row">
+      <span class="cmx-field-label">Symbol</span>
+      <div class="cmx-field-val">
+        <span class="cmx-eq-badge">EQ</span>
+        <b>AMC</b>
+      </div>
+      <button class="cmx-copy" onclick="copyText('AMC',this)">Copy</button>
+    </div>
+
+    <div class="cmx-field-row">
+      <span class="cmx-field-label">Side</span>
+      <div class="cmx-side-btns">
+        <span class="cmx-side-active cmx-side-sell">SELL</span>
+        <span class="cmx-side-inactive">Buy</span>
+      </div>
+      <button class="cmx-copy" onclick="copyText('SELL',this)">Copy</button>
+    </div>
+
+    <div class="cmx-field-row">
+      <span class="cmx-field-label">Quantity</span>
+      <div class="cmx-field-input">1155.3</div>
+      <button class="cmx-copy" onclick="copyText('1155.3',this)">Copy</button>
+    </div>
+
+    <div class="cmx-field-row">
+      <span class="cmx-field-label">Order type</span>
+      <div class="cmx-field-val">Limit</div>
+    </div>
+
+    <div class="cmx-field-row">
+      <span class="cmx-field-label">Validity</span>
+      <div class="cmx-field-val">GTC</div>
+    </div>
+
+    <div class="cmx-field-row">
+      <span class="cmx-field-label">Limit price</span>
+      <div class="cmx-field-input cmx-price-blue">1.89</div>
+      <button class="cmx-copy" onclick="copyText('1.89',this)">Copy</button>
+    </div>
+
+    <div class="cmx-field-row">
+      <span class="cmx-field-label">SL price</span>
+      <div class="cmx-field-input cmx-price-red">2.0</div>
+      <button class="cmx-copy" onclick="copyText('2.0',this)">Copy</button>
+    </div>
+
+    <div class="cmx-field-row">
+      <span class="cmx-field-label">TP price <small>(T1)</small></span>
+      <div class="cmx-field-input cmx-price-green">1.24</div>
+      <button class="cmx-copy" onclick="copyText('1.24',this)">Copy</button>
+    </div>
+
+    <div class="cmx-field-row cmx-fib-row">
+      <span class="cmx-field-label">TP <small>(T2 Fib)</small></span>
+      <div class="cmx-field-input cmx-price-green">0.84</div>
+      <button class="cmx-copy" onclick="copyText('0.84',this)">Copy</button>
+    </div>
+
+    <div class="cmx-field-row cmx-fib-row">
+      <span class="cmx-field-label">TP <small>(T3 Fib)</small></span>
+      <div class="cmx-field-input cmx-price-green">0.19</div>
+      <button class="cmx-copy" onclick="copyText('0.19',this)">Copy</button>
+    </div>
+
+    <div class="cmx-price-bar">
+      <span class="cmx-price-blue">1.89</span>
+      <span class="cmx-bar-mid">1155.3 units · $2,183 · R:R 1:6.01</span>
+      <span class="cmx-price-red">1.24</span>
+    </div>
+
+    <a href="https://webplatform.colmex.com/" target="_blank" class="cmx-place-btn">
+      🔴 Place SELL Order
+    </a>
+  </div>
+</div>
+  </div>
+
+  <!-- Pine Script modal for AMC -->
+  <div id="pine_SHORT_3" class="pine-modal" onclick="if(event.target===this)this.style.display='none'">
+<div class="pine-box">
+  <div class="pine-header">
+    <span>📋 Pine Script — AMC SHORT ▼</span>
+    <button class="pine-close" onclick="document.getElementById('pine_SHORT_3').style.display='none'">✕</button>
+  </div>
+  <div class="pine-instructions">
+    <b>How to use:</b>&nbsp; 1. Open TradingView &nbsp;→&nbsp;
+    2. Open <b>AMC</b> chart, Weekly (1W) &nbsp;→&nbsp;
+    3. Click <b>Pine Editor</b> at the bottom &nbsp;→&nbsp;
+    4. Paste the code below &nbsp;→&nbsp; Click <b>"Add to chart"</b><br>
+    → Entry (blue), Stop (red), T1/T2/T3 (green) lines appear automatically.
+  </div>
+  <textarea id="pine_SHORT_3_code" class="pine-code" readonly>//@version=5
+indicator("Cycles: AMC", overlay=true, max_lines_count=100)
+// ─── HOW TO USE ───────────────────────────────────────────
+// 1. Open this stock/coin chart on TradingView (Weekly 1W)
+// 2. Click Pine Editor at the bottom
+// 3. Paste this code and click "Add to chart"
+// 4. Entry / Stop / Target lines appear automatically
+
+// SHORT ▼  AMC
+// Entry : 1.89  |  Stop: 2.0  |  R:R: 6.01
+
+entry_price  = 1.89
+stop_price   = 2.0
+target1      = 1.24
+target2      = 0.8383
+target3      = 0.1883
+
+// Draw horizontal lines
+line.new(bar_index - 50, entry_price, bar_index + 20, entry_price,
+         color=color.new(color.blue,  0), width=2, style=line.style_solid)
+line.new(bar_index - 50, stop_price,  bar_index + 20, stop_price,
+         color=color.new(color.red,   0), width=2, style=line.style_dashed)
+line.new(bar_index - 50, target1,     bar_index + 20, target1,
+         color=color.new(color.green, 0), width=2, style=line.style_dashed)
+line.new(bar_index - 50, target2,     bar_index + 20, target2,
+         color=color.new(color.green,30), width=1, style=line.style_dashed)
+line.new(bar_index - 50, target3,     bar_index + 20, target3,
+         color=color.new(color.green,60), width=1, style=line.style_dotted)
+
+// Labels
+label.new(bar_index+1, entry_price, "Entry  $1.89",
+          color=color.blue,  textcolor=color.white, style=label.style_label_left, size=size.small)
+label.new(bar_index+1, stop_price,  "Stop   $2.0",
+          color=color.red,   textcolor=color.white, style=label.style_label_left, size=size.small)
+label.new(bar_index+1, target1,     "T1     $1.24",
+          color=color.green, textcolor=color.white, style=label.style_label_left, size=size.small)
+label.new(bar_index+1, target2,     "T2     $0.8383",
+          color=color.green, textcolor=color.white, style=label.style_label_left, size=size.small)
+label.new(bar_index+1, target3,     "T3     $0.1883",
+          color=color.green, textcolor=color.white, style=label.style_label_left, size=size.small)</textarea>
+  <button class="pine-copy-btn" onclick="copyPine('pine_SHORT_3')">📋 Copy to Clipboard</button>
+  <span id="pine_SHORT_3_copied" class="copied-msg" style="display:none">✓ Copied!</span>
+</div>
+  </div>
+
+  <div class="levels-grid">
+<div class="level-box">
+  <div class="level-label">Current Price</div>
+  <div class="level-value neutral">$1.89</div>
+</div>
+<div class="level-box">
+  <div class="level-label">Entry</div>
+  <div class="level-value blue">$1.89</div>
+</div>
+<div class="level-box">
+  <div class="level-label">Stop Loss</div>
+  <div class="level-value red">$2.0</div>
+</div>
+<div class="level-box">
+  <div class="level-label">Target T1</div>
+  <div class="level-value green">$1.24</div>
+</div>
+<div class="level-box">
+  <div class="level-label">T2 (Fib 161.8%)</div>
+  <div class="level-value green">$0.84</div>
+</div>
+<div class="level-box">
+  <div class="level-label">T3 (Fib 261.8%)</div>
+  <div class="level-value green">$0.19</div>
+</div>
+<div class="level-box">
+  <div class="level-label">R:R Ratio</div>
+  <div class="level-value green">1:6.01</div>
+</div>
+<div class="level-box">
+  <div class="level-label">RSI</div>
+  <div class="level-value neutral">61.5</div>
+</div>
+<div class="level-box">
+  <div class="level-label">Position $</div>
+  <div class="level-value neutral">$2,183</div>
+</div>
+  </div>
+
+  <div class="two-col">
+<div>
+  <h4>Profit / Loss Scenarios</h4>
+  <table class="scenario-table">
+    <tr><th>Scenario</th><th>Price</th><th>P&L</th><th>% Portfolio</th></tr>
+    <tr class="loss-row">
+      <td>Stop hit</td><td>$2.0</td>
+      <td>-$127.08</td><td class="red">-0.51%</td>
+    </tr>
+    <tr>
+      <td>Target T1</td><td>$1.24</td>
+      <td>+$750.94</td><td class="green">+3.0%</td>
+    </tr>
+    <tr>
+      <td>Target T2</td><td>$0.84</td>
+      <td>+$1213.06</td><td class="green">+4.85%</td>
+    </tr>
+    <tr>
+      <td>Target T3</td><td>$0.19</td>
+      <td>+$1964.01</td><td class="green">+7.86%</td>
+    </tr>
+  </table>
+</div>
+<div>
+  <h4>4-Week Compounding</h4>
+  <table class="scenario-table">
+    <tr><th>Week</th><th>Portfolio</th><th>Total Gain</th></tr>
+    
+            <tr>
+              <td>Week 1</td>
+              <td>$40,025.00</td>
+              <td class="green">+$15,025.00</td>
+            </tr>
+            <tr>
+              <td>Week 2</td>
+              <td>$64,080.02</td>
+              <td class="green">+$39,080.02</td>
+            </tr>
+            <tr>
+              <td>Week 3</td>
+              <td>$102,592.11</td>
+              <td class="green">+$77,592.11</td>
+            </tr>
+            <tr>
+              <td>Week 4</td>
+              <td>$164,249.97</td>
+              <td class="green">+$139,249.97</td>
+            </tr>
+  </table>
+</div>
+  </div>
+
+  <!-- Top-Down Filter Analysis -->
+  <div class="topdown-section">
+<div class="topdown-title">📊 Top-Down Filter Analysis (Cycles Trading)</div>
+<div class="topdown-grid">
+  <div class="td-box">
+    <div class="td-label">Monthly Trend</div>
+    <div class="td-badge td-bear">▼ SHORT</div>
+    <div class="td-sub">BULL (+6.7%)</div>
+  </div>
+  <div class="td-box">
+    <div class="td-label">Sector Relative Strength</div>
+    <div class="td-badge td-neut">—</div>
+    <div class="td-sub">N/A</div>
+  </div>
+  <div class="td-box">
+    <div class="td-label">Support Quality</div>
+    <div class="td-badge td-warn">WEAK</div>
+    <div class="td-sub">0 touches at level</div>
+  </div>
+</div>
+  </div>
+
+  <!-- Probability of Success -->
+  <div class="prob-section">
+<div class="prob-header">
+  <span class="prob-title">Estimated Success Probability (reach T1)</span>
+  <span class="prob-value" style="color:#f85149">27% &nbsp;<small style="font-size:13px;font-weight:500">LOW</small></span>
+</div>
+<div class="prob-bar-bg">
+  <div class="prob-bar-fill" style="width:27%;background:#f85149"></div>
+</div>
+<div class="prob-factors">
+  <div class="prob-factor" title="RSI 61.5 — ideal bounce zone (55–72)"><span class="fname">RSI</span><span class="fdelta" style="color:#3fb950">+16%</span></div><div class="prob-factor" title="R:R 1:6.01 — excellent room to target"><span class="fname">R:R Ratio</span><span class="fdelta" style="color:#3fb950">+14%</span></div><div class="prob-factor" title="Volume not declining — less conviction"><span class="fname">Volume</span><span class="fdelta" style="color:#f85149">-6%</span></div><div class="prob-factor" title="2.6% from key level — good entry"><span class="fname">Entry Distance</span><span class="fdelta" style="color:#3fb950">+9%</span></div><div class="prob-factor" title="Next earnings: 2026-05-05 — safe window"><span class="fname">Earnings Risk</span><span class="fdelta" style="color:#3fb950">+3%</span></div><div class="prob-factor" title="Setup score 9.1 — high-quality signal"><span class="fname">Setup Quality</span><span class="fdelta" style="color:#3fb950">+8%</span></div><div class="prob-factor" title="Stop 5.8% away — normal"><span class="fname">Stop Distance</span><span class="fdelta" style="color:#3fb950">+3%</span></div><div class="prob-factor" title="Monthly trend SHORT, candle mixed (BULL)"><span class="fname">Monthly Trend</span><span class="fdelta" style="color:#3fb950">+8%</span></div><div class="prob-factor" title="Support tested once — unproven"><span class="fname">Support Quality</span><span class="fdelta" style="color:#f85149">-8%</span></div><div class="prob-factor" title="ATR 24.8% — extreme volatility"><span class="fname">Volatility (ATR)</span><span class="fdelta" style="color:#f85149">-18%</span></div><div class="prob-factor" title="Analyst HOLD — None (6 analysts)"><span class="fname">Fundamentals</span><span class="fdelta" style="color:#8b949e">+0%</span></div><div class="prob-factor" title="MACD neutral"><span class="fname">MACD</span><span class="fdelta" style="color:#8b949e">+0%</span></div><div class="prob-factor" title="Mid-band (%B=0.67) — neutral"><span class="fname">Bollinger Bands</span><span class="fdelta" style="color:#8b949e">+0%</span></div><div class="prob-factor" title="Level broken both directions — market never respected it"><span class="fname">Level Reliability</span><span class="fdelta" style="color:#f85149">-18%</span></div><div class="prob-factor" title="6 competing levels nearby — unclear entry point (seek cleaner setup)"><span class="fname">Level Clarity</span><span class="fdelta" style="color:#f85149">-16%</span></div><div class="prob-factor" title="Shallow retracement (36%) — price hasn't pulled back to fib levels yet; consider waiting"><span class="fname">Fib 36%: Shallow</span><span class="fdelta" style="color:#8b949e">+0%</span></div><div class="prob-factor" title="Last swing high not closed through — may be a correction; wait for weekly close confirmation before entering"><span class="fname">TrendConf: UNCONFIRMED</span><span class="fdelta" style="color:#f85149">-18%</span></div>
+</div>
+<div style="font-size:10px;color:#484f58;margin-top:8px">
+  * Algorithmic estimate based on 10 technical factors (incl. Monthly Trend, Sector RS, Support Quality). Not a guarantee. Always manage your risk.
+</div>
+  </div>
+
+</div>
+</div>
+
+<div class="footer">
+  Cycles Trading Scanner &nbsp;|&nbsp; For educational purposes only &nbsp;|&nbsp;
+  Not financial advice &nbsp;|&nbsp; Always manage your risk
+</div>
+
+<script>
+/* ── Time Horizon filter ── */
+function filterHorizon(horizon, tabEl) {
+  // Update active tab
+  document.querySelectorAll('.htab').forEach(function(t) { t.classList.remove('active'); });
+  tabEl.classList.add('active');
+  // Show/hide cards
+  document.querySelectorAll('.card').forEach(function(card) {
+    if (horizon === 'ALL') {
+      card.style.display = '';
+    } else {
+      card.style.display = (card.dataset.horizon === horizon) ? '' : 'none';
+    }
+  });
+}
+
+function showPine(id) {
+  document.getElementById(id).style.display = 'flex';
+}
+function showColmex(id) {
+  document.getElementById(id).style.display = 'flex';
+}
+function copyPine(id) {
+  var ta = document.getElementById(id + '_code');
+  ta.select();
+  ta.setSelectionRange(0, 99999);
+  try { navigator.clipboard.writeText(ta.value); } catch(e) { document.execCommand('copy'); }
+  var msg = document.getElementById(id + '_copied');
+  msg.style.display = 'inline';
+  setTimeout(function(){ msg.style.display = 'none'; }, 2500);
+}
+function copyText(val, btn) {
+  try { navigator.clipboard.writeText(String(val)); } catch(e) {
+    var ta = document.createElement('textarea');
+    ta.value = String(val); document.body.appendChild(ta);
+    ta.select(); document.execCommand('copy'); document.body.removeChild(ta);
+  }
+  var orig = btn.textContent;
+  btn.textContent = '✓';
+  btn.classList.add('copied');
+  setTimeout(function(){ btn.textContent = orig; btn.classList.remove('copied'); }, 1500);
+}
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape') {
+    document.querySelectorAll('.pine-modal').forEach(function(m){
+      m.style.display = 'none';
+    });
+  }
+});
+</script>
+
+</body>
+</html>
