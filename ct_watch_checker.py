@@ -367,11 +367,14 @@ def generate_watch_html(results: list, today: str) -> str:
     out_path = reports_dir / f'watch_report_{ts}.html'
 
     tl_bg    = {'GREEN': '#d5f5e3', 'YELLOW': '#fef9e7', 'RED': '#fdecea',
-                'NO_LEVEL': '#f8f9fa', 'FETCH_ERROR': '#fff3e0', None: '#f8f9fa'}
+                'NO_LEVEL': '#f8f9fa', 'FETCH_ERROR': '#fff3e0',
+                'REMOVED': '#f0e6ff', None: '#f8f9fa'}
     tl_icon  = {'GREEN': '🟢',      'YELLOW': '🟡',      'RED': '🔴',
-                'NO_LEVEL': '🔘',    'FETCH_ERROR': '⚠️',  None: '⚪'}
+                'NO_LEVEL': '🔘',    'FETCH_ERROR': '⚠️',
+                'REMOVED': '🗑',   None: '⚪'}
     tl_label = {'GREEN': 'GO',      'YELLOW': 'WAIT',    'RED': 'NOT YET',
-                'NO_LEVEL': 'Not in zone', 'FETCH_ERROR': 'Fetch error', None: 'No Setup'}
+                'NO_LEVEL': 'Not in zone', 'FETCH_ERROR': 'Fetch error',
+                'REMOVED': 'Auto-removed', None: 'No Setup'}
 
     rows_html = ''
     for idx, r in enumerate(sorted(results, key=lambda x: x.get('prob', 0), reverse=True)):
@@ -422,10 +425,12 @@ def generate_watch_html(results: list, today: str) -> str:
             f"</tr>{fund_row}"
         )
 
-    n_go   = sum(1 for r in results if r.get('tl') == 'GREEN')
-    n_wait = sum(1 for r in results if r.get('tl') == 'YELLOW')
-    n_zone = sum(1 for r in results if r.get('tl') == 'NO_LEVEL')
-    n_no   = sum(1 for r in results if r.get('tl') not in ('GREEN', 'YELLOW', 'NO_LEVEL', 'FETCH_ERROR'))
+    n_go      = sum(1 for r in results if r.get('tl') == 'GREEN')
+    n_wait    = sum(1 for r in results if r.get('tl') == 'YELLOW')
+    n_zone    = sum(1 for r in results if r.get('tl') == 'NO_LEVEL')
+    n_removed = sum(1 for r in results if r.get('tl') == 'REMOVED')
+    n_no      = sum(1 for r in results if r.get('tl') not in
+                    ('GREEN', 'YELLOW', 'NO_LEVEL', 'FETCH_ERROR', 'REMOVED'))
 
     table_html = (
         '<table><thead><tr>'
@@ -488,6 +493,7 @@ function toggleFund(id) {{
     <span class="pill">🟡 WAIT: {n_wait}</span>
     <span class="pill">🔴 NOT YET: {n_no}</span>
     <span class="pill">🔘 Not in zone: {n_zone}</span>
+    <span class="pill">🗑 Removed: {n_removed}</span>
     <span class="pill">📋 Total: {len(results)}</span>
   </div>
 </div>
@@ -538,14 +544,21 @@ def run_check():
             print(f"-- {reason_label}  (price={price_str})")
             entry['status']       = reason or 'NO_DATA'
             entry['last_checked'] = today
+            # Track how long the stock has been out of zone
+            if reason == 'NO_LEVEL':
+                entry.setdefault('not_in_zone_since', today)
+            elif reason != 'FETCH_ERROR':
+                entry.pop('not_in_zone_since', None)
             html_results.append({'ticker': ticker, 'direction': direction,
                                   'prob': 0, 'tl': reason, 'cur_price': price_str,
-                                  'notes': reason_label})
+                                  'notes': reason_label,
+                                  'not_in_zone_since': entry.get('not_in_zone_since')})
             continue
 
         prob = setup.get('Prob', 0)
         print(f"Prob={prob}%  TL={tl}")
         # Persist status to watch_alerts.json
+        entry.pop('not_in_zone_since', None)   # back in zone — reset counter
         entry['status']       = tl
         entry['prob']         = prob
         entry['entry_price']  = setup.get('Entry')
@@ -579,6 +592,34 @@ def run_check():
             entry['alert_count']  = entry.get('alert_count', 0) + 1
             alerts_sent += 1
             print(f"    Email sent OK")
+
+    # Auto-prune: remove tickers that have been "Not in zone" for 21+ days
+    NOT_IN_ZONE_DAYS = 21
+    before = len(data['tickers'])
+    pruned = []
+    kept   = []
+    for t in data['tickers']:
+        niz = t.get('not_in_zone_since')
+        if niz:
+            try:
+                days_out = (datetime.date.today() - datetime.date.fromisoformat(niz)).days
+                if days_out >= NOT_IN_ZONE_DAYS:
+                    pruned.append((t['ticker'], days_out))
+                    continue
+            except Exception:
+                pass
+        kept.append(t)
+    data['tickers'] = kept
+    if pruned:
+        print(f"\n  Auto-pruned {len(pruned)} stale ticker(s) (>{NOT_IN_ZONE_DAYS}d out of zone):")
+        for sym, days in pruned:
+            print(f"    REMOVED {sym} — {days} days not in zone")
+        # Mark removed in html_results so report shows them as removed
+        removed_syms = {s for s, _ in pruned}
+        for r in html_results:
+            if r['ticker'] in removed_syms:
+                r['notes'] = r.get('notes','') + f'  [auto-removed: {NOT_IN_ZONE_DAYS}d out of zone]'
+                r['tl'] = 'REMOVED'
 
     # Save updated last_alerted values
     save_watchlist(data)
