@@ -835,6 +835,63 @@ def _factor_candle_compression(r):
                 'Not a disqualifier but setup is less textbook.')
 
 
+@factor
+def _factor_breakout_quality(r):
+    """
+    Factor 26 - Breakout Quality.
+
+    A retest setup only has conviction if the original breakout above/below
+    the key level was made with a STRONG candle (large body) AND HIGH volume.
+
+    Weak breakout = price drifted across the level, not a true break.
+    Retest of a drifted level has low conviction -- the market may not
+    respect it on the retest either.
+
+    Master: lo hayta kan be-emet pritza ichutit shel harama
+    (There was no quality breakout of the level)
+
+    Scoring:
+      body >= 0.7x ATR AND vol >= 1.3x avg  -> QUALITY BREAKOUT   +10
+      one condition met                      -> PARTIAL              +5
+      body < 0.3x ATR  OR  vol < 0.8x avg   -> WEAK DRIFT           -8
+      otherwise                              -> AVERAGE               0
+      no breakout found in 12-bar window     -> skip (None)
+    """
+    is_long   = 'LONG' in r['Dir']
+    direction = 'LONG' if is_long else 'SHORT'
+    bq        = r.get('_breakout_quality', {})
+
+    if not bq or direction not in bq or bq[direction] is None:
+        return None   # no breakout detected in recent window
+
+    data       = bq[direction]
+    body_ratio = data.get('body_ratio', 0.0)
+    vol_ratio  = data.get('vol_ratio',  1.0)
+
+    strong_body = body_ratio >= 0.7
+    good_vol    = vol_ratio  >= 1.3
+    weak_body   = body_ratio <  0.3
+    low_vol     = vol_ratio  <  0.8
+
+    if strong_body and good_vol:
+        return (+10, 'Breakout Quality',
+                f'Breakout bar: body {body_ratio}x ATR, vol {vol_ratio}x avg '
+                f'-- quality break. Retest has conviction.')
+    elif strong_body or good_vol:
+        return (+5, 'Breakout Quality',
+                f'Breakout bar: body {body_ratio}x ATR, vol {vol_ratio}x avg '
+                f'-- partial quality (one condition met). Acceptable.')
+    elif weak_body or low_vol:
+        return (-8, 'Breakout Quality',
+                f'Breakout bar: body {body_ratio}x ATR, vol {vol_ratio}x avg '
+                f'-- weak drift across level, not a true break. '
+                f'Retest setup has low conviction.')
+    else:
+        return (0, 'Breakout Quality',
+                f'Breakout bar: body {body_ratio}x ATR, vol {vol_ratio}x avg '
+                f'-- average breakout quality.')
+
+
 def calc_probability(r):
     """
     Iterate FACTORS registry. Each factor returns (delta, label, explanation) or None to skip.

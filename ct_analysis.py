@@ -590,12 +590,40 @@ def _fetch_market_data(ticker, is_crypto=False, is_commodity=False,
         except Exception:
             pass
 
+    # ── Breakout Quality (Factor 26) ─────────────────────────
+    # Find the bar that first crossed support (LONG) or resistance (SHORT)
+    # in the last 12 bars. Score its body size vs ATR and volume vs 20-bar avg.
+    try:
+        _avg_vol20 = float(df['Volume'].tail(20).mean()) if len(df) >= 20 else 1.0
+        _bk_quality = {}
+        _bars12     = df.tail(13)   # need i-1 lookback so fetch 13
+        _c  = _bars12['Close'].values.astype(float)
+        _o  = _bars12['Open'].values.astype(float)
+        _v  = _bars12['Volume'].values.astype(float)
+        for _dir, _level in [('LONG', support), ('SHORT', resistance)]:
+            _found = None
+            for _i in range(1, len(_c)):
+                if _dir == 'LONG'  and _c[_i] > _level and _c[_i-1] <= _level:
+                    _found = _i; break
+                if _dir == 'SHORT' and _c[_i] < _level and _c[_i-1] >= _level:
+                    _found = _i; break
+            if _found is not None:
+                _body = abs(_c[_found] - _o[_found])
+                _bk_quality[_dir] = {
+                    'body_ratio': round(_body / atr_val, 2) if atr_val > 0 else 0.0,
+                    'vol_ratio':  round(_v[_found] / _avg_vol20, 2) if _avg_vol20 > 0 else 1.0,
+                }
+            else:
+                _bk_quality[_dir] = None   # no breakout found in window
+    except Exception:
+        _bk_quality = {}
+
     return {
         'df': df, 'price': price, 'rsi_val': rsi_val, 'atr_val': atr_val,
         'macd_data': macd_data, 'boll_data': boll_data, 'trend': trend,
         'support': support, 'resistance': resistance,
         'vol_ok': vol_ok, '_vol_ratio': _vol_ratio, '_dir_vol_ratio': _dir_vol_ratio,
-        '_candle_bodies': _norm_cb,
+        '_candle_bodies': _norm_cb, '_breakout_quality': _bk_quality,
         'earn_date': earn_date, 'earn_days': earn_days, 'earn_warn': earn_warn,
         'earn_approaching': earn_approaching, 'atr_pct': atr_pct,
         'high_volatility': high_volatility, 'm_analysis': m_analysis,
@@ -723,7 +751,9 @@ def _detect_setup(ticker, portfolio_size, market, is_crypto, asset_type, max_dis
     _setup['_vol_ratio']     = market.get('_vol_ratio', 1.0)
     _setup['_dir_vol_ratio'] = market.get('_dir_vol_ratio', 1.0)
     # Factor 25 — Pullback Candle Compression
-    _setup['_candle_bodies'] = market.get('_candle_bodies', [])
+    _setup['_candle_bodies']      = market.get('_candle_bodies', [])
+    # Factor 26 — Breakout Quality
+    _setup['_breakout_quality']   = market.get('_breakout_quality', {})
     return _finalize_setup(_setup, direction, ticker, atr_val,
                            m_analysis, is_crypto, is_commodity,
                            is_israel, is_intl, cached_info=market['cached_info'])
