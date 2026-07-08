@@ -215,8 +215,12 @@ def scan_momentum(min_spy_pct: float = 2.0):
     # ── Step 2: Portfolio size ───────────────────────────────────
     print()
     try:
-        raw = input("  Portfolio size in $ (press ENTER for $25,000): ").replace(",", "").strip()
-        portfolio_size = float(raw) if raw else 25000
+        _env_ps = __import__("os").environ.get("CT_PORTFOLIO_SIZE", "").strip()
+        if _env_ps:
+            portfolio_size = float(_env_ps)
+        else:
+            raw = input("  Portfolio size in $ (press ENTER for $25,000): ").replace(",", "").strip()
+            portfolio_size = float(raw) if raw else 25000
     except (EOFError, ValueError):
         portfolio_size = 25000
     print(f"  Portfolio: ${portfolio_size:,.0f}")

@@ -160,26 +160,36 @@ def main():
     # ══════════════════════════════════════════════════════════
     global PORTFOLIO_SIZE
     if PORTFOLIO_SIZE is None:
-        try:
-            raw = input("  [1] Enter your portfolio size in $  (e.g. 1000): ").replace(',','').strip()
-            PORTFOLIO_SIZE = float(raw) if raw else 1000
-        except (EOFError, ValueError):
-            PORTFOLIO_SIZE = 1000
-        print(f"      -> Portfolio set to: ${PORTFOLIO_SIZE:,.0f}")
+        _env_ps = os.environ.get("CT_PORTFOLIO_SIZE", "").strip()
+        if _env_ps:
+            PORTFOLIO_SIZE = float(_env_ps)
+            print(f"      -> Portfolio: ${PORTFOLIO_SIZE:,.0f}  (env)")
+        else:
+            try:
+                raw = input("  [1] Enter your portfolio size in $  (e.g. 1000): ").replace(',','').strip()
+                PORTFOLIO_SIZE = float(raw) if raw else 1000
+            except (EOFError, ValueError):
+                PORTFOLIO_SIZE = 1000
+            print(f"      -> Portfolio set to: ${PORTFOLIO_SIZE:,.0f}")
 
     # ══════════════════════════════════════════════════════════
     #  OPTION 2 — Specific ticker or scan all
     # ══════════════════════════════════════════════════════════
     print()
-    try:
-        ticker_input = input(
-            "  [2] Specific ticker (press ENTER to scan ALL)\n"
-            "      US: AAPL  |  Israeli: LUMI.TA  |  Intl: SAP.DE / 7203.T\n"
-            "      Crypto: BTC-USD  |  Commodity: GC=F (Gold) / CL=F (Oil)\n"
-            "      > "
-        ).strip().upper()
-    except (EOFError, KeyboardInterrupt):
-        ticker_input = ''
+    _env_ti = os.environ.get("CT_TICKER_INPUT", "").strip().upper()
+    if _env_ti:
+        ticker_input = _env_ti
+        print(f"  [2] Ticker: {ticker_input or 'ALL'}  (env)")
+    else:
+        try:
+            ticker_input = input(
+                "  [2] Specific ticker (press ENTER to scan ALL)\n"
+                "      US: AAPL  |  Israeli: LUMI.TA  |  Intl: SAP.DE / 7203.T\n"
+                "      Crypto: BTC-USD  |  Commodity: GC=F (Gold) / CL=F (Oil)\n"
+                "      > "
+            ).strip().upper()
+        except (EOFError, KeyboardInterrupt):
+            ticker_input = ''
 
     # Interval is always Weekly — Cycles Trading standard
     INTERVAL, PERIOD, IV_LABEL = '1wk', '2y', 'Weekly (1wk)'
