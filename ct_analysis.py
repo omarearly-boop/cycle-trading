@@ -543,6 +543,20 @@ def _fetch_market_data(ticker, is_crypto=False, is_commodity=False,
     except Exception:
         _dir_vol_ratio = 1.0
 
+    # Pullback Candle Compression (Factor 25)
+    # Measure the last 4 weekly candle body sizes, normalised by ATR so the
+    # values are price-independent.  Body = |close - open|.
+    # Shrinking bodies on approach = healthy compression (smart money absorbing).
+    # Large final candle = aggressive drop = danger signal.
+    try:
+        _last4   = df.tail(4)
+        _bodies  = [abs(float(row['Close']) - float(row['Open']))
+                    for _, row in _last4.iterrows()]
+        # Normalise by ATR so a 0.3 candle on a $10 stock ≠ a 0.3 candle on $500
+        _norm_cb = [round(b / atr_val, 3) if atr_val > 0 else b for b in _bodies]
+    except Exception:
+        _norm_cb = []
+
     # ── Earnings (stocks only) ────────────────────────────
     skip_fundamentals = is_crypto or is_commodity
     earn_date, earn_days = (None, None) if skip_fundamentals else get_earnings(asset)
@@ -581,6 +595,7 @@ def _fetch_market_data(ticker, is_crypto=False, is_commodity=False,
         'macd_data': macd_data, 'boll_data': boll_data, 'trend': trend,
         'support': support, 'resistance': resistance,
         'vol_ok': vol_ok, '_vol_ratio': _vol_ratio, '_dir_vol_ratio': _dir_vol_ratio,
+        '_candle_bodies': _norm_cb,
         'earn_date': earn_date, 'earn_days': earn_days, 'earn_warn': earn_warn,
         'earn_approaching': earn_approaching, 'atr_pct': atr_pct,
         'high_volatility': high_volatility, 'm_analysis': m_analysis,
@@ -705,8 +720,10 @@ def _detect_setup(ticker, portfolio_size, market, is_crypto, asset_type, max_dis
         fib_swing_low=fib_sl, fib_swing_high=fib_sh, fib_levels=fib_lvls,
         monthly_sr=market.get('monthly_sr', {}))
     # Pass quantitative volume ratio to factors (Factor 3 enhancement)
-    _setup['_vol_ratio'] = market.get('_vol_ratio', 1.0)
+    _setup['_vol_ratio']     = market.get('_vol_ratio', 1.0)
     _setup['_dir_vol_ratio'] = market.get('_dir_vol_ratio', 1.0)
+    # Factor 25 — Pullback Candle Compression
+    _setup['_candle_bodies'] = market.get('_candle_bodies', [])
     return _finalize_setup(_setup, direction, ticker, atr_val,
                            m_analysis, is_crypto, is_commodity,
                            is_israel, is_intl, cached_info=market['cached_info'])
@@ -739,29 +756,27 @@ def analyze(ticker, portfolio_size, is_crypto=False, is_israel=False,
                                     is_israel=is_israel, is_intl=is_intl,
                                     interval=interval, period=period)
         if market is None:
-            _diag('no_data'); return []
-
-        if is_crypto:
-            max_dist, asset_type = MAX_DIST_CRYPTO, 'CRYPTO'
-        elif is_commodity:
-            max_dist, asset_type = MAX_DIST_COMMODITY, 'COMMODITY'
-        elif is_israel:
-            max_dist, asset_type = MAX_DIST_STOCK, 'TASE'
-        elif is_intl:
-            max_dist, asset_type = MAX_DIST_INTL, 'INTL'
-        else:
-            max_dist, asset_type = MAX_DIST_STOCK, 'STOCK'
-
+            return setups
         for direction in ('LONG', 'SHORT'):
-            setup = _detect_setup(ticker, portfolio_size, market, is_crypto,
-                                  asset_type, max_dist, direction,
-                                  is_commodity, is_israel, is_intl)
+            setup = _detect_setup(
+                ticker, portfolio_size, market, is_crypto, asset_type,
+                MAX_DIST_STOCK, direction,
+                is_commodity=is_commodity, is_israel=is_israel, is_intl=is_intl,
+            )
             if setup:
-                _diag('passed'); setups.append(setup)
-
-    except Exception:
+                setups.append(setup)
+    except Exception as e:
         pass
-
     return setups
 
 
+# ── Backward-compatible shims ────────────────────────────────────────────────
+def _detect_long_setup(ticker, portfolio_size, market, is_crypto, asset_type, max_dist,
+                       is_commodity=False, is_israel=False, is_intl=False):
+    return _detect_setup(ticker, portfolio_size, market, is_crypto, asset_type, max_dist,
+                         'LONG', is_commodity, is_israel, is_intl)
+
+def _detect_short_setup(ticker, portfolio_size, market, is_crypto, asset_type, max_dist,
+                        is_commodity=False, is_israel=False, is_intl=False):
+    return _detect_setup(ticker, portfolio_size, market, is_crypto, asset_type, max_dist,
+                         'SHORT', is_commodity, is_israel, is_intl)

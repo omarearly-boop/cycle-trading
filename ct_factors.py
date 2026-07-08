@@ -777,6 +777,64 @@ def _factor_monthly_sr_confluence(r):
     total = base_score + trend_penalty
     return (total, label, detail)
 
+@factor
+def _factor_candle_compression(r):
+    """
+    Factor 25 - Pullback Candle Compression.
+
+    As price approaches support (LONG) or resistance (SHORT), candle BODIES
+    should SHRINK each bar smaller than the last means sellers/buyers are
+    losing momentum, and smart money is quietly absorbing the move.
+
+    An AGGRESSIVE large final bar just before the level is the opposite signal:
+    price is falling hard into support, not drifting, support is at real risk.
+
+    Master principle: candles getting smaller (nrot sheholchim veketanim begodlam).
+    Opposite warning: aggressive drop into support = skip.
+
+    Body sizes are ATR-normalised so a 1.2x reading = bar was 1.2x the ATR.
+
+    Scoring (last 4 weekly candles, b0=oldest b3=newest):
+      b3 < b2 < b1 (3 shrinking)  -> COMPRESSING    +10
+      b3 < b2 only (2 shrinking)  -> MILD COMPRESS   +5
+      b3 > 1.5x avg(b0,b1,b2)    -> AGGRESSIVE     -12
+      otherwise                   -> NEUTRAL           0
+    """
+    bodies = r.get('_candle_bodies', [])
+    if len(bodies) < 3:
+        return None   # not enough weekly data
+
+    b       = bodies[-4:] if len(bodies) >= 4 else bodies
+    last    = b[-1]
+    prev    = b[-2]
+    prev2   = b[-3] if len(b) >= 3 else b[-2]
+    older   = b[:-1]
+    avg_old = sum(older) / len(older) if older else last
+
+    # Aggressive drop: last bar significantly bigger than prior approach bars
+    if avg_old > 0 and last > avg_old * 1.5:
+        ratio = round(last / avg_old, 1)
+        return (-12, 'Candle Compression',
+                f'Last bar {ratio}x avg of prior bars '
+                f'-- aggressive drop into level. Support may not hold -- skip or wait.')
+
+    two_shrinking   = last < prev
+    three_shrinking = two_shrinking and (prev < prev2)
+
+    if three_shrinking:
+        return (+10, 'Candle Compression',
+                '3 consecutive shrinking bars -- textbook compression. '
+                'Smart money absorbing the pullback.')
+    elif two_shrinking:
+        return (+5, 'Candle Compression',
+                '2 shrinking bars into level -- partial compression. '
+                'Healthy but watch for 3rd bar confirmation.')
+    else:
+        return (0, 'Candle Compression',
+                'No clear compression -- bar sizes mixed on approach. '
+                'Not a disqualifier but setup is less textbook.')
+
+
 def calc_probability(r):
     """
     Iterate FACTORS registry. Each factor returns (delta, label, explanation) or None to skip.
