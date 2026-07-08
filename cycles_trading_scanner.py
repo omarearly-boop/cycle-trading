@@ -505,5 +505,12 @@ if __name__ == "__main__":
         from ct_momentum import scan_momentum
         scan_momentum()
 
+    elif _args[0] == 'monthly':
+        # python cycles_trading_scanner.py monthly
+        # python cycles_trading_scanner.py monthly --dist 5
+        from ct_monthly_scan import scan_monthly
+        max_dist = float(_args[_args.index('--dist') + 1]) if '--dist' in _args else 8.0
+        scan_monthly(max_dist=max_dist)
+
     else:
         print('Commands: (none) → full scan | positions | check [--email] | add | close <id> [price] | momentum')
