@@ -612,9 +612,11 @@ function parsePipelineLog(lines){
       const k=MAP[m[1].trim()];
       if(k){if(cur&&cur!==k)setNodeState(cur,'done','done');cur=k;setNodeState(k,'running','running...');}
     }
-    if(l.includes('OK in')&&cur){setNodeState(cur,'done','done');cur=null;}
-    if(l.includes('FAILED')&&cur){setNodeState(cur,'error','error');cur=null;}
+    if((l.includes('OK in')||l.includes('Exit code: 0'))&&cur){setNodeState(cur,'done','done');cur=null;}
+    if((l.includes('FAILED')||l.includes('TIMEOUT')||l.includes('EXCEPTION'))&&cur){setNodeState(cur,'error','error');cur=null;}
   });
+  // If pipeline finished with a task still "running", mark it done
+  // (final poll may arrive after process exited)
 }
 
 function stopCurrentJob(){
@@ -652,8 +654,8 @@ function startPoll(){
       }else{
         stopPoll();currentJob=null;
         const ok=d.status==='done';
-        if(activeTask!=='pipeline')setNodeState(activeTask,ok?'done':'error',ok?'done':'error');
-        else if(ok||activeTask==='all'){[...Object.keys(SCANNERS),...Object.keys(CHECKER)].forEach(k=>{if(nodeStates[k]!=='done')setNodeState(k,'done','done');});}
+        if(activeTask!=='pipeline'&&activeTask!=='all')setNodeState(activeTask,ok?'done':'error',ok?'done':'error');
+        else{[...Object.keys(SCANNERS),...Object.keys(CHECKER)].forEach(k=>{if(nodeStates[k]!=='done')setNodeState(k,ok?'done':'error',ok?'done':'error');});}
         setJobTag(ok?'Done '+el:'Error',ok?'done':'error');
         document.querySelectorAll('.btn-run').forEach(b=>b.disabled=false);
         document.getElementById('btn-all').disabled=false;
