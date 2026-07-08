@@ -490,5 +490,10 @@ if __name__ == "__main__":
         else:
             print('Usage: python cycles_trading_scanner.py close <position_id> [exit_price]')
 
+    elif _args[0] == 'momentum':
+        # python cycles_trading_scanner.py momentum
+        from ct_momentum import scan_momentum
+        scan_momentum()
+
     else:
-        print('Commands: (none) → full scan | positions | check [--email] | add | close <id> [price]')
+        print('Commands: (none) → full scan | positions | check [--email] | add | close <id> [price] | momentum')
