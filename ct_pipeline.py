@@ -126,6 +126,7 @@ def _run(label: str, cmd: list) -> bool:
     try:
         proc = subprocess.Popen(
             cmd, cwd=str(BASE_DIR), env=env,
+            stdin=subprocess.DEVNULL,          # no interactive prompts
             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             text=True, encoding='utf-8', errors='replace'
         )

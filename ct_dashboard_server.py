@@ -123,9 +123,12 @@ def _run_job(job_id: str, task: str):
     try:
         proc = subprocess.Popen(
             info['cmd'], cwd=str(BASE_DIR), env=env,
+            stdin=subprocess.DEVNULL,           # no interactive prompts
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             text=True, encoding='utf-8', errors='replace'
         )
+        with JOB_LOCK:
+            JOBS[job_id]['proc'] = proc
         for raw in proc.stdout:
             lines.append(raw.rstrip())
             with JOB_LOCK:
@@ -192,6 +195,61 @@ def api_job(job_id):
         'elapsed': elapsed,
     })
 
+
+
+
+@app.route('/api/stop/<job_id>', methods=['POST'])
+def api_stop(job_id):
+    with JOB_LOCK:
+        job = JOBS.get(job_id)
+    if not job:
+        return jsonify({'error': 'not found'}), 404
+    proc = job.get('proc')
+    if proc and proc.poll() is None:
+        try:
+            if os.name == 'nt':
+                subprocess.run(['taskkill', '/F', '/T', '/PID', str(proc.pid)],
+                               capture_output=True)
+            else:
+                import signal
+                os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+        except Exception:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+        with JOB_LOCK:
+            JOBS[job_id]['status'] = 'stopped'
+            JOBS[job_id].setdefault('log', []).extend(['', '\u25a0  Stopped by user.'])
+    return jsonify({'ok': True})
+
+
+@app.route('/api/stop/all', methods=['POST'])
+def api_stop_all():
+    with JOB_LOCK:
+        running = [(jid, job) for jid, job in JOBS.items()
+                   if job.get('status') in ('running', 'starting')]
+    count = 0
+    for jid, job in running:
+        proc = job.get('proc')
+        if proc and proc.poll() is None:
+            try:
+                if os.name == 'nt':
+                    subprocess.run(['taskkill', '/F', '/T', '/PID', str(proc.pid)],
+                                   capture_output=True)
+                else:
+                    import signal
+                    os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+            except Exception:
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+            with JOB_LOCK:
+                JOBS[jid]['status'] = 'stopped'
+                JOBS[jid].setdefault('log', []).extend(['', '\u25a0  Stopped by user.'])
+            count += 1
+    return jsonify({'stopped': count})
 
 @app.route('/api/reports')
 def api_reports():
@@ -323,6 +381,8 @@ body{font-family:Arial,sans-serif;background:var(--bg);color:var(--text);min-hei
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
 .btn-clear{background:transparent;border:1px solid var(--border);color:var(--dim);border-radius:5px;padding:3px 10px;font-size:11px;cursor:pointer}
 .btn-clear:hover{border-color:var(--muted);color:var(--text)}
+.btn-stop-node{border:none;border-radius:6px;padding:5px 9px;font-size:13px;font-weight:700;cursor:pointer;transition:opacity .15s;flex-shrink:0}
+.btn-stop-node:hover{opacity:.75}
 pre#terminal{font-family:'Courier New',monospace;font-size:11.5px;line-height:1.55;color:#b0c4d8;padding:14px 16px;min-height:160px;max-height:320px;overflow-y:auto;white-space:pre-wrap;word-break:break-all;background:transparent}
 </style>
 </head>
@@ -335,6 +395,7 @@ pre#terminal{font-family:'Courier New',monospace;font-size:11.5px;line-height:1.
   <button class="btn-run-all" id="btn-all" onclick="runTask('pipeline')">&#9654; Run Today</button>
   <button class="btn-run-all" id="btn-run-all-wf" onclick="startFullWorkflow()"
     style="background:linear-gradient(135deg,#7f1d1d,#dc2626)">&#128293; Run All</button>
+  <button class="btn-run-all" id="btn-stop-all" onclick="stopAll()" style="background:linear-gradient(135deg,#1a1a2e,#4a0000);border:1px solid #7f1d1d">&#9632; Stop All</button>
 </div>
 
 <div class="today-bar">
@@ -463,6 +524,7 @@ function buildNode(key,info,container){
     '<div class="node-footer">'+
       '<span class="node-badge" id="badge-'+key+'">idle</span>'+
       '<button class="btn-run" id="btn-'+key+'" style="background:'+info.color+'" onclick="runTask(\''+key+'\')">&#9654; Run</button>'+
+    '<button class="btn-stop-node" id="btn-stop-'+key+'" style="display:none;background:#7f1d1d;color:#fca5a5" onclick="stopCurrentJob()">&#9632;</button>'+
     '</div>';
   container.appendChild(d);
   nodeStates[key]='idle';
@@ -479,10 +541,12 @@ function setNodeState(key,state,badge){
   const node=document.getElementById('node-'+key);
   const bdg=document.getElementById('badge-'+key);
   const btn=document.getElementById('btn-'+key);
+  const sbtn=document.getElementById('btn-stop-'+key);
   if(!node)return;
   node.className='node state-'+state+(todayTasks.includes(key)?' is-today':'');
   if(bdg)bdg.textContent=badge||state;
   if(btn)btn.disabled=(state==='running');
+  if(sbtn)sbtn.style.display=(state==='running')?'inline-block':'none';
   nodeStates[key]=state;
 }
 
@@ -544,6 +608,27 @@ function parsePipelineLog(lines){
     if(l.includes('OK in')&&cur){setNodeState(cur,'done','done');cur=null;}
     if(l.includes('FAILED')&&cur){setNodeState(cur,'error','error');cur=null;}
   });
+}
+
+function stopCurrentJob(){
+  if(!currentJob)return;
+  fetch('/api/stop/'+currentJob,{method:'POST'}).then(r=>r.json()).then(()=>{
+    stopPoll();
+    setJobTag('Stopped','error');
+    setLog((document.getElementById('terminal').textContent+'\n\u25a0  Stopped by user.').split('\n'));
+    resetAll();
+    currentJob=null;activeTask=null;
+  }).catch(()=>{});
+}
+
+function stopAll(){
+  fetch('/api/stop/all',{method:'POST'}).then(r=>r.json()).then(d=>{
+    stopPoll();
+    setJobTag('Stopped','error');
+    setLog((document.getElementById('terminal').textContent+'\n\u25a0  All stopped.').split('\n'));
+    resetAll();
+    currentJob=null;activeTask=null;
+  }).catch(()=>{});
 }
 
 function startPoll(){
