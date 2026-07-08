@@ -280,6 +280,21 @@ def scan_momentum(min_spy_pct: float = 2.0):
     except Exception:
         pass
 
+    # ── Step 7: Save candidates for daily SPY alert ──────────────
+    import json as _json, os as _os
+    cand_file = BASE_DIR / 'momentum_candidates.json'
+    save_keys = ['Ticker','Price','RSI','MA20','MA50','Entry','Stop','Target','R:R','Pos$','Earn']
+    cands = [{k: r.get(k) for k in save_keys} for r in results]
+    tmp = cand_file.with_suffix('.tmp')
+    tmp.write_text(_json.dumps({
+        'scan_date':    datetime.date.today().isoformat(),
+        'spy_pct':      round(spy_pct, 2),
+        'candidates':   cands,
+        'last_go_alert': None,
+    }, indent=2), encoding='utf-8')
+    _os.replace(tmp, cand_file)
+    print(f"  Saved {len(cands)} candidate(s) to momentum_candidates.json")
+
 
 # ─── HTML report ──────────────────────────────────────────────────────────────
 

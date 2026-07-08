@@ -545,6 +545,139 @@ function filterStatus(status, btn) {{
     return str(out_path)
 
 
+
+# ---------------------------------------------------------------------------
+#  Momentum GO signal — fires when SPY crosses +2% weekly gain
+# ---------------------------------------------------------------------------
+
+def _spy_weekly_gain_live() -> float:
+    """SPY % gain from last Friday close to now."""
+    try:
+        import yfinance as yf
+        spy = yf.download('SPY', period='5d', interval='1d',
+                          auto_adjust=True, progress=False)
+        closes = spy['Close'].squeeze().dropna()
+        if len(closes) < 2:
+            return 0.0
+        # last Friday = first bar if today is Mon–Fri, else second-to-last
+        return float((closes.iloc[-1] / closes.iloc[0] - 1) * 100)
+    except Exception:
+        return 0.0
+
+
+def check_momentum_go(email: str):
+    """
+    Called every time the watch checker runs.
+    If SPY weekly gain > 2% AND momentum candidates exist AND
+    we haven't already sent a GO alert today → send the email.
+    """
+    import json as _json, os as _os
+    cand_file = BASE_DIR / 'momentum_candidates.json'
+    if not cand_file.exists():
+        print("  Momentum GO: no candidates file yet (run Sunday scan first)")
+        return
+
+    try:
+        data = _json.loads(cand_file.read_text(encoding='utf-8'))
+    except Exception:
+        return
+
+    candidates = data.get('candidates', [])
+    if not candidates:
+        print("  Momentum GO: no candidates from last Sunday")
+        return
+
+    today = datetime.date.today().isoformat()
+    if data.get('last_go_alert') == today:
+        print("  Momentum GO: already alerted today")
+        return
+
+    spy_pct = _spy_weekly_gain_live()
+    print(f"  Momentum GO check: SPY weekly gain = {spy_pct:+.1f}%  (need >2%)")
+
+    if spy_pct < 2.0:
+        return
+
+    # Build email
+    EMAIL_FROM = os.environ.get('ALERT_EMAIL_FROM', '')
+    EMAIL_PWD  = os.environ.get('ALERT_EMAIL_PASSWORD', '')
+    if not EMAIL_FROM or not EMAIL_PWD:
+        print("  Momentum GO: no email credentials")
+        return
+
+    rows = ''
+    for c in candidates:
+        rows += (
+            f"<tr>"
+            f"<td style='padding:8px 12px;font-weight:700;font-size:15px'>{c.get('Ticker','')}</td>"
+            f"<td style='padding:8px 12px'>${c.get('Price','')}</td>"
+            f"<td style='padding:8px 12px;color:#f59e0b;font-weight:700'>{c.get('RSI','')}</td>"
+            f"<td style='padding:8px 12px;color:#22c55e;font-weight:700'>${c.get('Entry','')}</td>"
+            f"<td style='padding:8px 12px;color:#ef4444'>${c.get('Stop','')}</td>"
+            f"<td style='padding:8px 12px;color:#38bdf8'>${c.get('Target','')}</td>"
+            f"<td style='padding:8px 12px'>{c.get('R:R','')}</td>"
+            f"<td style='padding:8px 12px'>{c.get('Pos$','')}</td>"
+            f"<td style='padding:8px 12px;color:#6e7681;font-size:12px'>{c.get('Earn','')}</td>"
+            f"</tr>"
+        )
+
+    scan_date = data.get('scan_date', 'last Sunday')
+    body = f"""
+<html>
+<body style="font-family:Arial,sans-serif;background:#0f172a;color:#e2e8f0;padding:24px;margin:0">
+  <h2 style="color:#f59e0b;margin:0 0 4px">&#9889; Momentum GO Signal</h2>
+  <p style="color:#94a3b8;margin:0 0 20px;font-size:13px">
+    SPY is up <b style="color:#22c55e">{spy_pct:+.1f}%</b> this week &mdash;
+    momentum condition met &mdash; {today}
+  </p>
+  <p style="color:#94a3b8;font-size:12px;margin:0 0 12px">
+    Candidates from Sunday scan ({scan_date}):
+  </p>
+  <table style="border-collapse:collapse;background:#1e293b;border-radius:8px;overflow:hidden;min-width:600px">
+    <thead>
+      <tr style="background:#0f172a">
+        <th style="padding:8px 12px;text-align:left;color:#6e7681;font-size:11px">Ticker</th>
+        <th style="padding:8px 12px;text-align:left;color:#6e7681;font-size:11px">Price</th>
+        <th style="padding:8px 12px;text-align:left;color:#6e7681;font-size:11px">RSI</th>
+        <th style="padding:8px 12px;text-align:left;color:#6e7681;font-size:11px">Entry</th>
+        <th style="padding:8px 12px;text-align:left;color:#6e7681;font-size:11px">Stop</th>
+        <th style="padding:8px 12px;text-align:left;color:#6e7681;font-size:11px">Target</th>
+        <th style="padding:8px 12px;text-align:left;color:#6e7681;font-size:11px">R:R</th>
+        <th style="padding:8px 12px;text-align:left;color:#6e7681;font-size:11px">Position</th>
+        <th style="padding:8px 12px;text-align:left;color:#6e7681;font-size:11px">Earnings</th>
+      </tr>
+    </thead>
+    <tbody>{rows}</tbody>
+  </table>
+  <p style="color:#475569;font-size:11px;margin-top:16px">
+    Entry = current price at scan time &mdash; verify live price before trading.<br>
+    Stop = 20-week MA &mdash; Risk = 1% of portfolio per trade.
+  </p>
+</body>
+</html>"""
+
+    subject = f"[MOMENTUM GO] SPY {spy_pct:+.1f}% — {len(candidates)} setup(s) ready — {today}"
+    import smtplib
+    from email.mime.multipart import MIMEMultipart
+    from email.mime.text import MIMEText
+    msg = MIMEMultipart()
+    msg['From']    = EMAIL_FROM
+    msg['To']      = email
+    msg['Subject'] = subject
+    msg.attach(MIMEText(body, 'html', 'utf-8'))
+    try:
+        with smtplib.SMTP_SSL('smtp.gmail.com', 465, timeout=30) as s:
+            s.login(EMAIL_FROM, EMAIL_PWD)
+            s.sendmail(EMAIL_FROM, email, msg.as_string())
+        print(f"  Momentum GO email sent → {email}")
+        # Mark alerted today (atomic write)
+        data['last_go_alert'] = today
+        tmp = cand_file.with_suffix('.tmp')
+        tmp.write_text(_json.dumps(data, indent=2), encoding='utf-8')
+        _os.replace(tmp, cand_file)
+    except Exception as e:
+        print(f"  Momentum GO email FAILED: {e}")
+
 def run_check():
     data    = load_watchlist()
     tickers = data.get('tickers', [])
@@ -663,6 +796,11 @@ def run_check():
     save_watchlist(data)
     generate_watch_html(html_results, today)
     print(f"\n  Done. {alerts_sent} green light alert(s) sent.")
+    print("  " + "=" * 55)
+
+    # Check momentum GO signal
+    print()
+    check_momentum_go(email)
     print("  " + "=" * 55 + "\n")
 
 
