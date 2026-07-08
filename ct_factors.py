@@ -698,6 +698,85 @@ def _factor_trend_confirmation(r):
                 f'wait for weekly close confirmation before entering')
 
 
+
+@factor
+def _factor_monthly_sr_confluence(r):
+    """
+    Factor 24 -- Monthly S/R Confluence (top-down confirmation).
+
+    Cycles Trading insight: the strongest setups appear where a weekly S/R
+    level aligns with a MONTHLY S/R level.  Monthly levels carry the weight
+    of institutional memory -- they represent major accumulation / distribution
+    zones that held for months.
+
+    Also factors in the monthly Fibonacci golden zone (50-61.8%) when it
+    overlaps the monthly S/R level, as seen in CAMT July 2026.
+
+    Scoring:
+      within 3% of monthly S/R level        -> +18  (strong confluence)
+      within 3% + monthly Fib golden zone   -> +25  (double confluence)
+      within 5% of monthly S/R level        -> +10
+      within 8% of monthly S/R level        -> +5
+      no monthly level nearby               ->  0
+      monthly trend opposes trade direction -> -10  (e.g. LONG but monthly BEAR)
+    """
+    msr = r.get('monthly_sr') or {}
+    if not msr:
+        return None
+
+    dist_pct      = msr.get('dist_pct', 999.0)
+    nearest_label = msr.get('nearest_label', 'NONE')
+    monthly_trend = msr.get('monthly_trend', 'NEUTRAL')
+    fib_zone_mo   = msr.get('fib_zone_monthly', 'UNKNOWN')
+    nearest_level = msr.get('nearest_level')
+    direction     = r.get('Direction', 'LONG')
+
+    if nearest_label == 'NONE' or nearest_level is None:
+        return (0, 'MonthlyS/R: none', 'No monthly S/R level found near current price')
+
+    level_str = f'${nearest_level:,.2f} ({nearest_label.lower()})'
+
+    # Monthly trend penalty
+    trend_penalty = 0
+    trend_note    = ''
+    if direction == 'LONG'  and monthly_trend == 'BEAR':
+        trend_penalty = -10
+        trend_note    = ' | Monthly trend BEAR -- fighting the monthly trend'
+    elif direction == 'SHORT' and monthly_trend == 'BULL':
+        trend_penalty = -10
+        trend_note    = ' | Monthly trend BULL -- fighting the monthly trend'
+
+    # Golden zone bonus
+    fib_bonus = 0
+    fib_note  = ''
+    if fib_zone_mo == 'GOLDEN_ZONE':
+        fib_bonus = 7
+        fib_note  = ' + Monthly Fib golden zone'
+
+    if dist_pct <= 3.0:
+        base_score = 18 + fib_bonus
+        label = f'MonthlyS/R: {dist_pct:.1f}% from {level_str}{fib_note}'
+        detail = (f'Price within {dist_pct:.1f}% of monthly {nearest_label.lower()} '
+                  f'{level_str} -- strong institutional level{fib_note}{trend_note}')
+    elif dist_pct <= 5.0:
+        base_score = 10 + fib_bonus
+        label = f'MonthlyS/R: {dist_pct:.1f}% from {level_str}'
+        detail = (f'Price within {dist_pct:.1f}% of monthly {nearest_label.lower()} '
+                  f'{level_str} -- moderate confluence{fib_note}{trend_note}')
+    elif dist_pct <= 8.0:
+        base_score = 5 + fib_bonus
+        label = f'MonthlyS/R: {dist_pct:.1f}% from {level_str}'
+        detail = (f'Price approaching monthly {nearest_label.lower()} '
+                  f'{level_str} ({dist_pct:.1f}% away){fib_note}{trend_note}')
+    else:
+        base_score = 0
+        label = f'MonthlyS/R: {dist_pct:.1f}% from {level_str}'
+        detail = (f'No nearby monthly level (closest: {level_str} at {dist_pct:.1f}%)'
+                  f'{trend_note}')
+
+    total = base_score + trend_penalty
+    return (total, label, detail)
+
 def calc_probability(r):
     """
     Iterate FACTORS registry. Each factor returns (delta, label, explanation) or None to skip.

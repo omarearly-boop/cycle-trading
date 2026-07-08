@@ -226,3 +226,116 @@ def get_sector_rs(ticker, df_weekly):
         }
     except Exception:
         return None
+
+
+# ─── Factor 24: Monthly S/R Confluence ───────────────────────────────────────
+
+_MONTHLY_SR_CACHE: dict = {}   # ticker -> result  (cache per run)
+
+def get_monthly_sr(ticker: str, asset, current_price: float) -> dict:
+    """
+    Fetch monthly OHLC and find S/R levels using the same swing-pivot logic
+    as the weekly scanner.  Returns a dict with nearest monthly level and
+    distance % so Factor 24 can score the confluence.
+
+    Keys returned:
+        monthly_support    float | None  -- nearest monthly support below price
+        monthly_resist     float | None  -- nearest monthly resistance above price
+        nearest_level      float | None  -- whichever is closer to current price
+        nearest_label      str           -- 'SUPPORT' | 'RESISTANCE' | 'NONE'
+        dist_pct           float         -- % distance current_price -> nearest_level
+        monthly_trend      str           -- 'BULL' | 'BEAR' | 'NEUTRAL'
+        fib_zone_monthly   str           -- golden zone label on monthly chart
+        fib_ret_pct        float
+    """
+    if ticker in _MONTHLY_SR_CACHE:
+        return _MONTHLY_SR_CACHE[ticker]
+
+    result = {
+        'monthly_support':  None,
+        'monthly_resist':   None,
+        'nearest_level':    None,
+        'nearest_label':    'NONE',
+        'dist_pct':         999.0,
+        'monthly_trend':    'NEUTRAL',
+        'fib_zone_monthly': 'UNKNOWN',
+        'fib_ret_pct':      0.0,
+    }
+
+    try:
+        import warnings
+        import numpy as np
+        warnings.filterwarnings('ignore')
+
+        df = asset.history(period='5y', interval='1mo',
+                           auto_adjust=True, raise_errors=False)
+        if df is None or len(df) < 18:
+            _MONTHLY_SR_CACHE[ticker] = result
+            return result
+
+        df.columns = [c.capitalize() for c in df.columns]
+        df = df.dropna(subset=['Close'])
+
+        # ── Swing pivots (order=2 = needs 2 bars each side confirmed) ────────
+        from ct_indicators import swing_lows, swing_highs
+
+        lows  = swing_lows(df['Low'],  order=2)
+        highs = swing_highs(df['High'], order=2)
+
+        supports    = sorted([v for v in lows  if v < current_price * 0.985], reverse=True)
+        resistances = sorted([v for v in highs if v > current_price * 1.015])
+
+        monthly_support = supports[0]    if supports    else None
+        monthly_resist  = resistances[0] if resistances else None
+
+        # ── Which is closer? ──────────────────────────────────────────────────
+        d_sup = abs(current_price - monthly_support) / current_price * 100 if monthly_support else 999
+        d_res = abs(current_price - monthly_resist)  / current_price * 100 if monthly_resist  else 999
+
+        if d_sup <= d_res and monthly_support:
+            nearest_level = monthly_support
+            nearest_label = 'SUPPORT'
+            dist_pct      = d_sup
+        elif monthly_resist:
+            nearest_level = monthly_resist
+            nearest_label = 'RESISTANCE'
+            dist_pct      = d_res
+        else:
+            nearest_level = None
+            nearest_label = 'NONE'
+            dist_pct      = 999.0
+
+        # ── Monthly trend: last close vs 6-month MA ───────────────────────────
+        ma6 = float(df['Close'].rolling(6).mean().iloc[-1])
+        last_close = float(df['Close'].iloc[-1])
+        if last_close > ma6 * 1.02:
+            monthly_trend = 'BULL'
+        elif last_close < ma6 * 0.98:
+            monthly_trend = 'BEAR'
+        else:
+            monthly_trend = 'NEUTRAL'
+
+        # ── Monthly Fibonacci zone (reuse same logic as weekly Factor 20) ─────
+        try:
+            from ct_factors import check_fibonacci_zone
+            fib_zone_mo, fib_ret_pct, _, _, _ = check_fibonacci_zone(df, 'LONG', current_price)
+        except Exception:
+            fib_zone_mo  = 'UNKNOWN'
+            fib_ret_pct  = 0.0
+
+        result = {
+            'monthly_support':  round(monthly_support, 2) if monthly_support else None,
+            'monthly_resist':   round(monthly_resist,  2) if monthly_resist  else None,
+            'nearest_level':    round(nearest_level,   2) if nearest_level   else None,
+            'nearest_label':    nearest_label,
+            'dist_pct':         round(dist_pct, 1),
+            'monthly_trend':    monthly_trend,
+            'fib_zone_monthly': fib_zone_mo,
+            'fib_ret_pct':      round(fib_ret_pct, 1),
+        }
+
+    except Exception:
+        pass
+
+    _MONTHLY_SR_CACHE[ticker] = result
+    return result

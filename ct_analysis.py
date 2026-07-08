@@ -31,7 +31,7 @@ from ct_indicators import (
     check_false_breakout, check_level_ambiguity, check_swing_broken,
     calc_macd, calc_bollinger, estimate_time_horizon,
 )
-from ct_market_data import get_earnings, get_monthly_analysis, get_sector_rs
+from ct_market_data import get_earnings, get_monthly_analysis, get_sector_rs, get_monthly_sr
 from ct_factors import calc_probability, check_fibonacci_zone
 from ct_learnings import load_learnings
 
@@ -365,7 +365,8 @@ def _build_setup_dict(direction, ticker, price, rsi_val, support, resistance,
                       level_amb='CLEAR', level_amb_n=0,
                       trend_confirmed=True, trend_conf_label='CONFIRMED',
                       fib_zone='UNKNOWN', fib_ret_pct=0,
-                      fib_swing_low=0, fib_swing_high=0, fib_levels=None):
+                      fib_swing_low=0, fib_swing_high=0, fib_levels=None,
+                      monthly_sr=None):
     """
     Assemble the raw setup dict from computed values.
     Pure function — no yfinance calls, no side effects.
@@ -430,6 +431,7 @@ def _build_setup_dict(direction, ticker, price, rsi_val, support, resistance,
         '_macd':          macd_data,
         '_boll':          boll_data,
         '_fundamental':   None,   # filled in by _finalize_setup
+        'monthly_sr':     monthly_sr or {},  # Factor 24 — Monthly S/R Confluence
     }
 
 
@@ -557,6 +559,9 @@ def _fetch_market_data(ticker, is_crypto=False, is_commodity=False,
     _is_us_stock = (not is_crypto and not is_commodity and not is_israel and not is_intl)
     rs_info = get_sector_rs(clean_ticker(ticker), df) if _is_us_stock else None
 
+    # 3a. Monthly S/R confluence (Factor 24)
+    monthly_sr = get_monthly_sr(ticker, asset, price) if not is_crypto else {}
+
     # 3. Support quality calculated per-setup below (needs direction)
 
     # ── Short Squeeze + cached .info (reused by get_fundamental_analysis) ──
@@ -580,7 +585,7 @@ def _fetch_market_data(ticker, is_crypto=False, is_commodity=False,
         'earn_approaching': earn_approaching, 'atr_pct': atr_pct,
         'high_volatility': high_volatility, 'm_analysis': m_analysis,
         'rs_info': rs_info, 'short_pct': short_pct, 'inst_pct': inst_pct,
-        'cached_info': _cached_info,
+        'cached_info': _cached_info, 'monthly_sr': monthly_sr,
     }
 
 
@@ -697,7 +702,8 @@ def _detect_setup(ticker, portfolio_size, market, is_crypto, asset_type, max_dis
         level_amb=level_amb, level_amb_n=level_amb_n,
         trend_confirmed=tr_conf, trend_conf_label=tr_conf_lbl,
         fib_zone=fib_zone, fib_ret_pct=fib_pct,
-        fib_swing_low=fib_sl, fib_swing_high=fib_sh, fib_levels=fib_lvls)
+        fib_swing_low=fib_sl, fib_swing_high=fib_sh, fib_levels=fib_lvls,
+        monthly_sr=market.get('monthly_sr', {}))
     # Pass quantitative volume ratio to factors (Factor 3 enhancement)
     _setup['_vol_ratio'] = market.get('_vol_ratio', 1.0)
     _setup['_dir_vol_ratio'] = market.get('_dir_vol_ratio', 1.0)
