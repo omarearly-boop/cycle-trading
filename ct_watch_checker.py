@@ -83,6 +83,53 @@ def get_tl_color(setup: dict) -> str:
 # ---------------------------------------------------------------------------
 _INTL_SUFFIXES = ('.L', '.DE', '.PA', '.T', '.AX', '.TO', '.SW', '.NS', '.HK', '.F')
 
+# Zone tolerance: how far from entry_price the current price can be
+# before we skip the full analysis (saves 5-15s per ticker).
+_ZONE_PCT = 0.12   # 12% — if price is more than 12% away from entry, skip
+
+def _quick_price_check(entry: dict):
+    """
+    Fetch only the current price (fast_info, ~200ms) and compare to the
+    stored entry_price / stop_price to decide if a full analysis is worth running.
+
+    Returns (current_price, in_zone):
+      in_zone=True  -> price is near the entry zone, run full analysis
+      in_zone=False -> price is far from zone, skip heavy fetch
+      in_zone=True  -> also returned when entry_price is missing (safe default)
+    """
+    ticker      = entry['ticker']
+    entry_price = entry.get('entry_price')
+    stop_price  = entry.get('stop_price')
+    direction   = entry.get('direction', 'LONG')
+
+    if not entry_price:
+        return None, True   # no stored level → always run full analysis
+
+    try:
+        import yfinance as _yf
+        fi    = _yf.Ticker(ticker).fast_info
+        price = fi.get('lastPrice') or fi.get('regularMarketPrice')
+        if not price:
+            return None, True   # can't get price → run full to be safe
+
+        price = float(price)
+
+        if direction == 'LONG':
+            # In zone: price is between stop and entry+buffer (waiting for pullback or just touched)
+            lower = float(stop_price) * 0.90 if stop_price else entry_price * 0.85
+            upper = entry_price * (1 + _ZONE_PCT)
+        else:   # SHORT
+            # In zone: price is between entry-buffer and stop (waiting for rally back to level)
+            upper = float(stop_price) * 1.10 if stop_price else entry_price * 1.15
+            lower = entry_price * (1 - _ZONE_PCT)
+
+        in_zone = lower <= price <= upper
+        return price, in_zone
+
+    except Exception:
+        return None, True   # error → run full analysis
+
+
 def analyze_ticker(entry: dict):
     """
     Run ct_analysis._detect_setup() on a single watchlist entry.
@@ -852,6 +899,21 @@ def run_check():
         last_alert = entry.get('last_alerted') or ''
 
         print(f"  {ticker} ({direction})", end='  ')
+
+        # ── Quick pre-filter: skip full analysis if price is far from zone ──
+        quick_price, in_zone = _quick_price_check(entry)
+        if not in_zone:
+            price_str = f'${quick_price:.2f}' if quick_price else '-'
+            print(f"-- Not in zone (pre-filter)  (price={price_str})")
+            entry['status']       = 'NO_LEVEL'
+            entry['last_checked'] = today
+            entry.setdefault('not_in_zone_since', today)
+            html_results.append({'ticker': ticker, 'direction': direction,
+                                  'prob': 0, 'tl': 'NO_LEVEL', 'cur_price': price_str,
+                                  'notes': 'Not in zone',
+                                  'timeframe': entry.get('timeframe', 'WEEKLY'),
+                                  'not_in_zone_since': entry.get('not_in_zone_since')})
+            continue
 
         setup, tl, cur_price, reason = analyze_ticker(entry)
 
