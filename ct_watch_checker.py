@@ -57,10 +57,13 @@ def load_watchlist():
 
 
 def save_watchlist(data):
-    WATCH_FILE.write_text(
+    tmp = WATCH_FILE.with_suffix('.tmp')
+    tmp.write_text(
         json.dumps(data, ensure_ascii=False, indent=2),
         encoding='utf-8'
     )
+    import os
+    os.replace(tmp, WATCH_FILE)
 
 
 # ---------------------------------------------------------------------------
@@ -409,9 +412,15 @@ def generate_watch_html(results: list, today: str) -> str:
                      if no_setup else r.get('entry', '-'))
 
         earn_color = '#c0392b' if ('SOON' in earn or 'APPROACH' in earn) else '#555'
+        tf = r.get('timeframe', 'WEEKLY')
+        tf_badge = ('<span style="background:#1e3a5f;color:#38bdf8;font-size:9px;font-weight:700;'
+                    'padding:1px 5px;border-radius:4px;margin-left:5px;vertical-align:middle">MO</span>'
+                    if tf == 'MONTHLY' else
+                    '<span style="background:#1a3320;color:#22c55e;font-size:9px;font-weight:700;'
+                    'padding:1px 5px;border-radius:4px;margin-left:5px;vertical-align:middle">W</span>')
         rows_html += (
-            f"<tr style='background:{bg}'>"
-            f"<td style='padding:10px 14px;font-weight:bold;font-size:15px'>{r['ticker']}{btn}</td>"
+            f"<tr data-status='{tl}' style='background:{bg}'>"
+            f"<td style='padding:10px 14px;font-weight:bold;font-size:15px'>{r['ticker']}{tf_badge}{btn}</td>"
             f"<td style='padding:10px 14px'>{r.get('direction','')}</td>"
             f"<td style='padding:10px 14px;font-size:18px;text-align:center'>{icon}</td>"
             f"<td style='padding:10px 14px;font-weight:bold'>{lbl}</td>"
@@ -458,6 +467,10 @@ def generate_watch_html(results: list, today: str) -> str:
   th {{padding:10px 14px;text-align:left;font-size:13px;white-space:nowrap}}
   tr:hover > td {{filter:brightness(.97)}}
   .empty {{text-align:center;padding:40px;color:#999;font-size:16px}}
+  .filter-bar {{display:flex;gap:8px;flex-wrap:wrap;margin:14px 0 0}}
+  .flt-btn {{border:2px solid transparent;border-radius:20px;padding:5px 16px;font-size:13px;font-weight:700;cursor:pointer;background:rgba(255,255,255,.15);color:#fff;transition:background .15s,border-color .15s}}
+  .flt-btn:hover{{background:rgba(255,255,255,.25)}}
+  .flt-btn.active{{background:rgba(255,255,255,.35);border-color:#fff}}
   /* fund-box classes (dark theme, sits on #1a1f2e background) */
   .fund-box {{border-radius:8px;padding:12px 16px;margin:0}}
   .fund-header {{display:flex;justify-content:space-between;align-items:center;
@@ -483,6 +496,21 @@ function toggleFund(id) {{
   var el = document.getElementById(id);
   el.style.display = (el.style.display === 'none') ? 'table-row' : 'none';
 }}
+var _activeFilter = 'ALL';
+function filterStatus(status, btn) {{
+  _activeFilter = status;
+  document.querySelectorAll('.flt-btn').forEach(function(b){{ b.classList.remove('active'); }});
+  btn.classList.add('active');
+  document.querySelectorAll('tbody tr[data-status]').forEach(function(row){{
+    var s = row.getAttribute('data-status');
+    var show = (status === 'ALL' || s === status);
+    row.style.display = show ? '' : 'none';
+    var next = row.nextElementSibling;
+    if(next && !next.hasAttribute('data-status')){{
+      next.style.display = 'none';
+    }}
+  }});
+}}
 </script>
 </head>
 <body>
@@ -495,6 +523,14 @@ function toggleFund(id) {{
     <span class="pill">🔘 Not in zone: {n_zone}</span>
     <span class="pill">🗑 Removed: {n_removed}</span>
     <span class="pill">📋 Total: {len(results)}</span>
+  </div>
+  <div class="filter-bar">
+    <button class="flt-btn active" onclick="filterStatus('ALL',this)">❖ All</button>
+    <button class="flt-btn" onclick="filterStatus('GREEN',this)">🟢 GO</button>
+    <button class="flt-btn" onclick="filterStatus('YELLOW',this)">🟡 Wait</button>
+    <button class="flt-btn" onclick="filterStatus('RED',this)">🔴 Not Yet</button>
+    <button class="flt-btn" onclick="filterStatus('NO_LEVEL',this)">⚪ Not in Zone</button>
+    <button class="flt-btn" onclick="filterStatus('REMOVED',this)">🗑 Removed</button>
   </div>
 </div>
 {table_html}
@@ -552,6 +588,7 @@ def run_check():
             html_results.append({'ticker': ticker, 'direction': direction,
                                   'prob': 0, 'tl': reason, 'cur_price': price_str,
                                   'notes': reason_label,
+                                  'timeframe': entry.get('timeframe', 'WEEKLY'),
                                   'not_in_zone_since': entry.get('not_in_zone_since')})
             continue
 
@@ -571,6 +608,7 @@ def run_check():
             'direction': direction,
             'prob':      prob,
             'tl':        tl,
+            'timeframe': entry.get('timeframe', 'WEEKLY'),
             'entry':     setup.get('Entry', '-'),
             'stop':      setup.get('Stop', '-'),
             'target':    setup.get('Target', '-'),
