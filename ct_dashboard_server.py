@@ -483,8 +483,10 @@ pre#terminal{font-family:'Courier New',monospace;font-size:11.5px;line-height:1.
       <div id="output-reports"><div style="color:var(--dim);font-size:11px">Loading...</div></div>
     </div>
     <div class="email-node">
-      <div class="en-title">&#128231; Email Alert</div>
-      <div class="en-cond">&#9679; GREEN hit only</div>
+      <div class="en-title">&#128231; Email Alerts</div>
+      <div class="en-cond">&#9679; GREEN watchlist hit</div>
+      <div class="en-cond" style="color:var(--amber)">&#9889; Momentum GO (SPY &gt;2%)</div>
+      <div class="en-cond" style="color:var(--violet)">&#128196; Sunday scan reports</div>
       <div class="en-addr">omarearly@gmail.com</div>
     </div>
   </div>
