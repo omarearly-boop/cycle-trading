@@ -281,19 +281,27 @@ def scan_momentum(min_spy_pct: float = 2.0):
         pass
 
     # ── Step 7: Save candidates for daily SPY alert ──────────────
+    # Only persist when this IS a confirmed rally week.
+    # If SPY < 2%, these stocks were not selected in a rally environment
+    # and should not trigger a GO alert mid-week.
     import json as _json, os as _os
-    cand_file = BASE_DIR / 'momentum_candidates.json'
-    save_keys = ['Ticker','Price','RSI','MA20','MA50','Entry','Stop','Target','R:R','Pos$','Earn']
-    cands = [{k: r.get(k) for k in save_keys} for r in results]
-    tmp = cand_file.with_suffix('.tmp')
-    tmp.write_text(_json.dumps({
-        'scan_date':    datetime.date.today().isoformat(),
-        'spy_pct':      round(spy_pct, 2),
-        'candidates':   cands,
-        'last_go_alert': None,
-    }, indent=2), encoding='utf-8')
-    _os.replace(tmp, cand_file)
-    print(f"  Saved {len(cands)} candidate(s) to momentum_candidates.json")
+    if is_rally:
+        cand_file = BASE_DIR / 'momentum_candidates.json'
+        save_keys = ['Ticker','Price','RSI','MA20','MA50','Entry','Stop','Target','R:R','Pos$','Earn']
+        cands = [{k: r.get(k) for k in save_keys} for r in results]
+        tmp = cand_file.with_suffix('.tmp')
+        tmp.write_text(_json.dumps({
+            'scan_date':     datetime.date.today().isoformat(),
+            'spy_pct':       round(spy_pct, 2),
+            'candidates':    cands,
+            'last_go_alert': None,
+        }, indent=2), encoding='utf-8')
+        _os.replace(tmp, cand_file)
+        print(f"  Saved {len(cands)} candidate(s) to momentum_candidates.json")
+        print(f"  GO alert armed — will fire when SPY confirms >2% again mid-week.")
+    else:
+        print(f"  NOT saving candidates — SPY {spy_pct:+.1f}% is not a rally week.")
+        print(f"  GO alert will NOT fire this week (no reliable candidates).")
 
 
 # ─── HTML report ──────────────────────────────────────────────────────────────
@@ -385,7 +393,7 @@ def _write_html(results, out_path, spy_pct, is_rally, portfolio_size):
 
 <table>
   <thead><tr>
-    <th>Ticker</th><th>Price</th><th>RSI</th><th>MA20</th><th>MA50</th>
+    <th>Ticker</th><th>Price</th><th>RSI</th><th>MA20</th>    <th>Ticker</th><th>Price</th><th>RSI</th><th>MA20</th><th>MA50</th>
     <th>Entry</th><th>Stop</th><th>Target</th><th>R:R</th>
     <th>Position</th><th>Volume</th><th>Earnings</th>
   </tr></thead>

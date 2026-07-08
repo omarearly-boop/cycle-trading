@@ -565,6 +565,83 @@ def _spy_weekly_gain_live() -> float:
         return 0.0
 
 
+def _enrich_candidates_with_live_prices(candidates: list) -> list:
+    """
+    Re-fetch the current market price for each candidate and compare
+    to the Entry price saved at scan time (Sunday).
+
+    Adds three fields to each candidate dict:
+      current_price  — live price right now
+      drift_pct      — (current - scan_entry) / scan_entry * 100
+      chase_status   — one of 'VALID', 'CHASING', 'DROPPED'
+      status_color   — hex colour for the email badge
+    """
+    try:
+        import yfinance as yf
+    except Exception:
+        # yfinance unavailable — return candidates untouched
+        for c in candidates:
+            c.setdefault('current_price', c.get('Entry', 0))
+            c.setdefault('drift_pct', 0.0)
+            c.setdefault('chase_status', 'UNKNOWN')
+            c.setdefault('status_color', '#94a3b8')
+        return candidates
+
+    enriched = []
+    for c in candidates:
+        ticker     = c.get('Ticker', '')
+        scan_entry = float(c.get('Entry', 0) or 0)
+        current_price = scan_entry   # safe fallback
+
+        try:
+            asset = yf.Ticker(ticker)
+            hist  = asset.history(period='2d', interval='1h', auto_adjust=True)
+            if hist is not None and not hist.empty:
+                current_price = float(hist['Close'].iloc[-1])
+            else:
+                fi = getattr(asset, 'fast_info', {})
+                lp = getattr(fi, 'last_price', None) or fi.get('lastPrice')
+                if lp:
+                    current_price = float(lp)
+        except Exception:
+            pass   # keep fallback
+
+        drift_pct = ((current_price - scan_entry) / scan_entry * 100) if scan_entry else 0.0
+
+        if drift_pct > 5.0:
+            chase_status = f'⚠ CHASING (+{drift_pct:.1f}%)'
+            status_color = '#f59e0b'   # amber — do not enter
+        elif drift_pct < -5.0:
+            chase_status = f'⚠ DROPPED ({drift_pct:.1f}%)'
+            status_color = '#ef4444'   # red — level may have broken
+        else:
+            chase_status = f'✓ VALID ({drift_pct:+.1f}%)'
+            status_color = '#22c55e'   # green — still a clean entry
+
+        enriched.append({
+            **c,
+            'current_price': round(current_price, 2),
+            'drift_pct':     round(drift_pct, 1),
+            'chase_status':  chase_status,
+            'status_color':  status_color,
+        })
+
+    return enriched
+
+
+def _count_open_positions() -> int:
+    """Return number of currently OPEN positions from positions.json."""
+    try:
+        import json as _j
+        pos_file = BASE_DIR / 'positions.json'
+        if not pos_file.exists():
+            return 0
+        data = _j.loads(pos_file.read_text(encoding='utf-8'))
+        return sum(1 for p in data.get('positions', []) if p.get('status') == 'OPEN')
+    except Exception:
+        return 0
+
+
 def check_momentum_go(email: str):
     """
     Called every time the watch checker runs.
@@ -598,7 +675,45 @@ def check_momentum_go(email: str):
     if spy_pct < 2.0:
         return
 
-    # Build email
+    # ── Fix 1: Re-fetch live prices — compare to Sunday scan entry ──────────
+    scan_date = data.get('scan_date', 'last Sunday')
+    days_since = 0
+    try:
+        days_since = (datetime.date.today() - datetime.date.fromisoformat(scan_date)).days
+    except Exception:
+        pass
+    print(f"  Re-fetching live prices ({days_since}d since Sunday scan)...")
+    candidates = _enrich_candidates_with_live_prices(candidates)
+
+    n_valid   = sum(1 for c in candidates if c.get('drift_pct', 0) <= 5.0)
+    n_chasing = sum(1 for c in candidates if c.get('drift_pct', 0) > 5.0)
+    print(f"  {n_valid} valid  |  {n_chasing} chasing (>5% above scan price)")
+
+    # ── Fix 3: Check open position count ────────────────────────────────────
+    try:
+        from ct_config import MAX_OPEN_POSITIONS
+        max_pos = MAX_OPEN_POSITIONS
+    except Exception:
+        max_pos = 6
+    open_pos  = _count_open_positions()
+    remaining = max_pos - open_pos
+    if remaining <= 0:
+        pos_banner_color  = '#7f1d1d'
+        pos_banner_border = '#ef4444'
+        pos_banner_text   = (f'🚫 AT POSITION LIMIT ({open_pos}/{max_pos} open) — '
+                             f'close a position before entering new trades.')
+    elif remaining == 1:
+        pos_banner_color  = '#422006'
+        pos_banner_border = '#f59e0b'
+        pos_banner_text   = (f'⚠ Almost full ({open_pos}/{max_pos} open) — '
+                             f'room for 1 more trade. Be selective.')
+    else:
+        pos_banner_color  = '#052e16'
+        pos_banner_border = '#22c55e'
+        pos_banner_text   = (f'✓ {open_pos}/{max_pos} positions open — '
+                             f'room for {remaining} more trades.')
+
+    # ── Build email ──────────────────────────────────────────────────────────
     EMAIL_FROM = os.environ.get('ALERT_EMAIL_FROM', '')
     EMAIL_PWD  = os.environ.get('ALERT_EMAIL_PASSWORD', '')
     if not EMAIL_FROM or not EMAIL_PWD:
@@ -607,12 +722,20 @@ def check_momentum_go(email: str):
 
     rows = ''
     for c in candidates:
+        sc = c.get('status_color', '#94a3b8')
+        drift_pct   = c.get('drift_pct', 0)
+        scan_entry  = c.get('Entry', '-')
+        live_price  = c.get('current_price', '-')
+        chase_label = c.get('chase_status', '-')
+        # Dim chasing rows slightly
+        row_opacity = 'opacity:0.55;' if drift_pct > 5.0 else ''
         rows += (
-            f"<tr>"
+            f"<tr style='{row_opacity}'>"
             f"<td style='padding:8px 12px;font-weight:700;font-size:15px'>{c.get('Ticker','')}</td>"
-            f"<td style='padding:8px 12px'>${c.get('Price','')}</td>"
+            f"<td style='padding:8px 12px;color:#94a3b8'>${scan_entry}</td>"
+            f"<td style='padding:8px 12px;font-weight:700'>${live_price}</td>"
+            f"<td style='padding:8px 12px;font-weight:700;color:{sc}'>{chase_label}</td>"
             f"<td style='padding:8px 12px;color:#f59e0b;font-weight:700'>{c.get('RSI','')}</td>"
-            f"<td style='padding:8px 12px;color:#22c55e;font-weight:700'>${c.get('Entry','')}</td>"
             f"<td style='padding:8px 12px;color:#ef4444'>${c.get('Stop','')}</td>"
             f"<td style='padding:8px 12px;color:#38bdf8'>${c.get('Target','')}</td>"
             f"<td style='padding:8px 12px'>{c.get('R:R','')}</td>"
@@ -621,25 +744,46 @@ def check_momentum_go(email: str):
             f"</tr>"
         )
 
-    scan_date = data.get('scan_date', 'last Sunday')
+    chasing_note = (
+        f'<p style="background:#422006;border:1px solid #f59e0b;border-radius:6px;'
+        f'padding:10px 14px;color:#fde68a;font-size:12px;margin:12px 0">'
+        f'⚠ <b>{n_chasing} candidate(s) are marked CHASING</b> — price moved >5% above Sunday entry. '
+        f'These are dimmed and should NOT be entered at current prices. '
+        f'Wait for a pullback or skip.</p>'
+    ) if n_chasing > 0 else ''
+
     body = f"""
 <html>
 <body style="font-family:Arial,sans-serif;background:#0f172a;color:#e2e8f0;padding:24px;margin:0">
   <h2 style="color:#f59e0b;margin:0 0 4px">&#9889; Momentum GO Signal</h2>
-  <p style="color:#94a3b8;margin:0 0 20px;font-size:13px">
+  <p style="color:#94a3b8;margin:0 0 16px;font-size:13px">
     SPY is up <b style="color:#22c55e">{spy_pct:+.1f}%</b> this week &mdash;
     momentum condition met &mdash; {today}
   </p>
+
+  <!-- Position capacity banner -->
+  <div style="background:{pos_banner_color};border:1px solid {pos_banner_border};
+              border-radius:8px;padding:10px 16px;margin-bottom:16px;font-size:13px;
+              font-weight:700;color:#e2e8f0">
+    {pos_banner_text}
+  </div>
+
+  {chasing_note}
+
   <p style="color:#94a3b8;font-size:12px;margin:0 0 12px">
-    Candidates from Sunday scan ({scan_date}):
+    Candidates from scan on <b>{scan_date}</b>
+    ({days_since} day(s) ago — live prices fetched now):
   </p>
-  <table style="border-collapse:collapse;background:#1e293b;border-radius:8px;overflow:hidden;min-width:600px">
+
+  <table style="border-collapse:collapse;background:#1e293b;border-radius:8px;
+                overflow:hidden;min-width:680px">
     <thead>
       <tr style="background:#0f172a">
         <th style="padding:8px 12px;text-align:left;color:#6e7681;font-size:11px">Ticker</th>
-        <th style="padding:8px 12px;text-align:left;color:#6e7681;font-size:11px">Price</th>
+        <th style="padding:8px 12px;text-align:left;color:#6e7681;font-size:11px">Scan Entry</th>
+        <th style="padding:8px 12px;text-align:left;color:#6e7681;font-size:11px">Live Price</th>
+        <th style="padding:8px 12px;text-align:left;color:#6e7681;font-size:11px">Status</th>
         <th style="padding:8px 12px;text-align:left;color:#6e7681;font-size:11px">RSI</th>
-        <th style="padding:8px 12px;text-align:left;color:#6e7681;font-size:11px">Entry</th>
         <th style="padding:8px 12px;text-align:left;color:#6e7681;font-size:11px">Stop</th>
         <th style="padding:8px 12px;text-align:left;color:#6e7681;font-size:11px">Target</th>
         <th style="padding:8px 12px;text-align:left;color:#6e7681;font-size:11px">R:R</th>
@@ -649,14 +793,17 @@ def check_momentum_go(email: str):
     </thead>
     <tbody>{rows}</tbody>
   </table>
+
   <p style="color:#475569;font-size:11px;margin-top:16px">
-    Entry = current price at scan time &mdash; verify live price before trading.<br>
-    Stop = 20-week MA &mdash; Risk = 1% of portfolio per trade.
+    ✓ VALID = live price within 5% of scan entry — safe to enter.<br>
+    ⚠ CHASING = moved >5% since scan — wait for pullback or skip.<br>
+    Stop = 20-week MA. Risk = 1% of portfolio per trade.    Stop = 20-week MA. Risk = 1% of portfolio per trade.
   </p>
 </body>
 </html>"""
 
-    subject = f"[MOMENTUM GO] SPY {spy_pct:+.1f}% — {len(candidates)} setup(s) ready — {today}"
+    n_label = f"{n_valid} valid" + (f" + {n_chasing} chasing" if n_chasing else "")
+    subject = f"[MOMENTUM GO] SPY {spy_pct:+.1f}% — {n_label} — {today}"
     import smtplib
     from email.mime.multipart import MIMEMultipart
     from email.mime.text import MIMEText
@@ -677,6 +824,7 @@ def check_momentum_go(email: str):
         _os.replace(tmp, cand_file)
     except Exception as e:
         print(f"  Momentum GO email FAILED: {e}")
+
 
 def run_check():
     data    = load_watchlist()
@@ -713,7 +861,6 @@ def run_check():
             print(f"-- {reason_label}  (price={price_str})")
             entry['status']       = reason or 'NO_DATA'
             entry['last_checked'] = today
-            # Track how long the stock has been out of zone
             if reason == 'NO_LEVEL':
                 entry.setdefault('not_in_zone_since', today)
             elif reason != 'FETCH_ERROR':
@@ -727,8 +874,7 @@ def run_check():
 
         prob = setup.get('Prob', 0)
         print(f"Prob={prob}%  TL={tl}")
-        # Persist status to watch_alerts.json
-        entry.pop('not_in_zone_since', None)   # back in zone — reset counter
+        entry.pop('not_in_zone_since', None)
         entry['status']       = tl
         entry['prob']         = prob
         entry['entry_price']  = setup.get('Entry')
@@ -748,14 +894,12 @@ def run_check():
             'rr':        setup.get('R:R', '-'),
             'earn':      setup.get('Earn', '-'),
             'notes':     '',
-            'setup':     setup,   # full dict — used by generate_watch_html for _render_fund_box
+            'setup':     setup,
         })
 
-        # Already alerted today -- skip email only
         if last_alert == today or tl != 'GREEN':
             continue
 
-        # GREEN -- send alert
         print(f"    Sending GREEN LIGHT alert to {email}...")
         sent = send_green_alert(email, entry, setup)
         if sent:
@@ -764,9 +908,8 @@ def run_check():
             alerts_sent += 1
             print(f"    Email sent OK")
 
-    # Auto-prune: remove tickers that have been "Not in zone" for 21+ days
+    # Auto-prune: remove tickers out of zone for 21+ days
     NOT_IN_ZONE_DAYS = 21
-    before = len(data['tickers'])
     pruned = []
     kept   = []
     for t in data['tickers']:
@@ -784,21 +927,18 @@ def run_check():
     if pruned:
         print(f"\n  Auto-pruned {len(pruned)} stale ticker(s) (>{NOT_IN_ZONE_DAYS}d out of zone):")
         for sym, days in pruned:
-            print(f"    REMOVED {sym} — {days} days not in zone")
-        # Mark removed in html_results so report shows them as removed
+            print(f"    REMOVED {sym} \u2014 {days} days not in zone")
         removed_syms = {s for s, _ in pruned}
         for r in html_results:
             if r['ticker'] in removed_syms:
                 r['notes'] = r.get('notes','') + f'  [auto-removed: {NOT_IN_ZONE_DAYS}d out of zone]'
                 r['tl'] = 'REMOVED'
 
-    # Save updated last_alerted values
     save_watchlist(data)
     generate_watch_html(html_results, today)
     print(f"\n  Done. {alerts_sent} green light alert(s) sent.")
     print("  " + "=" * 55)
 
-    # Check momentum GO signal
     print()
     check_momentum_go(email)
     print("  " + "=" * 55 + "\n")
