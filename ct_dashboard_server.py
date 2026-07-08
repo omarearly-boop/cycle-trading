@@ -253,11 +253,16 @@ def api_stop_all():
 
 @app.route('/api/reports')
 def api_reports():
-    out = []
-    for f in sorted(REPORTS_DIR.glob('*.html'),
-                    key=lambda p: p.stat().st_mtime, reverse=True)[:30]:
-        out.append({'name': f.name, 'size': f.stat().st_size,
-                    'mtime': int(f.stat().st_mtime)})
+    PREFIXES = ['cycles_report','momentum_report','weekly_review','monthly_scan','watch_report']
+    all_files = sorted(REPORTS_DIR.glob('*.html'), key=lambda p: p.stat().st_mtime, reverse=True)
+    seen, out = set(), []
+    for f in all_files:
+        prefix = next((p for p in PREFIXES if f.name.startswith(p)), f.name)
+        if prefix not in seen:
+            seen.add(prefix)
+            out.append({'name': f.name, 'size': f.stat().st_size, 'mtime': int(f.stat().st_mtime)})
+        if len(out) >= 10:
+            break
     return jsonify(out)
 
 

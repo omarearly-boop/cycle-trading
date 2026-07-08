@@ -39,8 +39,11 @@ def _load_watchlist():
 
 
 def _save_watchlist(data):
-    WATCH_FILE.write_text(
+    import os
+    tmp = WATCH_FILE.with_suffix('.tmp')
+    tmp.write_text(
         json.dumps(data, ensure_ascii=False, indent=2), encoding='utf-8')
+    os.replace(tmp, WATCH_FILE)
 
 
 # ---------------------------------------------------------------------------
