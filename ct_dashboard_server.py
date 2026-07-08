@@ -40,9 +40,9 @@ TASKS = {
     'weekly': {
         'label':    'Weekly Retest',
         'icon':     '📊',
-        'desc':     'RSI 30-67 · Near S/R · 24 Factors',
+        'desc':     'RSI 30-67 · Near S/R · 26 Factors',
         'schedule': 'Sunday 08:00',
-        'color':    '#22c55e',
+        'color':    '#3fb950',
         'cmd':      [sys.executable, 'cycles_trading_scanner.py'],
         'report':   'cycles_report_*.html',
     },
@@ -51,16 +51,16 @@ TASKS = {
         'icon':     '🚀',
         'desc':     'RSI 55-78 · Above MA20/50 · SPY >2%',
         'schedule': 'Sunday 08:00',
-        'color':    '#f59e0b',
+        'color':    '#d29922',
         'cmd':      [sys.executable, 'cycles_trading_scanner.py', 'momentum'],
         'report':   'momentum_report_*.html',
     },
     'review': {
         'label':    'Weekly Review',
         'icon':     '📋',
-        'desc':     'מה זז השבוע · שיפור לוגיקה',
+        'desc':     'What moved · Improve logic',
         'schedule': 'Sunday 08:00',
-        'color':    '#a78bfa',
+        'color':    '#a371f7',
         'cmd':      [sys.executable, 'ct_weekly_review.py'],
         'report':   'weekly_review_*.html',
     },
@@ -69,7 +69,7 @@ TASKS = {
         'icon':     '🗓️',
         'desc':     'Monthly levels · Fibonacci golden zone',
         'schedule': '1st Sunday / month',
-        'color':    '#38bdf8',
+        'color':    '#79c0ff',
         'cmd':      [sys.executable, 'cycles_trading_scanner.py', 'monthly'],
         'report':   'monthly_scan_*.html',
     },
@@ -78,14 +78,14 @@ TASKS = {
         'icon':     '🔔',
         'desc':     'Checks watchlist · Email on GREEN hit',
         'schedule': 'Daily 08:00 · 09:45 · 16:45',
-        'color':    '#ef4444',
+        'color':    '#f85149',
         'cmd':      [sys.executable, 'ct_watch_checker.py'],
         'report':   'watch_report_*.html',
     },
     'pipeline': {
         'label':    'Full Pipeline',
         'icon':     '⚡',
-        'desc':     'Runs all tasks per today\'s schedule',
+        'desc':     "Runs today's scheduled tasks",
         'schedule': 'Daily 08:00 (auto-decide)',
         'color':    '#58a6ff',
         'cmd':      [sys.executable, 'ct_pipeline.py'],
@@ -96,7 +96,7 @@ TASKS = {
         'icon':     '🔥',
         'desc':     'Runs ALL scans regardless of schedule',
         'schedule': 'Manual only',
-        'color':    '#ff6b6b',
+        'color':    '#f85149',
         'cmd':      [sys.executable, 'ct_pipeline.py', '--force', 'all'],
         'report':   None,
     },
@@ -111,7 +111,6 @@ def _run_job(job_id: str, task: str):
     info = TASKS[task]
     env  = os.environ.copy()
     env.setdefault('CT_PORTFOLIO_SIZE', '25000')
-    # Force unbuffered + UTF-8 so live output flows through the pipe immediately
     env['PYTHONUNBUFFERED']  = '1'
     env['PYTHONUTF8']        = '1'
     env['PYTHONIOENCODING']  = 'utf-8'
@@ -123,7 +122,7 @@ def _run_job(job_id: str, task: str):
     try:
         proc = subprocess.Popen(
             info['cmd'], cwd=str(BASE_DIR), env=env,
-            stdin=subprocess.DEVNULL,           # no interactive prompts
+            stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             text=True, encoding='utf-8', errors='replace'
         )
@@ -141,8 +140,7 @@ def _run_job(job_id: str, task: str):
         lines += ['', f'✗  Exception: {e}']
 
     with JOB_LOCK:
-        JOBS[job_id].update({'status': status, 'log': lines,
-                             'end': time.time()})
+        JOBS[job_id].update({'status': status, 'log': lines, 'end': time.time()})
 
 
 # ---------------------------------------------------------------------------
@@ -173,10 +171,8 @@ def api_run(task):
         return jsonify({'error': f'Unknown task: {task}'}), 400
     job_id = str(uuid.uuid4())[:8]
     with JOB_LOCK:
-        JOBS[job_id] = {
-            'task': task, 'status': 'starting',
-            'log': [], 'start': time.time(), 'end': None
-        }
+        JOBS[job_id] = {'task': task, 'status': 'starting',
+                        'log': [], 'start': time.time(), 'end': None}
     threading.Thread(target=_run_job, args=(job_id, task), daemon=True).start()
     return jsonify({'job_id': job_id})
 
@@ -188,14 +184,8 @@ def api_job(job_id):
     if not job:
         return jsonify({'error': 'not found'}), 404
     elapsed = int(time.time() - job['start'])
-    return jsonify({
-        'task':    job['task'],
-        'status':  job['status'],
-        'log':     job['log'],
-        'elapsed': elapsed,
-    })
-
-
+    return jsonify({'task': job['task'], 'status': job['status'],
+                    'log': job['log'], 'elapsed': elapsed})
 
 
 @app.route('/api/stop/<job_id>', methods=['POST'])
@@ -214,13 +204,11 @@ def api_stop(job_id):
                 import signal
                 os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
         except Exception:
-            try:
-                proc.kill()
-            except Exception:
-                pass
+            try: proc.kill()
+            except Exception: pass
         with JOB_LOCK:
             JOBS[job_id]['status'] = 'stopped'
-            JOBS[job_id].setdefault('log', []).extend(['', '\u25a0  Stopped by user.'])
+            JOBS[job_id].setdefault('log', []).extend(['', '■  Stopped by user.'])
     return jsonify({'ok': True})
 
 
@@ -241,15 +229,14 @@ def api_stop_all():
                     import signal
                     os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
             except Exception:
-                try:
-                    proc.kill()
-                except Exception:
-                    pass
+                try: proc.kill()
+                except Exception: pass
             with JOB_LOCK:
                 JOBS[jid]['status'] = 'stopped'
-                JOBS[jid].setdefault('log', []).extend(['', '\u25a0  Stopped by user.'])
+                JOBS[jid].setdefault('log', []).extend(['', '■  Stopped by user.'])
             count += 1
     return jsonify({'stopped': count})
+
 
 @app.route('/api/reports')
 def api_reports():
@@ -289,454 +276,697 @@ def index():
 
 
 # ---------------------------------------------------------------------------
-# Embedded workflow dashboard HTML
+# Jenkins-style Pipeline Dashboard
 # ---------------------------------------------------------------------------
 
 DASHBOARD_HTML = r"""<!DOCTYPE html>
-<html lang="he">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Cycles Trading Pipeline</title>
 <style>
 :root{
-  --bg:#0c1220;--card:#1a2236;--card2:#131d30;
-  --border:#2a3a52;--text:#e2e8f0;--muted:#8899aa;--dim:#4a5568;
-  --blue:#4f9eff;--green:#22c55e;--amber:#f59e0b;--red:#ef4444;
-  --violet:#a78bfa;--sky:#38bdf8;
+  --bg:#0d1117;--surface:#161b22;--border:#30363d;
+  --text:#e6edf3;--muted:#8b949e;--dim:#484f58;
+  --blue:#58a6ff;--green:#3fb950;--amber:#d29922;
+  --red:#f85149;--violet:#a371f7;--sky:#79c0ff;
 }
 *{box-sizing:border-box;margin:0;padding:0}
-body{font-family:Arial,sans-serif;background:var(--bg);color:var(--text);min-height:100vh;overflow-x:hidden}
-.hdr{background:#080e1a;border-bottom:1px solid var(--border);padding:14px 24px;display:flex;align-items:center;gap:16px;flex-wrap:wrap}
-.hdr-logo{color:var(--blue);font-size:18px;font-weight:700;white-space:nowrap}
-.hdr-time{color:var(--muted);font-size:13px;flex:1;min-width:120px}
-.hdr-day{background:var(--card);border:1px solid var(--border);border-radius:20px;padding:4px 14px;font-size:12px;color:var(--muted)}
-.btn-run-all{background:linear-gradient(135deg,#1d4ed8,#7c3aed);color:#fff;border:none;border-radius:8px;padding:8px 20px;font-size:13px;font-weight:700;cursor:pointer;transition:opacity .15s;white-space:nowrap}
-.btn-run-all:hover{opacity:.85}
-.btn-run-all:disabled{opacity:.4;cursor:not-allowed}
-.today-bar{background:#111827;border-bottom:1px solid var(--border);padding:8px 24px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:12px;color:var(--muted)}
-.today-bar b{color:var(--text)}
-.plan-pill{border-radius:20px;padding:2px 10px;font-size:11px;font-weight:700;border:1px solid;background:transparent}
-/* WORKFLOW */
-.wf-outer{padding:24px;overflow-x:auto}
-.wf{display:flex;align-items:flex-start;gap:0;min-width:920px}
-.stage{display:flex;flex-direction:column;gap:10px;flex:1;min-width:160px}
-.stage-hdr{display:flex;align-items:center;gap:8px;padding:0 2px 10px;border-bottom:1px solid var(--border);margin-bottom:4px}
-.stage-num{width:22px;height:22px;border-radius:50%;background:var(--card);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:var(--blue);flex-shrink:0}
-.stage-name{font-size:11px;text-transform:uppercase;letter-spacing:.8px;color:var(--dim);font-weight:700}
-.stage-tag{margin-left:auto;font-size:9px;padding:1px 7px;border-radius:10px;border:1px solid var(--border);color:var(--dim)}
-.arrow-col{display:flex;align-items:center;justify-content:center;padding:0 6px;padding-top:14px;flex-shrink:0;min-width:28px;opacity:.5}
-/* NODES */
-.node{background:var(--card);border:1.5px solid var(--border);border-radius:10px;padding:12px;position:relative;overflow:hidden;transition:border-color .25s,box-shadow .25s}
-.node .top-bar{position:absolute;top:0;left:0;right:0;height:3px;border-radius:10px 10px 0 0}
-.node-head{display:flex;align-items:center;gap:7px;margin-bottom:6px}
-.node-icon{font-size:16px}
-.node-label{font-size:13px;font-weight:700}
-.node-desc{font-size:11px;color:var(--muted);line-height:1.5;margin-bottom:8px}
-.node-sched{font-size:10px;color:var(--dim);margin-bottom:10px}
-.node-footer{display:flex;align-items:center;justify-content:space-between;gap:6px}
-.node-badge{font-size:10px;padding:2px 8px;border-radius:12px;background:var(--bg);color:var(--dim);font-weight:600}
-.btn-run{border:none;border-radius:6px;padding:5px 13px;font-size:11px;font-weight:700;cursor:pointer;color:#000;transition:opacity .15s,transform .1s;flex-shrink:0}
-.btn-run:hover{opacity:.85}
-.btn-run:active{transform:scale(.96)}
-.btn-run:disabled{opacity:.35;cursor:not-allowed}
-/* States */
-.node.state-running{border-color:var(--blue);animation:glow 1.4s ease-in-out infinite}
-.node.state-running .node-badge{color:var(--blue)}
-.node.state-done{border-color:#166534}
-.node.state-done .node-badge{color:var(--green)}
-.node.state-error{border-color:#991b1b}
-.node.state-error .node-badge{color:var(--red)}
-.node.state-queued{opacity:.65}
-.node.state-queued .node-badge{color:var(--amber)}
-.node.is-today{box-shadow:0 0 0 1px #1e3a5f inset}
-@keyframes glow{0%,100%{box-shadow:0 0 0 2px #4f9eff22}50%{box-shadow:0 0 12px 3px #4f9eff44}}
-/* STORE */
-.store-node{background:var(--card);border:1.5px solid var(--border);border-radius:10px;padding:14px;text-align:center}
-.store-icon{font-size:28px;margin-bottom:6px}
-.store-name{font-size:12px;font-weight:700;color:var(--sky);margin-bottom:4px}
-.store-count{font-size:26px;font-weight:700;color:var(--text);margin-bottom:2px}
-.store-sub{font-size:10px;color:var(--dim)}
-.store-tickers{margin-top:8px;display:flex;flex-direction:column;gap:3px;max-height:130px;overflow-y:auto}
-.store-tick{display:flex;align-items:center;gap:6px;padding:3px 6px;background:var(--bg);border-radius:5px;font-size:10px}
-.store-tick .sym{font-weight:700;min-width:44px}
-.store-tick .dir{font-weight:700;font-size:9px}
-.store-tick .stat{color:var(--dim);font-size:9px;margin-left:auto}
-/* OUTPUT */
-.out-node{background:var(--card);border:1.5px solid var(--border);border-radius:10px;padding:12px}
-.out-title{font-size:11px;font-weight:700;color:var(--muted);margin-bottom:8px}
-.out-report{display:flex;align-items:center;justify-content:space-between;padding:4px 6px;background:var(--bg);border-radius:5px;margin-bottom:4px;border:1px solid var(--border);gap:6px}
-.out-report .rn{font-size:10px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
-.btn-open{font-size:10px;padding:2px 8px;border-radius:4px;border:1px solid var(--blue);color:var(--blue);background:transparent;cursor:pointer;text-decoration:none;white-space:nowrap;flex-shrink:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;
+     background:var(--bg);color:var(--text);min-height:100vh}
+
+/* ── Header ── */
+.hdr{background:#0d1117;border-bottom:1px solid var(--border);
+     padding:10px 20px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.hdr-logo{color:var(--blue);font-size:15px;font-weight:700;letter-spacing:-.3px}
+.hdr-time{color:var(--muted);font-size:12px;flex:1;min-width:100px}
+.hdr-pill{background:var(--surface);border:1px solid var(--border);
+          border-radius:20px;padding:3px 12px;font-size:11px;color:var(--muted)}
+.btn-h{border:none;border-radius:6px;padding:6px 14px;font-size:12px;font-weight:700;
+       cursor:pointer;color:#fff;transition:opacity .15s;white-space:nowrap}
+.btn-h:hover{opacity:.82}.btn-h:disabled{opacity:.3;cursor:not-allowed}
+
+/* ── Today bar ── */
+.today-bar{background:var(--surface);border-bottom:1px solid var(--border);
+           padding:5px 20px;display:flex;align-items:center;gap:8px;
+           font-size:11px;color:var(--muted);flex-wrap:wrap}
+.plan-pill{border-radius:20px;padding:2px 10px;font-size:10px;
+           font-weight:700;border:1px solid;background:transparent}
+
+/* ══════════════════════════════════════════
+   JENKINS PIPELINE
+══════════════════════════════════════════ */
+.jk-wrap{padding:28px 24px 20px;overflow-x:auto}
+
+/* Main horizontal pipe row */
+.jk-pipe{display:flex;align-items:center;min-width:900px;gap:0;position:relative}
+
+/* Horizontal connector line */
+.jk-line{height:3px;background:var(--border);flex:1;min-width:20px;transition:background .4s}
+.jk-line.lit{background:var(--green)}
+
+/* ── Stage wrapper ── */
+.jk-stage{display:flex;flex-direction:column;align-items:center;flex-shrink:0;
+          position:relative;min-width:72px}
+
+/* ── Circle bubble ── */
+.jk-circle{
+  width:54px;height:54px;border-radius:50%;
+  border:3px solid var(--dim);
+  background:var(--surface);
+  display:flex;align-items:center;justify-content:center;
+  font-size:22px;cursor:pointer;
+  transition:border-color .3s,box-shadow .3s,background .3s;
+  position:relative;z-index:2;user-select:none;
+}
+.jk-circle:hover{border-color:var(--blue);box-shadow:0 0 10px #58a6ff44}
+.jk-circle.no-click{cursor:default}
+.jk-circle.no-click:hover{border-color:var(--dim);box-shadow:none}
+
+/* Stage label */
+.jk-label{font-size:11px;font-weight:600;color:var(--muted);
+          margin-top:9px;text-align:center;max-width:76px;line-height:1.3}
+.jk-sub{font-size:10px;color:var(--dim);text-align:center;
+        margin-top:3px;max-width:80px;min-height:14px}
+
+/* Run button */
+.jk-btn{margin-top:6px;font-size:9px;padding:2px 10px;border-radius:10px;
+        background:transparent;border:1px solid var(--border);color:var(--dim);
+        cursor:pointer;transition:all .15s;white-space:nowrap}
+.jk-btn:hover{border-color:var(--blue);color:var(--blue)}
+.jk-btn:disabled{opacity:.3;cursor:not-allowed;pointer-events:none}
+
+/* ── States ── */
+.s-idle   .jk-circle{border-color:var(--dim)}
+.s-queued .jk-circle{border-color:var(--amber);opacity:.65}
+.s-running .jk-circle{border-color:var(--blue)!important;
+            animation:jk-glow 1.1s ease-in-out infinite}
+.s-done   .jk-circle{border-color:var(--green)!important;background:#0d2318}
+.s-error  .jk-circle{border-color:var(--red)!important;background:#2a0d0d}
+
+.s-running .jk-label{color:var(--blue)}
+.s-done    .jk-label{color:var(--green)}
+.s-error   .jk-label{color:var(--red)}
+.s-queued  .jk-label{color:var(--amber)}
+
+/* Status dot (bottom-right of circle) */
+.jk-dot{position:absolute;bottom:-3px;right:-3px;width:18px;height:18px;
+        border-radius:50%;font-size:10px;font-weight:700;
+        display:flex;align-items:center;justify-content:center;
+        background:var(--dim);border:2px solid var(--bg);color:#fff;
+        transition:background .3s;pointer-events:none}
+.s-running .jk-dot{background:var(--blue)}
+.s-done    .jk-dot{background:var(--green)}
+.s-error   .jk-dot{background:var(--red)}
+.s-queued  .jk-dot{background:var(--amber)}
+
+/* Today highlight ring */
+.today-ring .jk-circle{box-shadow:0 0 0 3px #58a6ff22}
+
+@keyframes jk-glow{
+  0%,100%{box-shadow:0 0 4px 1px #58a6ff33}
+  50%{box-shadow:0 0 14px 4px #58a6ff66}
+}
+@keyframes spin{0%{transform:rotate(0deg)}100%{transform:rotate(360deg)}}
+.spin{display:inline-block;animation:spin .7s linear infinite}
+
+/* ── Parallel scanners block ── */
+.jk-para-wrap{
+  display:flex;flex-direction:column;gap:0;
+  position:relative;flex-shrink:0;
+}
+
+/* Vertical left + right bars connecting the parallel branches */
+.jk-para-wrap::before,
+.jk-para-wrap::after{
+  content:'';position:absolute;
+  top:27px;       /* center of top circle */
+  bottom:27px;    /* center of bottom circle */
+  width:3px;background:var(--border);z-index:1;
+  transition:background .4s;
+}
+.jk-para-wrap::before{left:0}
+.jk-para-wrap::after{right:0}
+.jk-para-wrap.all-done::before,
+.jk-para-wrap.all-done::after{background:var(--green)}
+
+/* Each parallel row */
+.jk-para-row{
+  display:flex;align-items:center;gap:0;
+  padding:6px 0;position:relative;
+}
+
+/* Horizontal stubs from vertical bar to circle */
+.jk-stub{width:22px;height:3px;background:var(--border);flex-shrink:0;transition:background .4s}
+.jk-stub.lit{background:var(--green)}
+
+/* Smaller circle for parallel items */
+.jk-circle-sm{
+  width:46px;height:46px;border-radius:50%;
+  border:3px solid var(--dim);
+  background:var(--surface);
+  display:flex;align-items:center;justify-content:center;
+  font-size:18px;cursor:pointer;
+  transition:border-color .3s,box-shadow .3s,background .3s;
+  position:relative;z-index:2;user-select:none;flex-shrink:0;
+}
+.jk-circle-sm:hover{border-color:var(--blue);box-shadow:0 0 8px #58a6ff44}
+
+/* Parallel item label area */
+.jk-para-info{margin-left:10px;min-width:100px}
+.jk-para-name{font-size:11px;font-weight:600;color:var(--muted);line-height:1.3}
+.jk-para-badge{font-size:10px;color:var(--dim);margin-top:2px}
+.jk-para-btn{
+  display:inline-block;margin-top:4px;font-size:9px;padding:1px 8px;
+  border-radius:8px;background:transparent;border:1px solid var(--border);
+  color:var(--dim);cursor:pointer;transition:all .15s;
+}
+.jk-para-btn:hover{border-color:var(--blue);color:var(--blue)}
+.jk-para-btn:disabled{opacity:.3;cursor:not-allowed;pointer-events:none}
+
+/* Parallel item states (applied on the .jk-para-row) */
+.ps-idle    .jk-circle-sm{border-color:var(--dim)}
+.ps-queued  .jk-circle-sm{border-color:var(--amber);opacity:.65}
+.ps-running .jk-circle-sm{border-color:var(--blue)!important;animation:jk-glow 1.1s ease-in-out infinite}
+.ps-done    .jk-circle-sm{border-color:var(--green)!important;background:#0d2318}
+.ps-error   .jk-circle-sm{border-color:var(--red)!important;background:#2a0d0d}
+.ps-running .jk-para-name{color:var(--blue)}
+.ps-done    .jk-para-name{color:var(--green)}
+.ps-error   .jk-para-name{color:var(--red)}
+.ps-queued  .jk-para-name{color:var(--amber)}
+.ps-running .jk-para-badge{color:var(--blue)}
+.ps-done    .jk-para-badge{color:var(--green)}
+
+/* ── Data Store ── */
+.jk-store{margin-top:8px;text-align:center}
+.jk-count{font-size:20px;font-weight:700;color:var(--text)}
+.jk-count-lbl{font-size:9px;color:var(--dim);margin-top:1px}
+.jk-tickers{margin-top:6px;display:flex;flex-direction:column;gap:2px;
+             max-height:90px;overflow-y:auto;min-width:110px}
+.jk-tick{display:flex;align-items:center;gap:5px;padding:2px 5px;
+         background:var(--surface);border-radius:3px;font-size:9px}
+.jk-tick .sym{font-weight:700;min-width:32px;color:var(--text)}
+.jk-tick .sta{margin-left:auto;color:var(--dim)}
+
+/* ── Reports ── */
+.jk-reports{margin-top:8px;min-width:148px}
+.jk-rep{display:flex;align-items:center;justify-content:space-between;
+        gap:5px;padding:3px 6px;background:var(--surface);border-radius:4px;
+        margin-bottom:3px}
+.jk-rep .rn{font-size:9px;color:var(--muted);overflow:hidden;
+             text-overflow:ellipsis;white-space:nowrap;flex:1}
+.btn-open{font-size:9px;padding:1px 7px;border-radius:4px;
+          border:1px solid var(--blue);color:var(--blue);
+          background:transparent;cursor:pointer;text-decoration:none;
+          white-space:nowrap;flex-shrink:0}
 .btn-open:hover{background:var(--blue);color:#000}
-.email-node{background:linear-gradient(135deg,#1a2236,#1a1f30);border:1.5px solid #1e3a5f;border-radius:10px;padding:12px;margin-top:10px}
-.en-title{font-size:11px;font-weight:700;color:var(--amber);margin-bottom:4px}
-.en-cond{font-size:10px;color:var(--green);margin-bottom:2px}
-.en-addr{font-size:10px;color:var(--dim)}
-/* TERMINAL */
-.term-section{padding:0 24px 24px}
-.term-wrap{background:#080e1a;border:1px solid var(--border);border-radius:10px;overflow:hidden}
-.term-bar{background:#0e1726;border-bottom:1px solid var(--border);padding:8px 14px;display:flex;align-items:center;gap:8px}
+
+/* ── Terminal ── */
+.term-wrap{margin:0 20px 20px;background:#0d1117;
+           border:1px solid var(--border);border-radius:8px;overflow:hidden}
+.term-bar{background:var(--surface);border-bottom:1px solid var(--border);
+          padding:7px 14px;display:flex;align-items:center;gap:8px}
 .dot{width:10px;height:10px;border-radius:50%}
-.dot-r{background:#ef4444}.dot-y{background:#f59e0b}.dot-g{background:#22c55e}
+.dot-r{background:#f85149}.dot-y{background:#d29922}.dot-g{background:#3fb950}
 .term-title{font-size:12px;color:var(--muted);flex:1}
-.job-tag{font-size:11px;padding:2px 10px;border-radius:10px;background:var(--card);color:var(--dim)}
-.job-tag.running{color:var(--blue);animation:pulse .9s infinite}
+.job-tag{font-size:10px;padding:2px 10px;border-radius:10px;
+         background:var(--surface);color:var(--dim)}
+.job-tag.running{color:var(--blue);animation:blink .9s infinite}
 .job-tag.done{color:var(--green)}.job-tag.error{color:var(--red)}
-@keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
-.btn-clear{background:transparent;border:1px solid var(--border);color:var(--dim);border-radius:5px;padding:3px 10px;font-size:11px;cursor:pointer}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
+.btn-clear{background:transparent;border:1px solid var(--border);color:var(--dim);
+           border-radius:5px;padding:3px 10px;font-size:11px;cursor:pointer}
 .btn-clear:hover{border-color:var(--muted);color:var(--text)}
-.btn-stop-node{border:none;border-radius:6px;padding:5px 9px;font-size:13px;font-weight:700;cursor:pointer;transition:opacity .15s;flex-shrink:0}
-.btn-stop-node:hover{opacity:.75}
-pre#terminal{font-family:'Courier New',monospace;font-size:11.5px;line-height:1.55;color:#b0c4d8;padding:14px 16px;min-height:160px;max-height:320px;overflow-y:auto;white-space:pre-wrap;word-break:break-all;background:transparent}
+pre#terminal{font-family:'JetBrains Mono','Courier New',monospace;font-size:11px;
+             line-height:1.6;color:#8b949e;padding:14px 16px;
+             min-height:150px;max-height:300px;overflow-y:auto;
+             white-space:pre-wrap;word-break:break-all;background:transparent}
 </style>
 </head>
 <body>
 
+<!-- ── Header ── -->
 <div class="hdr">
   <div class="hdr-logo">&#9889; Cycles Trading Pipeline</div>
   <div class="hdr-time" id="hdr-time">Loading...</div>
-  <span class="hdr-day" id="hdr-day">&#x2014;</span>
-  <button class="btn-run-all" id="btn-all" onclick="runTask('pipeline')">&#9654; Run Today</button>
-  <button class="btn-run-all" id="btn-run-all-wf" onclick="startFullWorkflow()"
-    style="background:linear-gradient(135deg,#7f1d1d,#dc2626)">&#128293; Run All</button>
-  <button class="btn-run-all" id="btn-stop-all" onclick="stopAll()" style="background:linear-gradient(135deg,#1a1a2e,#4a0000);border:1px solid #7f1d1d">&#9632; Stop All</button>
+  <span class="hdr-pill" id="hdr-day">&#x2014;</span>
+  <button class="btn-h" id="btn-today" onclick="runTask('pipeline')"
+          style="background:#1f6feb">&#9654; Run Today</button>
+  <button class="btn-h" id="btn-all" onclick="startFullWorkflow()"
+          style="background:#b91c1c">&#128293; Run All</button>
+  <button class="btn-h" id="btn-stop" onclick="stopAll()"
+          style="background:#161b22;border:1px solid #6e0f0f;color:#f85149">&#9632; Stop</button>
 </div>
 
+<!-- ── Today bar ── -->
 <div class="today-bar">
-  <b>Auto-plan today:</b>
+  <b>Today&rsquo;s plan:</b>
   <span id="plan-pills">Loading...</span>
 </div>
 
-<div class="wf-outer"><div class="wf">
+<!-- ══ JENKINS PIPELINE ══ -->
+<div class="jk-wrap">
+<div class="jk-pipe">
 
-  <!-- Stage 1: Scheduler -->
-  <div class="stage" style="max-width:148px">
-    <div class="stage-hdr">
-      <div class="stage-num">1</div>
-      <div class="stage-name">Scheduler</div>
+  <!-- ① Scheduler -->
+  <div class="jk-stage s-done" id="node-scheduler">
+    <div class="jk-circle no-click">
+      &#9889;
+      <div class="jk-dot">&#10003;</div>
     </div>
-    <div class="node">
-      <div class="top-bar" style="background:#58a6ff"></div>
-      <div class="node-head"><span class="node-icon">&#128336;</span><span class="node-label" style="font-size:12px">Automatic</span></div>
-      <div class="node-desc">
-        <b style="color:#4f9eff">Daily</b><br>08:00 &middot; 09:45 &middot; 16:45<br><br>
-        <b style="color:#22c55e">Sunday</b><br>Full scan 08:00<br><br>
-        <b style="color:#38bdf8">1st Sunday</b><br>+ Monthly S/R
+    <div class="jk-label">Scheduler</div>
+    <div class="jk-sub" id="sch-day">auto</div>
+  </div>
+
+  <div class="jk-line" id="line-to-scan"></div>
+
+  <!-- ② Parallel Scanners -->
+  <div class="jk-para-wrap" id="para-wrap">
+
+    <!-- Weekly -->
+    <div class="jk-para-row ps-idle" id="node-weekly">
+      <div class="jk-stub" id="stub-l-weekly"></div>
+      <div class="jk-circle-sm" onclick="runTask('weekly')">&#128202;</div>
+      <div class="jk-para-info">
+        <div class="jk-para-name">Weekly Retest</div>
+        <div class="jk-para-badge" id="badge-weekly">idle &middot; Sunday</div>
+        <button class="jk-para-btn" id="btn-weekly" onclick="runTask('weekly')">&#9654; Run</button>
       </div>
-      <div style="margin-top:8px">
-        <span class="plan-pill" id="sch-day" style="color:#58a6ff;border-color:#1e3a5f">&#x2014;</span>
+      <div class="jk-stub jk-stub-r" id="stub-r-weekly"></div>
+    </div>
+
+    <!-- Momentum -->
+    <div class="jk-para-row ps-idle" id="node-momentum">
+      <div class="jk-stub" id="stub-l-momentum"></div>
+      <div class="jk-circle-sm" onclick="runTask('momentum')">&#128640;</div>
+      <div class="jk-para-info">
+        <div class="jk-para-name">Momentum</div>
+        <div class="jk-para-badge" id="badge-momentum">idle &middot; Sunday</div>
+        <button class="jk-para-btn" id="btn-momentum" onclick="runTask('momentum')">&#9654; Run</button>
       </div>
+      <div class="jk-stub jk-stub-r" id="stub-r-momentum"></div>
+    </div>
+
+    <!-- Weekly Review -->
+    <div class="jk-para-row ps-idle" id="node-review">
+      <div class="jk-stub" id="stub-l-review"></div>
+      <div class="jk-circle-sm" onclick="runTask('review')">&#128203;</div>
+      <div class="jk-para-info">
+        <div class="jk-para-name">Weekly Review</div>
+        <div class="jk-para-badge" id="badge-review">idle &middot; Sunday</div>
+        <button class="jk-para-btn" id="btn-review" onclick="runTask('review')">&#9654; Run</button>
+      </div>
+      <div class="jk-stub jk-stub-r" id="stub-r-review"></div>
+    </div>
+
+    <!-- Monthly -->
+    <div class="jk-para-row ps-idle" id="node-monthly">
+      <div class="jk-stub" id="stub-l-monthly"></div>
+      <div class="jk-circle-sm" onclick="runTask('monthly')">&#128197;</div>
+      <div class="jk-para-info">
+        <div class="jk-para-name">Monthly S/R</div>
+        <div class="jk-para-badge" id="badge-monthly">idle &middot; 1st Sunday</div>
+        <button class="jk-para-btn" id="btn-monthly" onclick="runTask('monthly')">&#9654; Run</button>
+      </div>
+      <div class="jk-stub jk-stub-r" id="stub-r-monthly"></div>
+    </div>
+
+  </div><!-- /para-wrap -->
+
+  <div class="jk-line" id="line-to-store"></div>
+
+  <!-- ③ Data Store -->
+  <div class="jk-stage s-done" id="node-store">
+    <div class="jk-circle no-click" style="font-size:20px">
+      &#128190;
+      <div class="jk-dot">&#10003;</div>
+    </div>
+    <div class="jk-label">Data Store</div>
+    <div class="jk-store">
+      <div class="jk-count" id="store-count">—</div>
+      <div class="jk-count-lbl">watched</div>
+      <div class="jk-tickers" id="store-tickers"></div>
     </div>
   </div>
 
-  <div class="arrow-col"><svg width="24" height="24" viewBox="0 0 24 24" fill="none"><path d="M5 12h14M13 6l6 6-6 6" stroke="#4f9eff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+  <div class="jk-line" id="line-to-checker"></div>
 
-  <!-- Stage 2: Scanners -->
-  <div class="stage">
-    <div class="stage-hdr">
-      <div class="stage-num">2</div>
-      <div class="stage-name">Scanners</div>
-      <span class="stage-tag">parallel</span>
+  <!-- ④ Watch Checker -->
+  <div class="jk-stage s-idle" id="node-daily">
+    <div class="jk-circle" onclick="runTask('daily')">
+      &#128276;
+      <div class="jk-dot">&#8212;</div>
     </div>
-    <div id="scanner-nodes"></div>
+    <div class="jk-label">Watch Checker</div>
+    <div class="jk-sub" id="badge-daily">Daily</div>
+    <button class="jk-btn" id="btn-daily" onclick="runTask('daily')">&#9654; Run</button>
   </div>
 
-  <div class="arrow-col"><svg width="24" height="24" viewBox="0 0 24 24" fill="none"><path d="M5 12h14M13 6l6 6-6 6" stroke="#4f9eff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+  <div class="jk-line" id="line-to-out"></div>
 
-  <!-- Stage 3: Data Store -->
-  <div class="stage" style="max-width:162px">
-    <div class="stage-hdr">
-      <div class="stage-num">3</div>
-      <div class="stage-name">Data Store</div>
+  <!-- ⑤ Output -->
+  <div class="jk-stage" id="node-output">
+    <div class="jk-circle no-click" style="font-size:20px">
+      &#128231;
+      <div class="jk-dot" style="background:var(--dim)">&#8212;</div>
     </div>
-    <div class="store-node">
-      <div class="store-icon">&#128190;</div>
-      <div class="store-name">watch_alerts.json</div>
-      <div class="store-count" id="store-count">&#x2014;</div>
-      <div class="store-sub">stocks tracked</div>
-      <div class="store-tickers" id="store-tickers"></div>
-    </div>
-  </div>
-
-  <div class="arrow-col"><svg width="24" height="24" viewBox="0 0 24 24" fill="none"><path d="M5 12h14M13 6l6 6-6 6" stroke="#4f9eff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
-
-  <!-- Stage 4: Checker -->
-  <div class="stage" style="max-width:185px">
-    <div class="stage-hdr">
-      <div class="stage-num">4</div>
-      <div class="stage-name">Checker</div>
-    </div>
-    <div id="checker-node"></div>
-  </div>
-
-  <div class="arrow-col"><svg width="24" height="24" viewBox="0 0 24 24" fill="none"><path d="M5 12h14M13 6l6 6-6 6" stroke="#4f9eff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
-
-  <!-- Stage 5: Output -->
-  <div class="stage">
-    <div class="stage-hdr">
-      <div class="stage-num">5</div>
-      <div class="stage-name">Output</div>
-    </div>
-    <div class="out-node">
-      <div class="out-title">&#128196; Reports</div>
-      <div id="output-reports"><div style="color:var(--dim);font-size:11px">Loading...</div></div>
-    </div>
-    <div class="email-node">
-      <div class="en-title">&#128231; Email Alerts</div>
-      <div class="en-cond">&#9679; GREEN watchlist hit</div>
-      <div class="en-cond" style="color:var(--amber)">&#9889; Momentum GO (SPY &gt;2%)</div>
-      <div class="en-cond" style="color:var(--violet)">&#128196; Sunday scan reports</div>
-      <div class="en-addr">omarearly@gmail.com</div>
+    <div class="jk-label">Output</div>
+    <div class="jk-reports" id="output-reports">
+      <div style="color:var(--dim);font-size:10px;margin-top:6px">Loading&hellip;</div>
     </div>
   </div>
 
-</div></div>
+</div><!-- /jk-pipe -->
+</div><!-- /jk-wrap -->
 
-<div class="term-section">
-  <div class="term-wrap">
-    <div class="term-bar">
-      <div class="dot dot-r"></div><div class="dot dot-y"></div><div class="dot dot-g"></div>
-      <span class="term-title">Log Output</span>
-      <span class="job-tag" id="job-tag">IDLE</span>
-      <button class="btn-clear" onclick="clearLog()">Clear</button>
-    </div>
-    <pre id="terminal">$ Cycles Trading Dashboard ready.
-$ Click Run on any scanner node to start.</pre>
+<!-- ── Terminal ── -->
+<div class="term-wrap">
+  <div class="term-bar">
+    <div class="dot dot-r"></div><div class="dot dot-y"></div><div class="dot dot-g"></div>
+    <span class="term-title">Log Output</span>
+    <span class="job-tag" id="job-tag">IDLE</span>
+    <button class="btn-clear" onclick="clearLog()">Clear</button>
   </div>
+  <pre id="terminal">$ Cycles Trading Dashboard ready.
+$ Click any stage to run it individually, or use Run All.</pre>
 </div>
 
 <script>
-const SCANNERS = {
-  weekly:   {label:'Weekly Retest',icon:'&#128202;',desc:'RSI 30-67 &middot; Near S/R &middot; 24 Factors',schedule:'Sunday 08:00',color:'#22c55e'},
-  momentum: {label:'Momentum',icon:'&#128640;',desc:'RSI 55-78 &middot; Above MA20/50 &middot; SPY &gt;2%',schedule:'Sunday 08:00',color:'#f59e0b'},
-  review:   {label:'Weekly Review',icon:'&#128203;',desc:'What moved &middot; Improve logic',schedule:'Sunday 08:00',color:'#a78bfa'},
-  monthly:  {label:'Monthly S/R',icon:'&#128197;',desc:'Monthly levels &middot; Fibonacci golden zone',schedule:'1st Sunday/month',color:'#38bdf8'},
-};
-const CHECKER = {
-  daily: {label:'Watch Checker',icon:'&#128276;',desc:'Checks watchlist &middot; Email on GREEN',schedule:'Daily 08:00 &middot; 09:45 &middot; 16:45',color:'#ef4444'},
-};
+// ── State ──────────────────────────────────────────────────────────────────
+const SCAN_KEYS = ['weekly','momentum','review','monthly'];
+const ALL_KEYS  = ['weekly','momentum','review','monthly','daily'];
 
-let currentJob=null, activeTask=null, pollTimer=null, nodeStates={}, todayTasks=[];
+let currentJob = null, activeTask = null, pollTimer = null;
+let nodeStates = {};
+let todayTasks = [];
 
-function buildNode(key,info,container){
-  const d=document.createElement('div');
-  d.className='node state-idle';d.id='node-'+key;
-  d.innerHTML=
-    '<div class="top-bar" style="background:'+info.color+'"></div>'+
-    '<div class="node-head"><span class="node-icon">'+info.icon+'</span>'+
-    '<span class="node-label">'+info.label+'</span></div>'+
-    '<div class="node-desc">'+info.desc+'</div>'+
-    '<div class="node-sched">&#128336; '+info.schedule+'</div>'+
-    '<div class="node-footer">'+
-      '<span class="node-badge" id="badge-'+key+'">idle</span>'+
-      '<button class="btn-run" id="btn-'+key+'" style="background:'+info.color+'" onclick="runTask(\''+key+'\')">&#9654; Run</button>'+
-    '<button class="btn-stop-node" id="btn-stop-'+key+'" style="display:none;background:#7f1d1d;color:#fca5a5" onclick="stopCurrentJob()">&#9632;</button>'+
-    '</div>';
-  container.appendChild(d);
-  nodeStates[key]='idle';
+ALL_KEYS.forEach(k => nodeStates[k] = 'idle');
+
+// ── Node state setters ─────────────────────────────────────────────────────
+function setScannerState(key, state, badge) {
+  const row   = document.getElementById('node-'+key);
+  const bdg   = document.getElementById('badge-'+key);
+  const btn   = document.getElementById('btn-'+key);
+  const stubL = document.getElementById('stub-l-'+key);
+  const stubR = document.getElementById('stub-r-'+key);
+  if (!row) return;
+
+  // Remove old ps- class, add new
+  row.className = row.className.replace(/\bps-\w+/g,'').trim() + ' ps-'+state;
+
+  if (bdg) {
+    const icons = {running:'<span class="spin">&#9696;</span> running&hellip;',
+                   done:'&#10003; done', error:'&#10007; error',
+                   queued:'&#8230; queued', idle:'idle'};
+    bdg.innerHTML = badge ? badge : (icons[state] || state);
+  }
+  if (btn) btn.disabled = (state === 'running');
+  if (stubL && state === 'done') stubL.classList.add('lit');
+  else if (stubL) stubL.classList.remove('lit');
+  if (stubR && state === 'done') stubR.classList.add('lit');
+  else if (stubR) stubR.classList.remove('lit');
+
+  nodeStates[key] = state;
+
+  // Light up vertical bars when all scanners done
+  const allDone = SCAN_KEYS.every(k => nodeStates[k] === 'done');
+  const pw = document.getElementById('para-wrap');
+  if (pw) pw.classList.toggle('all-done', allDone);
 }
 
-function buildNodes(){
-  const sc=document.getElementById('scanner-nodes');
-  Object.entries(SCANNERS).forEach(([k,v])=>buildNode(k,v,sc));
-  const cc=document.getElementById('checker-node');
-  Object.entries(CHECKER).forEach(([k,v])=>buildNode(k,v,cc));
+function setCheckerState(state, badge) {
+  const node = document.getElementById('node-daily');
+  const bdg  = document.getElementById('badge-daily');
+  const btn  = document.getElementById('btn-daily');
+  const dot  = node ? node.querySelector('.jk-dot') : null;
+  if (!node) return;
+
+  node.className = node.className.replace(/\bs-\w+/g,'').trim() + ' s-'+state
+                   + (todayTasks.includes('daily') ? ' today-ring' : '');
+
+  if (dot) {
+    const icons = {running:'<span class="spin">&#9696;</span>',done:'&#10003;',
+                   error:'&#10007;',queued:'&#8230;',idle:'&#8212;'};
+    dot.innerHTML = icons[state] || '&#8212;';
+  }
+  if (bdg) bdg.textContent = badge || (state==='idle'?'Daily':state);
+  if (btn) btn.disabled = (state === 'running');
+  nodeStates['daily'] = state;
+
+  // Light up line after checker when done
+  const lineOut = document.getElementById('line-to-out');
+  if (lineOut) lineOut.classList.toggle('lit', state === 'done');
 }
 
-function setNodeState(key,state,badge){
-  const node=document.getElementById('node-'+key);
-  const bdg=document.getElementById('badge-'+key);
-  const btn=document.getElementById('btn-'+key);
-  const sbtn=document.getElementById('btn-stop-'+key);
-  if(!node)return;
-  node.className='node state-'+state+(todayTasks.includes(key)?' is-today':'');
-  if(bdg)bdg.textContent=badge||state;
-  if(btn)btn.disabled=(state==='running');
-  if(sbtn)sbtn.style.display=(state==='running')?'inline-block':'none';
-  nodeStates[key]=state;
+function setNodeState(key, state, badge) {
+  if (key === 'daily') { setCheckerState(state, badge); return; }
+  if (SCAN_KEYS.includes(key)) { setScannerState(key, state, badge); return; }
 }
 
-function resetAll(){
-  [...Object.keys(SCANNERS),...Object.keys(CHECKER)].forEach(k=>setNodeState(k,'idle','idle'));
-  document.querySelectorAll('.btn-run').forEach(b=>b.disabled=false);
-  document.getElementById('btn-all').disabled=false;
-  document.getElementById('btn-run-all-wf').disabled=false;
-}
-
-function startFullWorkflow(){
-  if(currentJob&&!confirm('A task is already running. Start anyway?'))return;
-  if(currentJob)stopPoll();
-  // Mark all nodes as queued first (visual)
-  [...Object.keys(SCANNERS),...Object.keys(CHECKER)].forEach(k=>setNodeState(k,'queued','waiting...'));
-  activeTask='all';
-  document.querySelectorAll('.btn-run').forEach(b=>b.disabled=true);
-  document.getElementById('btn-all').disabled=true;
-  document.getElementById('btn-run-all-wf').disabled=true;
-  setJobTag('Running Full Workflow...','running');
-  setLog(['Starting Full Workflow — all 5 scans in sequence...']);
-  fetch('/api/run/all',{method:'POST'})
-    .then(r=>r.json())
-    .then(d=>{
-      if(d.error){setLog(['Error: '+d.error]);setJobTag('ERROR','error');resetAll();return;}
-      currentJob=d.job_id;startPoll();
-    })
-    .catch(e=>{setLog(['Error: '+e]);setJobTag('ERROR','error');resetAll();});
-}
-
-function runTask(task){
-  if(currentJob&&!confirm('A task is already running. Start anyway?'))return;
-  if(currentJob)stopPoll();
-  activeTask=task;
-  document.querySelectorAll('.btn-run').forEach(b=>b.disabled=true);
-  document.getElementById('btn-all').disabled=true;
-  if(SCANNERS[task]||CHECKER[task])setNodeState(task,'running','starting...');
-  setJobTag('Starting...','running');
-  setLog(['Starting: '+(SCANNERS[task]||CHECKER[task]||{label:task}).label]);
-  fetch('/api/run/'+task,{method:'POST'})
-    .then(r=>r.json())
-    .then(d=>{
-      if(d.error){setLog(['Error: '+d.error]);setJobTag('ERROR','error');resetAll();return;}
-      currentJob=d.job_id;startPoll();
-    })
-    .catch(e=>{setLog(['Network error: '+e]);setJobTag('ERROR','error');resetAll();});
-}
-
-function parsePipelineLog(lines){
-  const MAP={'Weekly Retest Scan':'weekly','Momentum Scan':'momentum',
-             'Weekly Review':'review','Monthly S/R Scan':'monthly','Daily Watch Checker':'daily'};
-  let cur=null;
-  lines.forEach(l=>{
-    const m=l.match(/>>>\s+(.+)/);
-    if(m){
-      const k=MAP[m[1].trim()];
-      if(k){if(cur&&cur!==k)setNodeState(cur,'done','done');cur=k;setNodeState(k,'running','running...');}
-    }
-    if((l.includes('OK in')||l.includes('Exit code: 0'))&&cur){setNodeState(cur,'done','done');cur=null;}
-    if((l.includes('FAILED')||l.includes('TIMEOUT')||l.includes('EXCEPTION'))&&cur){setNodeState(cur,'error','error');cur=null;}
+function resetAll() {
+  ALL_KEYS.forEach(k => setNodeState(k, 'idle'));
+  document.querySelectorAll('.jk-btn,.jk-para-btn').forEach(b => b.disabled = false);
+  ['btn-today','btn-all'].forEach(id => { const b=document.getElementById(id); if(b) b.disabled=false; });
+  // Reset lit lines
+  ['line-to-store','line-to-checker','line-to-out'].forEach(id => {
+    const el = document.getElementById(id); if(el) el.classList.remove('lit');
   });
-  // If pipeline finished with a task still "running", mark it done
-  // (final poll may arrive after process exited)
+  document.querySelectorAll('.jk-stub').forEach(s => s.classList.remove('lit'));
+  const pw = document.getElementById('para-wrap');
+  if (pw) pw.classList.remove('all-done');
 }
 
-function stopCurrentJob(){
-  if(!currentJob)return;
-  fetch('/api/stop/'+currentJob,{method:'POST'}).then(r=>r.json()).then(()=>{
-    stopPoll();
-    setJobTag('Stopped','error');
-    setLog((document.getElementById('terminal').textContent+'\n\u25a0  Stopped by user.').split('\n'));
-    resetAll();
-    currentJob=null;activeTask=null;
-  }).catch(()=>{});
+// ── Task runners ───────────────────────────────────────────────────────────
+function startFullWorkflow() {
+  if (currentJob && !confirm('A task is running. Start anyway?')) return;
+  if (currentJob) stopPoll();
+  ALL_KEYS.forEach(k => setNodeState(k, 'queued', 'waiting…'));
+  activeTask = 'all';
+  lockButtons();
+  setJobTag('Running Full Workflow…', 'running');
+  setLog(['▶ Starting Full Workflow — all 5 scans in sequence…']);
+  fetch('/api/run/all', {method:'POST'})
+    .then(r => r.json())
+    .then(d => {
+      if (d.error) { setLog(['Error: '+d.error]); setJobTag('ERROR','error'); resetAll(); return; }
+      currentJob = d.job_id; startPoll();
+    })
+    .catch(e => { setLog(['Error: '+e]); setJobTag('ERROR','error'); resetAll(); });
 }
 
-function stopAll(){
-  fetch('/api/stop/all',{method:'POST'}).then(r=>r.json()).then(d=>{
-    stopPoll();
-    setJobTag('Stopped','error');
-    setLog((document.getElementById('terminal').textContent+'\n\u25a0  All stopped.').split('\n'));
-    resetAll();
-    currentJob=null;activeTask=null;
-  }).catch(()=>{});
+function runTask(task) {
+  if (currentJob && !confirm('A task is running. Start anyway?')) return;
+  if (currentJob) stopPoll();
+  activeTask = task;
+  lockButtons();
+  if (ALL_KEYS.includes(task)) setNodeState(task, 'running', 'starting…');
+  setJobTag('Starting…', 'running');
+  setLog(['▶ Starting: ' + task]);
+  fetch('/api/run/'+task, {method:'POST'})
+    .then(r => r.json())
+    .then(d => {
+      if (d.error) { setLog(['Error: '+d.error]); setJobTag('ERROR','error'); resetAll(); return; }
+      currentJob = d.job_id; startPoll();
+    })
+    .catch(e => { setLog(['Error: '+e]); setJobTag('ERROR','error'); resetAll(); });
 }
 
-function startPoll(){
-  stopPoll();
-  pollTimer=setInterval(()=>{
-    fetch('/api/job/'+currentJob).then(r=>r.json()).then(d=>{
-      setLog(d.log);
-      const el=d.elapsed<60?d.elapsed+'s':Math.floor(d.elapsed/60)+'m'+(d.elapsed%60)+'s';
-      if(activeTask==='pipeline'||activeTask==='all')parsePipelineLog(d.log);
-      if(d.status==='running'||d.status==='starting'){
-        setJobTag('Running '+el,'running');
-        if(activeTask!=='pipeline'&&(SCANNERS[activeTask]||CHECKER[activeTask]))
-          setNodeState(activeTask,'running',el);
-      }else{
-        stopPoll();currentJob=null;
-        const ok=d.status==='done';
-        if(activeTask!=='pipeline'&&activeTask!=='all')setNodeState(activeTask,ok?'done':'error',ok?'done':'error');
-        else{[...Object.keys(SCANNERS),...Object.keys(CHECKER)].forEach(k=>{if(nodeStates[k]!=='done')setNodeState(k,ok?'done':'error',ok?'done':'error');});}
-        setJobTag(ok?'Done '+el:'Error',ok?'done':'error');
-        document.querySelectorAll('.btn-run').forEach(b=>b.disabled=false);
-        document.getElementById('btn-all').disabled=false;
-        loadReports();loadWatchlist();activeTask=null;
+// ── Pipeline log parser ────────────────────────────────────────────────────
+function parsePipelineLog(lines) {
+  const MAP = {
+    'Weekly Retest Scan' : 'weekly',
+    'Momentum Scan'      : 'momentum',
+    'Weekly Review'      : 'review',
+    'Monthly S/R Scan'   : 'monthly',
+    'Daily Watch Checker': 'daily',
+  };
+  let cur = null;
+  lines.forEach(l => {
+    const m = l.match(/>>>\s+(.+)/);
+    if (m) {
+      const k = MAP[m[1].trim()];
+      if (k) {
+        if (cur && cur !== k) setNodeState(cur, 'done');
+        cur = k;
+        setNodeState(k, 'running');
       }
-    }).catch(()=>{});
-  },600);
+    }
+    if ((l.includes('OK in') || l.includes('Exit code: 0')) && cur) {
+      setNodeState(cur, 'done'); cur = null;
+    }
+    if ((l.includes('FAILED') || l.includes('TIMEOUT') || l.includes('EXCEPTION')) && cur) {
+      setNodeState(cur, 'error'); cur = null;
+    }
+  });
 }
 
-function stopPoll(){if(pollTimer){clearInterval(pollTimer);pollTimer=null;}}
-function setLog(lines){const el=document.getElementById('terminal');el.textContent=lines.join('\n');el.scrollTop=el.scrollHeight;}
-function clearLog(){document.getElementById('terminal').textContent='$ Log cleared.';setJobTag('IDLE','');resetAll();}
-function setJobTag(msg,cls){const el=document.getElementById('job-tag');el.textContent=msg;el.className='job-tag '+(cls||'');}
+// ── Polling ────────────────────────────────────────────────────────────────
+function startPoll() {
+  stopPoll();
+  pollTimer = setInterval(() => {
+    fetch('/api/job/'+currentJob)
+      .then(r => r.json())
+      .then(d => {
+        setLog(d.log);
+        const el = d.elapsed < 60 ? d.elapsed+'s'
+                                  : Math.floor(d.elapsed/60)+'m'+(d.elapsed%60)+'s';
 
-function loadToday(){
-  fetch('/api/today').then(r=>r.json()).then(d=>{
-    document.getElementById('hdr-time').textContent=d.date+'  '+d.time;
-    document.getElementById('hdr-day').textContent=d.day;
-    document.getElementById('sch-day').textContent=d.day;
-    todayTasks=d.planned;
-    const C={weekly:'#22c55e',momentum:'#f59e0b',review:'#a78bfa',monthly:'#38bdf8',daily:'#ef4444',pipeline:'#58a6ff'};
-    const I={weekly:'&#128202;',momentum:'&#128640;',review:'&#128203;',monthly:'&#128197;',daily:'&#128276;',pipeline:'&#9889;'};
-    const L={weekly:'Weekly',momentum:'Momentum',review:'Review',monthly:'Monthly S/R',daily:'Checker',pipeline:'Pipeline'};
-    document.getElementById('plan-pills').innerHTML=d.planned.map(k=>
-      '<span class="plan-pill" style="color:'+C[k]+';border-color:'+C[k]+'44">'+I[k]+' '+L[k]+'</span>'
-    ).join(' ');
-    d.planned.forEach(k=>{const n=document.getElementById('node-'+k);if(n)n.classList.add('is-today');});
-  }).catch(()=>{});
+        if (activeTask === 'pipeline' || activeTask === 'all') parsePipelineLog(d.log);
+
+        if (d.status === 'running' || d.status === 'starting') {
+          setJobTag('Running ' + el, 'running');
+          if (activeTask !== 'pipeline' && activeTask !== 'all' && ALL_KEYS.includes(activeTask))
+            setNodeState(activeTask, 'running', el);
+        } else {
+          stopPoll(); currentJob = null;
+          const ok = d.status === 'done';
+
+          if (activeTask !== 'pipeline' && activeTask !== 'all') {
+            setNodeState(activeTask, ok ? 'done' : 'error');
+          } else {
+            // Mark any remaining queued/running nodes
+            ALL_KEYS.forEach(k => {
+              if (nodeStates[k] !== 'done') setNodeState(k, ok ? 'done' : 'error');
+            });
+          }
+
+          // Light up lines when everything is done
+          if (ok) {
+            ['line-to-store','line-to-checker','line-to-out'].forEach(id => {
+              const el = document.getElementById(id); if(el) el.classList.add('lit');
+            });
+          }
+
+          setJobTag(ok ? 'Done ' + el : 'Error', ok ? 'done' : 'error');
+          unlockButtons();
+          loadReports(); loadWatchlist();
+          activeTask = null;
+        }
+      }).catch(() => {});
+  }, 600);
 }
 
-function loadReports(){
-  fetch('/api/reports').then(r=>r.json()).then(list=>{
-    const el=document.getElementById('output-reports');
-    if(!list.length){el.innerHTML='<div style="color:var(--dim);font-size:11px">No reports yet.</div>';return;}
-    const C={cycles:'#22c55e',momentum:'#f59e0b',weekly_review:'#a78bfa',monthly:'#38bdf8',watch:'#ef4444'};
-    el.innerHTML=list.slice(0,6).map(r=>{
-      const key=Object.keys(C).find(k=>r.name.startsWith(k))||'';
-      const c=C[key]||'#8899aa';
-      const label=r.name.replace(/_\d{8}_\d{4}\.html$/,'').replace(/_/g,' ');
-      const ts=(r.name.match(/(\d{8}_\d{4})/)||[])[1]||'';
-      const tm=ts?ts.slice(6,8)+'/'+ts.slice(4,6)+' '+ts.slice(9,11)+':'+ts.slice(11):'';
-      return '<div class="out-report"><div class="rn"><b style="color:'+c+'">'+label+'</b> '+
-             '<span style="color:var(--dim)">'+tm+'</span></div>'+
-             '<a class="btn-open" href="/report/'+r.name+'" target="_blank">Open</a></div>';
+function stopPoll() { if (pollTimer) { clearInterval(pollTimer); pollTimer = null; } }
+
+function stopAll() {
+
+  fetch('/api/stop/all', {method:'POST'})
+    .then(r => r.json())
+    .then(() => {
+      stopPoll();
+      setJobTag('Stopped', 'error');
+      resetAll(); currentJob = null; activeTask = null;
+    }).catch(() => {});
+}
+
+// -- UI helpers
+function lockButtons() {
+  ['btn-today','btn-all'].forEach(id => { const b=document.getElementById(id); if(b) b.disabled=true; });
+  document.querySelectorAll('.jk-btn,.jk-para-btn').forEach(b => b.disabled=true);
+}
+function unlockButtons() {
+  ['btn-today','btn-all'].forEach(id => { const b=document.getElementById(id); if(b) b.disabled=false; });
+  document.querySelectorAll('.jk-btn,.jk-para-btn').forEach(b => b.disabled=false);
+}
+
+function setLog(lines) {
+  const el = document.getElementById('terminal');
+  el.textContent = lines.join('\n');
+  el.scrollTop = el.scrollHeight;
+}
+function clearLog() {
+  document.getElementById('terminal').textContent = '$ Log cleared.';
+  setJobTag('IDLE', '');
+  resetAll();
+}
+function setJobTag(msg, cls) {
+  const el = document.getElementById('job-tag');
+  el.textContent = msg;
+  el.className = 'job-tag ' + (cls || '');
+}
+
+// -- Data loaders
+function loadToday() {
+  fetch('/api/today').then(r => r.json()).then(d => {
+    document.getElementById('hdr-time').textContent = d.date + '  ' + d.time;
+    document.getElementById('hdr-day').textContent  = d.day;
+    document.getElementById('sch-day').textContent  = d.day;
+    todayTasks = d.planned;
+    const C = {weekly:'#3fb950',momentum:'#d29922',review:'#a371f7',
+               monthly:'#79c0ff',daily:'#f85149',pipeline:'#58a6ff'};
+    const L = {weekly:'Weekly',momentum:'Momentum',review:'Review',monthly:'Monthly',daily:'Checker'};
+    document.getElementById('plan-pills').innerHTML = d.planned
+      .filter(k => k !== 'pipeline')
+      .map(k => '<span class="plan-pill" style="color:'+C[k]+';border-color:'+C[k]+'55">'
+               +(L[k]||k)+'</span>')
+      .join(' ');
+    d.planned.forEach(k => {
+      const n = document.getElementById('node-'+k);
+      if (n && !n.className.includes('today-ring')) n.className += ' today-ring';
+    });
+  }).catch(() => {});
+}
+
+function loadReports() {
+  fetch('/api/reports').then(r => r.json()).then(list => {
+    const el = document.getElementById('output-reports');
+    if (!list.length) {
+      el.innerHTML='<div style="color:var(--dim);font-size:10px;margin-top:6px">No reports yet.</div>';
+      return;
+    }
+    const C = {cycles:'#3fb950',momentum:'#d29922',weekly_review:'#a371f7',monthly:'#79c0ff',watch:'#f85149'};
+    el.innerHTML = list.slice(0,5).map(r => {
+      const key = Object.keys(C).find(k => r.name.startsWith(k)) || '';
+      const c   = C[key] || '#8b949e';
+      const lbl = r.name.replace(/_\d{8}_\d{4}\.html$/, '').replace(/_/g,' ');
+      return '<div class="jk-rep"><div class="rn" style="color:'+c+'">'+lbl+'</div>'
+           + '<a class="btn-open" href="/report/'+r.name+'" target="_blank">Open</a></div>';
     }).join('');
-  }).catch(()=>{});
+  }).catch(() => {});
 }
 
-function loadWatchlist(){
-  fetch('/api/watchlist').then(r=>r.json()).then(data=>{
-    const list=data.tickers||[];
-    document.getElementById('store-count').textContent=list.length;
-    const el=document.getElementById('store-tickers');
-    if(!list.length){el.innerHTML='<div style="color:var(--dim);font-size:10px;margin-top:4px">Empty</div>';return;}
-    el.innerHTML=list.map(t=>{
-      const dc=t.direction==='LONG'?'#22c55e':'#ef4444';
-      const sc=t.status==='GREEN'?'#22c55e':'#4a5568';
-      const tf=t.timeframe==='MONTHLY'?' <span style="color:#38bdf8;font-size:8px">MO</span>':'';
-      return '<div class="store-tick"><span class="sym">'+t.ticker+tf+'</span>'+
-             '<span class="dir" style="color:'+dc+'">'+t.direction+'</span>'+
-             '<span class="stat" style="color:'+sc+'">'+( t.status||'?')+'</span></div>';
-    }).join('');
-  }).catch(()=>{});
+function loadWatchlist() {
+  fetch('/api/watchlist').then(r => r.json()).then(data => {
+    const list = data.tickers || [];
+    document.getElementById('store-count').textContent = list.length;
+    const el = document.getElementById('store-tickers');
+    if (!list.length) {
+      el.innerHTML='<div style="color:var(--dim);font-size:9px">Empty</div>';
+      return;
+    }
+    const SC = {GREEN:'#3fb950',YELLOW:'#d29922',RED:'#f85149'};
+    el.innerHTML = list.slice(0,8).map(t => {
+      const dc = t.direction === 'LONG' ? '#3fb950' : '#f85149';
+      const sc = SC[t.status] || '#484f58';
+      return '<div class="jk-tick"><span class="sym">'+t.ticker+'</span>'
+           + '<span style="color:'+dc+';font-size:9px;font-weight:700">'+t.direction+'</span>'
+           + '<span class="sta" style="color:'+sc+'">'+( t.status||'?')+'</span></div>';
+    }).join('') + (list.length > 8
+      ? '<div style="color:var(--dim);font-size:9px;margin-top:2px">+' + (list.length-8) + ' more</div>'
+      : '');
+  }).catch(() => {});
 }
 
-function refreshTime(){
-  fetch('/api/today').then(r=>r.json()).then(d=>{
-    document.getElementById('hdr-time').textContent=d.date+'  '+d.time;
-  }).catch(()=>{});
+function refreshTime() {
+  fetch('/api/today').then(r => r.json()).then(d => {
+    document.getElementById('hdr-time').textContent = d.date + '  ' + d.time;
+  }).catch(() => {});
 }
 
-buildNodes();
+// -- Init
 loadToday();
 loadReports();
 loadWatchlist();
-setInterval(refreshTime,60000);
-setInterval(loadReports,20000);
-setInterval(loadWatchlist,20000);
+setInterval(refreshTime, 60000);
+setInterval(loadReports, 20000);
+setInterval(loadWatchlist, 20000);
 </script>
 </body>
-</html>"""
+</html>
+"""
+
+
 
 # ---------------------------------------------------------------------------
 # Main
