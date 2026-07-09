@@ -188,6 +188,47 @@ def pm_rule2_momentum(pos: dict, df: pd.DataFrame,
                 'reason': f'Rule 2 ✅ {n_weeks}-week momentum → new stop {new_stop:.2f}'}
 
 
+def pm_rule3_tp_trail(pos: dict) -> dict:
+    """
+    Rule 3 -- TP-Based Trailing Stop (course Gap #8).
+    After TP1 hit: advance stop to entry (breakeven).
+    After TP2 hit: advance stop to TP1 level.
+    After TP3 hit: advance stop to TP2 level.
+    Only ever advances (never retreats the stop).
+    """
+    d       = pos['direction']
+    stop    = pos['stop']
+    entry   = pos['entry']
+    tp1     = pos['tp1']
+    tp2     = pos['tp2']
+    tp1_hit = pos.get('tp1_hit', False)
+    tp2_hit = pos.get('tp2_hit', False)
+    tp3_hit = pos.get('tp3_hit', False)
+
+    if d == 'LONG':
+        if tp3_hit and stop < pos['tp2']:
+            return {'advance': True, 'new_stop': pos['tp2'], 'rule': 'TP3_TRAIL',
+                    'reason': f'Rule 3 OK TP3 hit -> stop to TP2 {pos["tp2"]:.2f}'}
+        if tp2_hit and stop < tp1:
+            return {'advance': True, 'new_stop': tp1, 'rule': 'TP2_TRAIL',
+                    'reason': f'Rule 3 OK TP2 hit -> stop to TP1 {tp1:.2f}'}
+        if tp1_hit and stop < entry:
+            return {'advance': True, 'new_stop': entry, 'rule': 'TP1_TRAIL',
+                    'reason': f'Rule 3 OK TP1 hit -> stop to breakeven {entry:.2f}'}
+    else:  # SHORT
+        if tp3_hit and stop > pos['tp2']:
+            return {'advance': True, 'new_stop': pos['tp2'], 'rule': 'TP3_TRAIL',
+                    'reason': f'Rule 3 OK TP3 hit -> stop to TP2 {pos["tp2"]:.2f}'}
+        if tp2_hit and stop > tp1:
+            return {'advance': True, 'new_stop': tp1, 'rule': 'TP2_TRAIL',
+                    'reason': f'Rule 3 OK TP2 hit -> stop to TP1 {tp1:.2f}'}
+        if tp1_hit and stop > entry:
+            return {'advance': True, 'new_stop': entry, 'rule': 'TP1_TRAIL',
+                    'reason': f'Rule 3 OK TP1 hit -> stop to breakeven {entry:.2f}'}
+
+    return {'advance': False, 'new_stop': None,
+            'reason': 'Rule 3: no TP milestone reached yet'}
+
 def pm_check_hits(pos: dict, df: pd.DataFrame) -> list:
     """
     Detect TP hits and stop touches against the last weekly bar.
@@ -339,6 +380,26 @@ def manage_positions(send_email: bool = False) -> list:
         else:
             print(f'  │  {r2["reason"]}')
 
+
+        # -- Rule 3 -- TP-based trail stop
+        r3 = pm_rule3_tp_trail(pos)
+        if r3['advance']:
+            is_better = (pos['direction'] == 'LONG' and r3['new_stop'] > pos['stop']) \
+                     or (pos['direction'] == 'SHORT' and r3['new_stop'] < pos['stop'])
+            if is_better:
+                old = pos['stop']
+                pos['stop'] = r3['new_stop']
+                pos.setdefault('stop_history', []).append({
+                    'date': datetime.now().strftime('%Y-%m-%d'),
+                    'from': old, 'to': r3['new_stop'], 'rule': r3['rule']
+                })
+                print(f'  |  {r3["reason"]}')
+                all_alerts.append(f'TRAIL STOP  {t}: {r3["reason"]}')
+                any_change = True
+            else:
+                print(f'  |  Rule 3: stop already tighter')
+        else:
+            print(f'  |  {r3["reason"]}')
         print(f'  └  Active stop: {pos["stop"]:.2f}')
 
     if any_change:

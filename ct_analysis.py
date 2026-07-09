@@ -388,6 +388,7 @@ def _build_setup_dict(direction, ticker, price, rsi_val, support, resistance,
         'Entry':          round(entry, 2),
         'Stop':           round(stop, 2),
         'Target':         round(target, 2),
+        'GannTarget':     round(entry + (entry - stop), 2) if direction == 'LONG' else round(entry - (stop - entry), 2),
         'R:R':            rratio,
         'Units':          round(units, 1),
         'Risk$':          int(risk_amt),
@@ -598,6 +599,17 @@ def _fetch_market_data(ticker, is_crypto=False, is_commodity=False,
     MIN_AVG_VOL = 100_000 if not (is_crypto or is_commodity or is_israel or is_intl) else 10_000
     if avg_vol_20 < MIN_AVG_VOL:
         _diag('illiquid'); return None  # OTC / illiquid -- skip
+
+    # Market Cap filter — course lesson 30: require $300M+ for US stocks
+    # (crypto/commodity/israel/intl exempt — market cap not reliably available)
+    if not (is_crypto or is_commodity or is_israel or is_intl):
+        try:
+            _info = asset.info or {}
+            _mktcap = _info.get('marketCap') or 0
+            if _mktcap > 0 and _mktcap < 300_000_000:
+                _diag('mktcap'); return None  # micro-cap -- too small per course rules
+        except Exception:
+            pass  # info unavailable -- don't filter out
 
 
     # Volume ratio — recent 3-bar avg vs 20-bar avg (quantitative retest signal)
@@ -939,13 +951,3 @@ def _detect_setup(ticker, portfolio_size, market, is_crypto, asset_type, max_dis
         monthly_sr=market.get('monthly_sr', {}))
     # Pass quantitative volume ratio to factors (Factor 3 enhancement)
     _setup['_vol_ratio']     = market.get('_vol_ratio', 1.0)
-    _setup['_dir_vol_ratio'] = market.get('_dir_vol_ratio', 1.0)
-    # Factor 25 — Pullback Candle Compression
-    _setup['_candle_bodies']      = market.get('_candle_bodies', [])
-    # Factor 26 — Breakout Quality
-    _setup['_breakout_quality']   = market.get('_breakout_quality', {})
-    # Factor 32 — CCI
-    _setup['_cci_val']            = market.get('_cci_val', 0.0)
-    # Factor 33 — RSI Divergence
-    _setup['_rsi_divergence']     = market.get('_rsi_divergence', 'NONE')
-    # 5-candle retest window — lesson 14: must wait ≥5 

@@ -243,8 +243,10 @@ def _factor_macd(r):
     elif trend == 'BEAR'   and not is_long: d = +6;  ex = 'MACD below signal line — bearish trend'
     elif trend == 'BEAR'   and is_long:     d = -6;  ex = 'MACD below signal line — weak LONG momentum'
     else:                                   d =  0;  ex = 'MACD neutral'
-    if div == 'BULL_DIV' and is_long:
-        d += 8; ex += ' + Bullish divergence'
+    if   div == 'BULL_DIV' and is_long:     d += 8; ex += ' + Bullish MACD divergence'
+    elif div == 'BULL_DIV' and not is_long: d -= 4; ex += ' + Bullish div conflicts SHORT'
+    elif div == 'BEAR_DIV' and not is_long: d += 8; ex += ' + Bearish MACD divergence'
+    elif div == 'BEAR_DIV' and is_long:     d -= 4; ex += ' + Bearish div conflicts LONG'
     return d, "MACD", ex
 
 @factor
@@ -1278,6 +1280,113 @@ def _factor_chart_pattern(r):
     elif body_ratio < 0.5:
         return (-6, 'Chart Pattern',
                 f'Weak prior breakout (body {body_ratio:.1f}x ATR) -- no clear pattern structure')
+    return None
+
+
+
+@factor
+def _factor_price_gaps(r):
+    """
+    Factor 37 -- Price Gap Analysis (lesson 23).
+    Course teaches 4 gap types: breakaway, runaway, exhaustion, common.
+    Breakaway gap up with high volume at support = strong LONG entry signal.
+    Exhaustion gap at resistance = warning to exit / avoid entry.
+    We detect gaps in the weekly OHLC using open vs prior close.
+    """
+    bq  = r.get('_breakout_quality', {})
+    is_long = 'LONG' in r['Dir']
+    direction = 'LONG' if is_long else 'SHORT'
+    bk = bq.get(direction)
+    if not bk:
+        return None
+
+    vol_ratio  = bk.get('vol_ratio', 1.0)
+    body_ratio = bk.get('body_ratio', 0.0)
+
+    # Breakaway gap proxy: breakout candle has very large body AND high volume
+    # (a true gap shows as an outsized body when using weekly OHLC)
+    is_breakaway  = body_ratio >= 2.0 and vol_ratio >= 2.0
+    is_strong     = body_ratio >= 1.5 and vol_ratio >= 1.5
+    is_exhaustion = body_ratio >= 1.5 and vol_ratio < 0.8  # big body but low vol -- suspect
+
+    # Late entry: if bars since breakout < 3 it is likely an exhaustion gap, not safe
+    bars = r.get('_bars_since_breakout', 99)
+    at_resistance = r.get('LateEntry', 0) > 8  # price far from level -- extended
+
+    if is_breakaway and not at_resistance:
+        return (+14, 'Price Gap',
+                f'Breakaway gap: body {body_ratio:.1f}x ATR, vol {vol_ratio:.1f}x avg -- '
+                f'high-conviction directional move (lesson 23 breakaway pattern)')
+    elif is_exhaustion and bars <= 3:
+        return (-12, 'Price Gap',
+                f'Possible exhaustion gap: large body but weak vol ({vol_ratio:.1f}x) -- '
+                f'buying/selling may be ending; caution on entry')
+    elif is_strong:
+        return (+7, 'Price Gap',
+                f'Strong impulse move: body {body_ratio:.1f}x ATR, vol {vol_ratio:.1f}x avg')
+    elif body_ratio < 0.3:
+        return (-4, 'Price Gap',
+                f'Weak prior breakout (body {body_ratio:.1f}x ATR) -- no gap/impulse confirmation')
+    return None
+
+
+@factor
+def _factor_dow_theory_phase(r):
+    """
+    Factor 38 -- Dow Theory Phase Detection (lesson 8).
+    Course: 4 market phases -- Accumulation, Markup, Distribution, Markdown.
+    LONG setups should be in Accumulation or early Markup.
+    SHORT setups should be in Distribution or early Markdown.
+    Detected using trend + volume pattern over last 20 bars.
+
+    Proxy heuristic (weekly data):
+      Accumulation: flat/mild downtrend + declining volume trend
+      Markup:       uptrend + expanding volume on up-bars
+      Distribution: flat/mild uptrend + expanding volume on down-bars
+      Markdown:     downtrend + expanding volume on down-bars
+    """
+    is_long = 'LONG' in r['Dir']
+    m_trend = r.get('MonthlyTrend')
+    vol_ratio = r.get('_vol_ratio', 1.0)
+    dir_vol   = r.get('_dir_vol_ratio', 1.0)   # down-bar vol / up-bar vol
+    spy_rs    = r.get('spy_rs') or {}
+    spy_trend = spy_rs.get('spy_trend', 'NEUTRAL')
+
+    # Markup phase: monthly LONG + up-bar volume dominates (dir_vol < 0.7) + SPY up
+    is_markup       = (m_trend == 'LONG'  and dir_vol <= 0.7 and spy_trend != 'DOWN')
+    # Accumulation: no clear monthly trend but vol is drying up (vol_ratio < 0.8)
+    is_accumulation = (m_trend != 'LONG'  and m_trend != 'SHORT' and vol_ratio < 0.8)
+    # Distribution: monthly LONG but down-bar vol dominates (dir_vol > 1.3)
+    is_distribution = (m_trend == 'LONG'  and dir_vol >= 1.3)
+    # Markdown: monthly SHORT + down-bar vol dominates
+    is_markdown     = (m_trend == 'SHORT' and dir_vol >= 1.0)
+
+    if is_long:
+        if is_markup:
+            return (+10, 'Dow Phase: Markup',
+                    'Markup phase: uptrend + up-bar volume dominates -- ideal for LONG (lesson 8)')
+        elif is_accumulation:
+            return (+6,  'Dow Phase: Accum.',
+                    'Accumulation phase: volume drying up in base -- early LONG opportunity')
+        elif is_distribution:
+            return (-12, 'Dow Phase: Distrib.',
+                    'Distribution phase: up-bars but heavy down-bar vol -- smart money exiting, avoid LONG')
+        elif is_markdown:
+            return (-16, 'Dow Phase: Markdown',
+                    'Markdown phase: downtrend + selling volume -- LONG is counter-trend (lesson 8)')
+    else:  # SHORT
+        if is_markdown:
+            return (+10, 'Dow Phase: Markdown',
+                    'Markdown phase: downtrend + selling pressure -- ideal for SHORT (lesson 8)')
+        elif is_distribution:
+            return (+6,  'Dow Phase: Distrib.',
+                    'Distribution phase: heavy down-bar vol at top -- early SHORT opportunity')
+        elif is_markup:
+            return (-12, 'Dow Phase: Markup',
+                    'Markup phase: uptrend + buying volume -- SHORT is counter-trend')
+        elif is_accumulation:
+            return (-6,  'Dow Phase: Accum.',
+                    'Accumulation phase -- no clear short thesis yet')
     return None
 
 

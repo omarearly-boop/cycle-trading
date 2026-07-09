@@ -455,10 +455,17 @@ def calc_macd(df):
         elif hist_prev > 0 and hist_now < 0:
             cross = 'DEATH'    # bearish crossover
 
-        # Bullish divergence: price making lower low but MACD making higher low
-        price_ll = closes.iloc[-1] < closes.iloc[-5]
-        macd_hl  = float(macd.iloc[-1]) > float(macd.iloc[-5])
-        divergence = 'BULL_DIV' if (price_ll and macd_hl) else None
+        # Divergence detection (compare last bar vs 5 bars ago)
+        price_ll = closes.iloc[-1] < closes.iloc[-5]   # price lower low
+        price_hh = closes.iloc[-1] > closes.iloc[-5]   # price higher high
+        macd_hl  = float(macd.iloc[-1]) > float(macd.iloc[-5])  # MACD higher low
+        macd_lh  = float(macd.iloc[-1]) < float(macd.iloc[-5])  # MACD lower high
+        if price_ll and macd_hl:
+            divergence = 'BULL_DIV'   # bullish: price LL but MACD HL
+        elif price_hh and macd_lh:
+            divergence = 'BEAR_DIV'   # bearish: price HH but MACD LH
+        else:
+            divergence = None
 
         return {
             'macd':       macd_now,
@@ -533,4 +540,9 @@ def estimate_time_horizon(entry, target, atr_val):
     if   weeks <= 2.5:
         return round(weeks, 1), 'WEEKLY',  '⚡ שבועי',    '#3fb950', '1–2 שבועות'
     elif weeks <= 6:
- 
+        return round(weeks, 1), 'MONTHLY', '3-6 weeks',    '#58a6ff', '3-6 weeks'
+    elif weeks <= 12:
+        return round(weeks, 1), 'MEDIUM',  '2-3 months',   '#d29922', '2-3 months'
+    else:
+        return round(weeks, 1), 'LONG',    '3+ months',    '#8b949e', '3+ months'
+

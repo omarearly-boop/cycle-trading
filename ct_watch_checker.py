@@ -209,6 +209,7 @@ def send_green_alert(to_email: str, entry: dict, setup: dict) -> bool:
     stop      = setup.get('Stop', 0)
     target    = setup.get('Target', 0)
     rr        = setup.get('R:R', 0)
+    gann_tgt  = setup.get('GannTarget', 0)
     earn      = setup.get('Earn', '-')
     horizon   = setup.get('HorizonLabel', '-')
     monthly   = setup.get('MonthlyTrend', '-')
@@ -276,6 +277,10 @@ def send_green_alert(to_email: str, entry: dict, setup: dict) -> bool:
       <tr style="background:#0f172a">
         <td style="padding:10px 16px;color:#64748b;font-size:13px">Target</td>
         <td style="padding:10px 16px;color:#38bdf8;font-size:15px;font-weight:700">${target}</td>
+      </tr>
+      <tr style="background:#0f172a">
+        <td style="padding:10px 16px;color:#64748b;font-size:13px">Gann 100%</td>
+        <td style="padding:10px 16px;color:#a855f7;font-size:13px;font-weight:700">${gann_tgt if gann_tgt else '-'}</td>
       </tr>
       <tr>
         <td style="padding:10px 16px;color:#64748b;font-size:13px">Risk:Reward</td>
