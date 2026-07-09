@@ -10,12 +10,29 @@ Seam: callers that need live data import from here.
       callers that need pure math import from ct_indicators.
       Mocking this module in tests gives a network-free test suite.
 """
-import sys, warnings, logging
-from datetime import datetime
+import sys, os, warnings, logging
+import urllib.request, urllib.error
+from datetime import datetime, timedelta
+from pathlib import Path
 import json
 
 warnings.filterwarnings('ignore')
 logging.getLogger('yfinance').setLevel(logging.CRITICAL)
+
+# ---------------------------------------------------------------------------
+#  Load .env (so FINNHUB_API_KEY is available without dotenv dependency)
+# ---------------------------------------------------------------------------
+def _load_env_vars():
+    env_file = Path(__file__).parent / '.env'
+    if env_file.exists():
+        for line in env_file.read_text(encoding='utf-8').splitlines():
+            line = line.strip()
+            if not line or line.startswith('#') or '=' not in line:
+                continue
+            k, v = line.split('=', 1)
+            os.environ.setdefault(k.strip(), v.strip())
+
+_load_env_vars()
 
 
 def _install(pkg):
@@ -102,13 +119,50 @@ def get_market_regime() -> dict:
 
 
 # -----------------------------------------------------------------------------
-#  Earnings date fetch
+#  Earnings date fetch  (Finnhub primary, yfinance fallback)
 # -----------------------------------------------------------------------------
-def get_earnings(tkr):
+def _finnhub_earnings(symbol: str) -> tuple:
     """
-    Return (date_str, days_until) for the next earnings event.
-    tkr is a yf.Ticker asset object (already created by the caller).
-    Returns (None, None) on any failure.
+    Fetch next earnings date from Finnhub calendar API.
+    Returns (date_str, days_until) or (None, None) on any failure.
+    Requires FINNHUB_API_KEY in environment / .env
+    """
+    key = os.environ.get('FINNHUB_API_KEY', '').strip()
+    if not key:
+        return None, None
+    today = datetime.now().date()
+    end   = today + timedelta(days=90)   # look 90 days ahead
+    url   = (
+        f"https://finnhub.io/api/v1/calendar/earnings"
+        f"?from={today}&to={end}&symbol={symbol}&token={key}"
+    )
+    try:
+        req = urllib.request.Request(url, headers={'User-Agent': 'CyclesTrading/1.0'})
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            data = json.loads(resp.read())
+        events = data.get('earningsCalendar', [])
+        if not events:
+            return None, None
+        # Sort by date, pick the earliest future one
+        events.sort(key=lambda e: e.get('date', ''))
+        for ev in events:
+            raw = ev.get('date', '')
+            if not raw:
+                continue
+            ed   = datetime.strptime(raw, '%Y-%m-%d').date()
+            days = (ed - today).days
+            if days >= 0:
+                return str(ed), days
+        return None, None
+    except Exception:
+        return None, None
+
+
+def _yfinance_earnings(tkr) -> tuple:
+    """
+    yfinance fallback for earnings date.
+    tkr is a yf.Ticker asset object.
+    Returns (date_str, days_until) or (None, None).
     """
     try:
         cal = tkr.calendar
@@ -126,11 +180,31 @@ def get_earnings(tkr):
             return None, None
         ed   = pd.to_datetime(date).date()
         days = (ed - datetime.now().date()).days
-        if days < 0:  # already past -- skip stale date
+        if days < 0:
             return None, None
         return str(ed), days
     except Exception:
         return None, None
+
+
+def get_earnings(tkr):
+    """
+    Return (date_str, days_until) for the next earnings event.
+    tkr is a yf.Ticker asset object (already created by the caller).
+
+    Strategy:
+      1. Try Finnhub (reliable, official API) using the ticker symbol
+      2. Fall back to yfinance .calendar if Finnhub has no data or no key
+
+    Returns (None, None) on any failure.
+    """
+    symbol = getattr(tkr, 'ticker', None) or getattr(tkr, '_ticker', None)
+    if symbol:
+        date_str, days = _finnhub_earnings(symbol)
+        if date_str is not None:
+            return date_str, days
+    # Fallback to yfinance
+    return _yfinance_earnings(tkr)
 
 
 # -----------------------------------------------------------------------------
@@ -228,6 +302,100 @@ def get_sector_rs(ticker, df_weekly):
         return None
 
 
+# -----------------------------------------------------------------------------
+#  Relative Strength vs SPY  (13-week / 1-quarter)
+# -----------------------------------------------------------------------------
+_SPY_RS_CACHE: dict = {}   # 'spy_df' -> DataFrame, cached per process
+
+def get_spy_rs(df_weekly) -> dict:
+    """
+    Compare the stock's 13-week return against SPY's 13-week return.
+    Returns dict: stock_ret, spy_ret, rs_vs_spy, rs_label
+    or {} on any failure.
+
+    SPY data is cached for the scan run (one fetch per process).
+    Uses 13 weeks (one quarter) — longer window than sector RS (4 weeks)
+    to identify structural leaders vs short-term noise.
+    """
+    global _SPY_RS_CACHE
+    if df_weekly is None or len(df_weekly) < 14:
+        return {}
+    try:
+        # Stock 13-week return
+        stock_ret = float(
+            (df_weekly['Close'].iloc[-1] / df_weekly['Close'].iloc[-14] - 1) * 100
+        )
+
+        # SPY weekly data (cached)
+        spy_df = _SPY_RS_CACHE.get('spy_df')
+        if spy_df is None:
+            spy_asset = yf.Ticker('SPY')
+            spy_df = spy_asset.history(period='1y', interval='1wk',
+                                       auto_adjust=True, raise_errors=False)
+            if spy_df is None or len(spy_df) < 14:
+                return {}
+            spy_df.columns = [c.capitalize() for c in spy_df.columns]
+            _SPY_RS_CACHE['spy_df'] = spy_df
+
+        spy_ret = float(
+            (spy_df['Close'].iloc[-1] / spy_df['Close'].iloc[-14] - 1) * 100
+        )
+
+        rs = round(stock_ret - spy_ret, 1)
+
+        if   rs >= 15: rs_label = 'LEADER'      # crushing the market
+        elif rs >=  5: rs_label = 'STRONG'       # clearly outperforming
+        elif rs >=  0: rs_label = 'INLINE'       # matching market
+        elif rs >= -5: rs_label = 'LAGGING'      # slightly underperforming
+        else:          rs_label = 'WEAK'         # consistently losing vs market
+
+        return {
+            'stock_ret': round(stock_ret, 1),
+            'spy_ret':   round(spy_ret, 1),
+            'rs_vs_spy': rs,
+            'rs_label':  rs_label,
+        }
+    except Exception:
+        return {}
+
+
+# ─── Factor 40: Daily entry timing (lessons 26–27) ───────────────────────────
+
+_DAILY_TIMING_CACHE: dict = {}   # ticker -> {'rsi': x, 'cci': y}  (per-run cache)
+
+def get_daily_timing(ticker: str) -> dict:
+    """
+    Multi-timeframe entry timing (lessons 26–27): weekly chart gives the
+    trend, DAILY RSI + CCI give the precise entry timing.
+    Ideal LONG: daily RSI < 30 AND daily CCI < -200.
+
+    Fetched only for tickers that already produced a setup (cheap: a few
+    dozen calls per scan, not one per scanned ticker).
+    Returns {'rsi': float, 'cci': float} or {} on failure.
+    """
+    if ticker in _DAILY_TIMING_CACHE:
+        return _DAILY_TIMING_CACHE[ticker]
+    result: dict = {}
+    try:
+        from ct_indicators import rsi, cci   # lazy import (avoids circular import)
+        asset = yf.Ticker(ticker)
+        ddf = asset.history(period='6mo', interval='1d',
+                            auto_adjust=True, raise_errors=False)
+        if ddf is not None and len(ddf) >= 30:
+            ddf.columns = [c.capitalize() for c in ddf.columns]
+            d_rsi = rsi(ddf['Close'])
+            d_cci = cci(ddf['High'], ddf['Low'], ddf['Close'])
+            r_v = float(d_rsi.iloc[-1])
+            c_v = float(d_cci.iloc[-1])
+            if not pd.isna(r_v):
+                result = {'rsi': round(r_v, 1),
+                          'cci': round(c_v, 1) if not pd.isna(c_v) else 0.0}
+    except Exception:
+        result = {}
+    _DAILY_TIMING_CACHE[ticker] = result
+    return result
+
+
 # ─── Factor 24: Monthly S/R Confluence ───────────────────────────────────────
 
 _MONTHLY_SR_CACHE: dict = {}   # ticker -> result  (cache per run)
@@ -279,6 +447,8 @@ def get_monthly_sr(ticker: str, asset, current_price: float) -> dict:
         # ── Swing pivots (order=2 = needs 2 bars each side confirmed) ────────
         from ct_indicators import swing_lows, swing_highs
 
+   
+
         lows  = swing_lows(df['Low'],  order=2)
         highs = swing_highs(df['High'], order=2)
 
@@ -288,7 +458,7 @@ def get_monthly_sr(ticker: str, asset, current_price: float) -> dict:
         monthly_support = supports[0]    if supports    else None
         monthly_resist  = resistances[0] if resistances else None
 
-        # ── Which is closer? ──────────────────────────────────────────────────
+        # -- Which is closer? --
         d_sup = abs(current_price - monthly_support) / current_price * 100 if monthly_support else 999
         d_res = abs(current_price - monthly_resist)  / current_price * 100 if monthly_resist  else 999
 
@@ -305,7 +475,7 @@ def get_monthly_sr(ticker: str, asset, current_price: float) -> dict:
             nearest_label = 'NONE'
             dist_pct      = 999.0
 
-        # ── Monthly trend: last close vs 6-month MA ───────────────────────────
+        # -- Monthly trend: last close vs 6-month MA --
         ma6 = float(df['Close'].rolling(6).mean().iloc[-1])
         last_close = float(df['Close'].iloc[-1])
         if last_close > ma6 * 1.02:
@@ -315,13 +485,19 @@ def get_monthly_sr(ticker: str, asset, current_price: float) -> dict:
         else:
             monthly_trend = 'NEUTRAL'
 
-        # ── Monthly Fibonacci zone (reuse same logic as weekly Factor 20) ─────
+        # -- Monthly Fibonacci zone (both directions; Factor 24 picks by trade dir) --
         try:
             from ct_factors import check_fibonacci_zone
             fib_zone_mo, fib_ret_pct, _, _, _ = check_fibonacci_zone(df, 'LONG', current_price)
         except Exception:
             fib_zone_mo  = 'UNKNOWN'
             fib_ret_pct  = 0.0
+        try:
+            from ct_factors import check_fibonacci_zone
+            fib_zone_mo_s, fib_ret_pct_s, _, _, _ = check_fibonacci_zone(df, 'SHORT', current_price)
+        except Exception:
+            fib_zone_mo_s = 'UNKNOWN'
+            fib_ret_pct_s = 0.0
 
         result = {
             'monthly_support':  round(monthly_support, 2) if monthly_support else None,
@@ -332,6 +508,8 @@ def get_monthly_sr(ticker: str, asset, current_price: float) -> dict:
             'monthly_trend':    monthly_trend,
             'fib_zone_monthly': fib_zone_mo,
             'fib_ret_pct':      round(fib_ret_pct, 1),
+            'fib_zone_monthly_short': fib_zone_mo_s,
+            'fib_ret_pct_short':      round(fib_ret_pct_s, 1),
         }
 
     except Exception:

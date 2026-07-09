@@ -38,19 +38,44 @@ from ct_market_data import get_earnings, get_monthly_analysis, get_sector_rs
 # ══════════════════════════════════════════════════════════════
 
 def rsi(series, n=14):
+    """Wilder-smoothed RSI (matches TradingView / course values).
+    Previously used simple rolling means (Cutler's RSI), which can differ
+    from TradingView by several points and shift the RSI entry gates."""
     d  = series.diff()
-    g  = d.where(d > 0, 0.0).rolling(n).mean()
-    l  = (-d.where(d < 0, 0.0)).rolling(n).mean()
+    g  = d.where(d > 0, 0.0).ewm(alpha=1 / n, adjust=False).mean()
+    l  = (-d.where(d < 0, 0.0)).ewm(alpha=1 / n, adjust=False).mean()
     rs = g / l.replace(0, float('nan'))
-    return 100 - (100 / (1 + rs))
+    out = 100 - (100 / (1 + rs))
+    # No losses at all in the window → RSI is 100 by definition (was NaN,
+    # which callers coerced to 50 — badly misreading the strongest uptrends)
+    out = out.where(l != 0, 100.0)
+    out.iloc[:n] = float('nan')   # warmup period — not enough data
+    return out
 
 def atr(high, low, close, n=14):
+    """Wilder-smoothed ATR (matches TradingView / course values)."""
     tr = pd.concat([
         high - low,
         (high - close.shift()).abs(),
         (low  - close.shift()).abs(),
     ], axis=1).max(axis=1)
-    return tr.rolling(n).mean()
+    return tr.ewm(alpha=1 / n, adjust=False).mean()
+
+def calc_vwap(df, n=20):
+    """
+    Rolling 20-bar VWAP on weekly data (lesson 28 context tool).
+    Course: price above VWAP + upper Bollinger half = confirmed uptrend.
+    Returns the latest rolling VWAP value or None.
+    """
+    try:
+        tp = (df['High'] + df['Low'] + df['Close']) / 3
+        pv = (tp * df['Volume']).rolling(n).sum()
+        vv = df['Volume'].rolling(n).sum()
+        v  = pv / vv.replace(0, float('nan'))
+        val = float(v.iloc[-1])
+        return None if pd.isna(val) else round(val, 4)
+    except Exception:
+        return None
 
 def cci(high, low, close, n=20):
     """Commodity Channel Index — CCI = (TP - SMA_TP) / (0.015 * MeanDev)"""
@@ -162,15 +187,17 @@ def vol_declining(df, n=3):
         return False
     return recent < avg * 0.85
 
-def get_support_quality(df, support_level, tolerance=0.03):
+def get_support_quality(df, support_level, tolerance=0.03, use='low'):
     """
-    Count weekly closes / lows within tolerance of support.
+    Count weekly touches within tolerance of the level.
+    use='low'  — count Lows near the level  (support quality, LONG setups)
+    use='high' — count Highs near the level (resistance quality, SHORT setups)
     Returns: (touches, quality)  quality = STRONG / MEDIUM / WEAK
     """
     try:
         lower = support_level * (1 - tolerance)
         upper = support_level * (1 + tolerance)
-        lows  = df['Low'].values
+        lows  = df['Low'].values if use == 'low' else df['High'].values
         touches = int(sum(1 for l in lows if lower <= l <= upper))
         if   touches >= 3: quality = 'STRONG'
         elif touches >= 2: quality = 'MEDIUM'
@@ -200,22 +227,30 @@ def check_level_reliability(df, level, lookback: int = 52, tolerance: float = 0.
         above_thresh = level * (1 + tolerance)
         below_thresh = level * (1 - tolerance)
 
-        # State machine — track direction changes around the level
-        saw_above              = False
-        saw_below_after_above  = False
-        saw_above_after_below  = False
+        # State machine — track direction changes around the level.
+        # Symmetric: ABOVE→BELOW→ABOVE and BELOW→ABOVE→BELOW both mean the
+        # market crossed the level in both directions = level not respected.
+        saw_above  = False
+        saw_below  = False
+        broke_down = False   # was above, then closed below
+        broke_up   = False   # was below, then closed above
+        full_cycle = False
 
         for c in closes:
             if c > above_thresh:
-                if saw_below_after_above:
-                    saw_above_after_below = True   # full cycle: ABOVE→BELOW→ABOVE
-                if not saw_below_after_above:
-                    saw_above = True
+                if broke_down:
+                    full_cycle = True   # ABOVE→BELOW→ABOVE
+                if saw_below:
+                    broke_up = True
+                saw_above = True
             elif c < below_thresh:
+                if broke_up:
+                    full_cycle = True   # BELOW→ABOVE→BELOW
                 if saw_above:
-                    saw_below_after_above = True   # price dipped below after being above
+                    broke_down = True
+                saw_below = True
 
-        if saw_above_after_below:
+        if full_cycle:
             return ('UNRELIABLE',
                     f'Level {level:.2f} broken both directions — '
                     f'market did not respect it as a barrier (N.M.S.)')
@@ -223,7 +258,7 @@ def check_level_reliability(df, level, lookback: int = 52, tolerance: float = 0.
         below_count = int(sum(1 for c in closes if c < below_thresh))
         above_count = int(sum(1 for c in closes if c > above_thresh))
 
-        if saw_below_after_above and above_count > 0:
+        if (broke_down or broke_up) and above_count > 0:
             return ('TESTED',
                     f'Level {level:.2f} violated once then recovered — '
                     f'moderate confidence ({above_count} bars above, {below_count} below)')

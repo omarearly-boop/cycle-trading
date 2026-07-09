@@ -111,9 +111,16 @@ def _factor_entry_distance(r):
 @factor
 def _factor_earnings(r):
     earn = r['Earn']
-    if earn == 'SOON!':        return -14, "Earnings Risk", "Earnings report soon — high volatility risk"
-    elif earn and earn != '-': return +3,  "Earnings Risk", f"Next earnings: {earn} — safe window"
-    else:                      return +5,  "Earnings Risk", "No earnings concern"
+    if earn == 'SOON!':
+        return -14, "Earnings Risk", "Earnings report soon — high volatility risk"
+    elif earn == 'APPROACHING':
+        # neutral here — the 15-30d penalty belongs to the Earnings Zone factor
+        # (previously this returned +3 'safe window', contradicting that factor)
+        return 0,   "Earnings Risk", "Earnings in 15–30 days — see Earnings Zone"
+    elif earn and earn != '-':
+        return +3,  "Earnings Risk", f"Next earnings: {earn} — safe window"
+    else:
+        return +5,  "Earnings Risk", "No earnings concern"
 
 @factor
 def _factor_setup_quality(r):
@@ -730,10 +737,12 @@ def _factor_monthly_sr_confluence(r):
     dist_pct      = msr.get('dist_pct', 999.0)
     nearest_label = msr.get('nearest_label', 'NONE')
     monthly_trend = msr.get('monthly_trend', 'NEUTRAL')
-    fib_zone_mo   = msr.get('fib_zone_monthly', 'UNKNOWN')
     nearest_level = msr.get('nearest_level')
     is_long       = 'LONG' in r['Dir']
     direction     = 'LONG' if is_long else 'SHORT'
+    # direction-correct monthly fib zone (was hardcoded to the LONG retracement)
+    fib_zone_mo   = (msr.get('fib_zone_monthly', 'UNKNOWN') if is_long
+                     else msr.get('fib_zone_monthly_short', 'UNKNOWN'))
 
     if nearest_label == 'NONE' or nearest_level is None:
         return (0, 'MonthlyS/R: none', 'No monthly S/R level found near current price')
@@ -1479,6 +1488,100 @@ def _factor_gann_levels(r):
             return (+6, 'Gann 100%',
                     f'Resistance {res} at the Gann 100% level ({g100}) -- strong barrier backs the SHORT')
     return None
+
+
+@factor
+def _factor_daily_timing(r):
+    """
+    Factor 40 -- Multi-timeframe entry timing (lessons 26-27).
+    Weekly chart = trend direction; DAILY RSI + CCI = precise entry timing.
+      LONG : daily RSI < 30 AND daily CCI < -200 -> +10 (ideal timing)
+             one of the two                       -> +5
+             daily RSI > 70                       -> -6 (chasing, wait)
+      SHORT: mirrored.
+    """
+    dt = r.get('_daily_timing') or {}
+    d_rsi = dt.get('rsi')
+    if d_rsi is None:
+        return None
+    d_cci   = dt.get('cci', 0.0)
+    is_long = 'LONG' in r['Dir']
+
+    if is_long:
+        if d_rsi < 30 and d_cci < -200:
+            return (+10, 'Daily Timing',
+                    f'Daily RSI {d_rsi} oversold + CCI {d_cci:.0f} < -200 -- ideal LONG entry timing (lessons 26-27)')
+        if d_rsi < 30 or d_cci < -200:
+            return (+5, 'Daily Timing',
+                    f'Daily RSI {d_rsi} / CCI {d_cci:.0f} -- partial oversold timing signal')
+        if d_rsi > 70:
+            return (-6, 'Daily Timing',
+                    f'Daily RSI {d_rsi} overbought -- poor LONG entry timing; wait for a daily pullback')
+        return (0, 'Daily Timing', f'Daily RSI {d_rsi}, CCI {d_cci:.0f} -- neutral timing')
+    else:
+        if d_rsi > 70 and d_cci > 200:
+            return (+10, 'Daily Timing',
+                    f'Daily RSI {d_rsi} overbought + CCI {d_cci:.0f} > +200 -- ideal SHORT entry timing (lessons 26-27)')
+        if d_rsi > 70 or d_cci > 200:
+            return (+5, 'Daily Timing',
+                    f'Daily RSI {d_rsi} / CCI {d_cci:.0f} -- partial overbought timing signal')
+        if d_rsi < 30:
+            return (-6, 'Daily Timing',
+                    f'Daily RSI {d_rsi} oversold -- poor SHORT entry timing; wait for a daily bounce')
+        return (0, 'Daily Timing', f'Daily RSI {d_rsi}, CCI {d_cci:.0f} -- neutral timing')
+
+
+@factor
+def _factor_vwap(r):
+    """
+    Factor 41 -- Rolling VWAP trend context (lesson 28).
+    Course: price above VWAP AND in the upper Bollinger half = confirmed
+    uptrend. Modest weights -- VWAP is a context tool on this timeframe.
+    """
+    vw = r.get('_vwap') or {}
+    vwap = vw.get('vwap')
+    if not vwap:
+        return None
+    is_long = 'LONG' in r['Dir']
+    above   = vw.get('above', False)
+    boll    = r.get('_boll') or {}
+    pct_b   = boll.get('pct_b', 0.5)
+
+    if is_long:
+        if above and pct_b >= 0.5:
+            return (+5, 'VWAP', f'Price above 20W VWAP ({vwap:.2f}) + upper Bollinger half -- uptrend confirmed (lesson 28)')
+        if above:
+            return (+3, 'VWAP', f'Price above 20W VWAP ({vwap:.2f}) -- positive trend context')
+        return (-4, 'VWAP', f'Price below 20W VWAP ({vwap:.2f}) -- weak trend context for LONG')
+    else:
+        if not above and pct_b <= 0.5:
+            return (+5, 'VWAP', f'Price below 20W VWAP ({vwap:.2f}) + lower Bollinger half -- downtrend confirmed (lesson 28)')
+        if not above:
+            return (+3, 'VWAP', f'Price below 20W VWAP ({vwap:.2f}) -- negative trend context')
+        return (-4, 'VWAP', f'Price above 20W VWAP ({vwap:.2f}) -- weak trend context for SHORT')
+
+
+@factor
+def _factor_entry_method(r):
+    """
+    Factor 42 -- Entry Method (lesson 20).
+    Three entry methods for reversal/retest setups:
+      Method 1 AGGRESSIVE  -- before N.M.S. confirmation: smaller stop, lower probability (-4)
+      Method 2 SOLID       -- N.M.S. weekly close confirmed: recommended (+2)
+      Method 3 MORE SOLID  -- 5+ bars after breakout, retest entry: highest probability (+4)
+    Course: most students should use method 2 or 3.
+    """
+    m = r.get('EntryMethod')
+    if not m:
+        return None
+    if m == 'MORE_SOLID':
+        return (+4, 'Entry Method',
+                'Method 3 (More Solid): 5+ bars after breakout, retest entry -- highest probability (lesson 20)')
+    if m == 'SOLID':
+        return (+2, 'Entry Method',
+                'Method 2 (Solid): N.M.S. weekly close confirmed -- recommended entry (lesson 20)')
+    return (-4, 'Entry Method',
+            'Method 1 (Aggressive): entering before N.M.S. confirmation -- lower probability, use smaller size (lesson 20)')
 
 
 def calc_probability(r):

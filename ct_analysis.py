@@ -31,7 +31,7 @@ from ct_indicators import (
     vol_declining, get_support_quality, check_level_reliability,
     check_false_breakout, check_level_ambiguity, check_swing_broken,
     calc_macd, calc_bollinger, estimate_time_horizon,
-    detect_price_gaps, detect_chart_pattern, check_gann_levels,
+    detect_price_gaps, detect_chart_pattern, check_gann_levels, calc_vwap,
 )
 from ct_market_data import get_earnings, get_monthly_analysis, get_sector_rs, get_monthly_sr, get_spy_rs
 from ct_factors import calc_probability, check_fibonacci_zone
@@ -462,6 +462,29 @@ def _finalize_setup(setup, direction, ticker, atr_val, m_analysis,
     if _is_us:
         setup['_fundamental'] = get_fundamental_analysis(clean_ticker(ticker), info=cached_info)
 
+    # ── Factor 40 — daily RSI/CCI entry timing (lessons 26-27) ──
+    # Fetched only here (per detected setup, not per scanned ticker) to keep
+    # scan time flat. Skipped for TASE/intl where daily data is less reliable.
+    try:
+        from ct_market_data import get_daily_timing
+        setup['_daily_timing'] = {} if (is_israel or is_intl) else get_daily_timing(ticker)
+    except Exception:
+        setup['_daily_timing'] = {}
+
+    # ── Factor 42 — entry method classification (lesson 20) ──
+    # Method 1 AGGRESSIVE:  before N.M.S. confirmation — lower probability
+    # Method 2 SOLID:       N.M.S. weekly close confirmed — enter at close
+    # Method 3 MORE SOLID:  5+ bars after breakout, retest entry — highest prob
+    _bars  = setup.get('_bars_since_breakout', 99)
+    _fb_l  = setup.get('_fb_label', '')
+    _conf  = setup.get('_trend_confirmed', True) and _fb_l != 'FALSE_BREAKOUT'
+    if _bars < 99 and _bars >= 5:
+        setup['EntryMethod'] = 'MORE_SOLID'
+    elif _fb_l == 'VALID_BREAKOUT' or (_conf and _bars < 99):
+        setup['EntryMethod'] = 'SOLID'
+    else:
+        setup['EntryMethod'] = 'AGGRESSIVE'
+
     prob, pfacts = calc_probability(setup)
     setup['Prob']    = prob
     setup['_pfacts'] = pfacts
@@ -739,6 +762,10 @@ def _fetch_market_data(ticker, is_crypto=False, is_commodity=False,
     # ── Gann levels (lesson 31) ───────────────────────────
     _gann = check_gann_levels(df)
 
+    # ── Rolling VWAP (lesson 28 context tool) ─────────────
+    _vwap_val = calc_vwap(df)
+    _vwap = {'vwap': _vwap_val, 'above': price > _vwap_val} if _vwap_val else {}
+
     # ── Earnings (stocks only) ────────────────────────────
     skip_fundamentals = is_crypto or is_commodity
     earn_date, earn_days = (None, None) if skip_fundamentals else get_earnings(asset)
@@ -876,7 +903,7 @@ def _fetch_market_data(ticker, is_crypto=False, is_commodity=False,
         '_bars_since_breakout': _bars_since_breakout,
         '_surge_vol': _surge_vol, '_candle_pattern': _candle_pattern,
         '_price_gap': _price_gap, '_secondary_trend': _secondary_trend,
-        '_chart_pattern': _chart_geo, '_gann': _gann,
+        '_chart_pattern': _chart_geo, '_gann': _gann, '_vwap': _vwap,
         'earn_date': earn_date, 'earn_days': earn_days, 'earn_warn': earn_warn,
         'earn_approaching': earn_approaching, 'atr_pct': atr_pct,
         'high_volatility': high_volatility, 'm_analysis': m_analysis,
@@ -978,7 +1005,9 @@ def _detect_setup(ticker, portfolio_size, market, is_crypto, asset_type, max_dis
     # Primary level = support (LONG) / resistance (SHORT)
     # False-breakout reference = resistance (LONG) / support (SHORT)
     lvl_dir = 'up' if is_long else 'down'
-    lev_touches, lev_q = get_support_quality(df, key_level)
+    # Support quality counts Lows near the level; resistance quality counts Highs
+    lev_touches, lev_q = get_support_quality(df, key_level,
+                                             use='low' if is_long else 'high')
     level_rel, _       = check_level_reliability(df, key_level)
     fb, fb_label, _    = check_false_breakout(df, resistance if is_long else support,
                                                direction=lvl_dir)
@@ -1024,6 +1053,7 @@ def _detect_setup(ticker, portfolio_size, market, is_crypto, asset_type, max_dis
     _setup['_dow_phase']          = market.get('_dow_phase', 'UNKNOWN')
     _setup['_candle_pattern']     = market.get('_candle_pattern', {})
     _setup['_gann']               = market.get('_gann', {})
+    _setup['_vwap']               = market.get('_vwap', {})
     _setup['_adx_weekly']         = market.get('_adx_weekly', {})
     _setup['_spy_rs']             = market.get('spy_rs', {})   # fix: key is 'spy_rs' not '_spy_rs'
     _setup['_monthly_sr']         = market.get('monthly_sr', {})
@@ -1062,6 +1092,9 @@ def analyze(ticker, portfolio_size, is_crypto=False, is_israel=False,
             )
             if setup:
                 setups.append(setup)
-    except Exception:
-        pass
+    except Exception as e:
+        # Never crash the scan, but don't hide failures either — silent
+        # swallowing here masked real bugs (dead mktcap filter, key drift).
+        _diag('no_data')
+        print(f'  ⚠ analyze({ticker}) failed: {type(e).__name__}: {e}')
     return setups
