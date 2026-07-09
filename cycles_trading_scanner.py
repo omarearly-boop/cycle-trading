@@ -61,7 +61,7 @@ from ct_analysis import (
     clean_ticker, send_email_summary, get_fundamental_analysis,
     is_hard_blocked, get_traffic_light, calc_position_size,
     _build_setup_dict, _finalize_setup, _fetch_market_data,
-    _detect_setup, _detect_long_setup, _detect_short_setup, analyze,
+    _detect_setup, analyze,
     reset_diag, print_diag,
 )
 from ct_report   import profit_breakdown
