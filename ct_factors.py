@@ -533,11 +533,10 @@ def _factor_fundamental_quality(r):
     """
     fund = r.get('_fundamental')
     if not fund:
-        return (0, 'Fundamental', 'No fundamental data available (ETF/crypto/commodity)')
+        return None  # ETF/crypto/commodity -- no fundamental data
 
     scores   = fund.get('scores', {})
-    direction = r.get('Direction', 'LONG')
-    is_long   = direction == 'LONG'
+    is_long   = 'LONG' in r['Dir']
 
     pe          = scores.get('pe')
     fwd_pe      = scores.get('fwdPE')
@@ -688,8 +687,8 @@ def _factor_trend_confirmation(r):
     """
     confirmed  = r.get('_trend_confirmed', True)
     label      = r.get('_trend_conf_label', 'CONFIRMED')
-    direction  = r.get('Direction', 'LONG')
-    swing_word = 'low' if direction == 'SHORT' else 'high'
+    is_long    = 'LONG' in r['Dir']
+    swing_word = 'high' if is_long else 'low'
 
     if confirmed:
         return (+10, f'TrendConf: {label}',
@@ -731,7 +730,8 @@ def _factor_monthly_sr_confluence(r):
     monthly_trend = msr.get('monthly_trend', 'NEUTRAL')
     fib_zone_mo   = msr.get('fib_zone_monthly', 'UNKNOWN')
     nearest_level = msr.get('nearest_level')
-    direction     = r.get('Direction', 'LONG')
+    is_long       = 'LONG' in r['Dir']
+    direction     = 'LONG' if is_long else 'SHORT'
 
     if nearest_label == 'NONE' or nearest_level is None:
         return (0, 'MonthlyS/R: none', 'No monthly S/R level found near current price')
@@ -1123,6 +1123,164 @@ def _factor_short_squeeze(r):
         else:
             return (+2,  "Short Squeeze", f"Short float {short_int:.1f}% -- low short interest supports short thesis.")
 
+
+@factor
+def _factor_cci(r):
+    """
+    Factor 32 -- CCI Oscillator (Commodity Channel Index, period=20).
+    Course (lessons 27, 30): CCI +-200 is the key threshold.
+    Below -200 = deeply oversold -> bullish for LONG entries.
+    Above +200 = deeply overbought -> bullish for SHORT entries.
+    -100 to +100 = neutral zone.
+    """
+    cci_val = r.get('_cci_val', 0.0)
+    is_long = 'LONG' in r['Dir']
+
+    if is_long:
+        if cci_val <= -200:   return (+14, 'CCI', f'CCI {cci_val:.0f} -- deeply oversold (<-200), strong LONG signal')
+        elif cci_val <= -100: return (+8,  'CCI', f'CCI {cci_val:.0f} -- oversold (<-100), LONG-favourable')
+        elif cci_val <= 0:    return (+3,  'CCI', f'CCI {cci_val:.0f} -- mild pullback, neutral to positive')
+        elif cci_val <= 100:  return (-2,  'CCI', f'CCI {cci_val:.0f} -- neutral zone, caution on LONG')
+        elif cci_val <= 200:  return (-6,  'CCI', f'CCI {cci_val:.0f} -- elevated CCI, overbought caution')
+        else:                 return (-10, 'CCI', f'CCI {cci_val:.0f} -- extreme overbought (>+200), avoid LONG')
+    else:
+        if cci_val >= 200:    return (+14, 'CCI', f'CCI {cci_val:.0f} -- deeply overbought (>+200), strong SHORT signal')
+        elif cci_val >= 100:  return (+8,  'CCI', f'CCI {cci_val:.0f} -- overbought (>+100), SHORT-favourable')
+        elif cci_val >= 0:    return (+3,  'CCI', f'CCI {cci_val:.0f} -- mild bounce, neutral for SHORT')
+        elif cci_val >= -100: return (-2,  'CCI', f'CCI {cci_val:.0f} -- neutral zone, caution on SHORT')
+        elif cci_val >= -200: return (-6,  'CCI', f'CCI {cci_val:.0f} -- dropping CCI, overbought caution')
+        else:                 return (-10, 'CCI', f'CCI {cci_val:.0f} -- extreme oversold (<-200), avoid SHORT')
+
+
+@factor
+def _factor_rsi_divergence(r):
+    """
+    Factor 33 -- RSI Divergence (lesson 26).
+    Course: price/RSI divergence is the strongest reversal signal.
+    BULLISH divergence (LONG): price lower low, RSI higher low.
+    BEARISH divergence (SHORT): price higher high, RSI lower high.
+    """
+    div     = r.get('_rsi_divergence', 'NONE')
+    is_long = 'LONG' in r['Dir']
+
+    if div == 'NONE':
+        return None   # no divergence detected -- skip factor (neutral)
+
+    if is_long:
+        if div == 'BULLISH':
+            return (+12, 'RSI Divergence', 'Bullish RSI divergence -- price lower low, RSI higher low')
+        else:   # BEARISH -- bad for LONG
+            return (-8,  'RSI Divergence', 'Bearish RSI divergence -- price higher high, RSI lower high (distribution)')
+    else:
+        if div == 'BEARISH':
+            return (+12, 'RSI Divergence', 'Bearish RSI divergence -- price higher high, RSI lower high')
+        else:   # BULLISH -- bad for SHORT
+            return (-8,  'RSI Divergence', 'Bullish RSI divergence -- price lower low, RSI higher low (accumulation)')
+
+
+@factor
+def _factor_retest_window(r):
+    """
+    Factor 34 -- 5-Candle Retest Window (lesson 14).
+    Course: wait at least 5 weekly bars after breakout before entering retest.
+    Entering too early = chasing, high failure rate.
+    """
+    bars = r.get('_bars_since_breakout', 99)
+
+    if bars >= 99:
+        return None   # no breakout in window -- skip
+    if bars < 3:
+        return (-16, 'Retest Window', f'Only {bars} bar(s) since breakout -- too early, high failure risk')
+    elif bars < 5:
+        return (-8,  'Retest Window', f'{bars} bars since breakout -- approaching window (need >=5)')
+    elif bars <= 12:
+        return (+8,  'Retest Window', f'{bars} bars since breakout -- valid retest window (5-12 bars)')
+    else:
+        return (+3,  'Retest Window', f'{bars} bars since breakout -- late retest, still valid')
+
+
+
+@factor
+def _factor_secondary_trend(r):
+    """
+    Factor 35 -- Secondary Trend Validation (lessons 10, 16).
+    Course: a valid setup requires:
+      1. Primary uptrend (confirmed by get_trend -- already gated upstream)
+      2. Intermediate correction of 8-15 bars before retest
+    Too short a pullback (<5 bars) = not a true correction, probably noise.
+    Too long (>20 bars) = trend may be broken, not just correcting.
+    """
+    bars = r.get('_bars_since_breakout', 99)  # reuse -- bars since price crossed key level
+    # When bars_since_breakout = 99 it means no breakout in 12-bar window.
+    # In that case look at LateEntry distance as proxy for pullback depth.
+    if bars < 99:
+        if bars < 5:
+            return (-10, 'Secondary Trend', f'Correction only {bars} bars -- too brief, likely noise not real pullback')
+        elif bars <= 12:
+            return (+10, 'Secondary Trend', f'{bars}-bar correction -- healthy intermediate pullback (ideal 8-15 bars)')
+        elif bars <= 20:
+            return (+4,  'Secondary Trend', f'{bars}-bar correction -- extended but trend intact')
+        else:
+            return (-6,  'Secondary Trend', f'{bars}+ bars since breakout -- prolonged; check if trend still valid')
+    # Fallback: use LateEntry (distance from key level) as depth proxy
+    late_pct = r.get('LateEntry', 0) or 0
+    if late_pct >= 5:
+        return (+6, 'Secondary Trend', f'Price {late_pct:.1f}% from level -- meaningful pullback depth')
+    return None
+
+
+@factor
+def _factor_chart_pattern(r):
+    """
+    Factor 36 -- Chart Pattern Detection (lessons 19-22).
+    Detects: Flag/Pennant (tightest, most common), Cup-like base.
+    Course: these patterns have the highest statistical completion rate.
+
+    Flag: after strong rally (>10% in 5 bars), consolidation <5% range for 3-8 bars.
+    Cup base: price forms a U-shape over 10-30 bars, returns near prior high.
+    """
+    bq = r.get('_breakout_quality', {})
+    is_long = 'LONG' in r['Dir']
+    direction = 'LONG' if is_long else 'SHORT'
+
+    # Use breakout quality data as proxy for prior impulse strength
+    bk = bq.get(direction)
+    if not bk:
+        return None
+
+    body_ratio = bk.get('body_ratio', 0)   # breakout candle body / ATR
+    vol_ratio  = bk.get('vol_ratio', 1.0)  # breakout vol / 20-bar avg
+
+    # Strong prior move: large body (>1.5x ATR) on high volume (>1.5x avg)
+    # + current price pulling back calmly (low vol on retest already scored in Factor 3)
+    # = Flag/Pennant pattern
+    is_flag = body_ratio >= 1.5 and vol_ratio >= 1.5
+
+    # Moderate move with decent volume -- possible cup/base
+    is_cup  = 0.8 <= body_ratio < 1.5 and vol_ratio >= 1.0
+
+    bars = r.get('_bars_since_breakout', 99)
+    fib_zone = r.get('_fib_zone', 'UNKNOWN')
+
+    if is_flag and 3 <= bars <= 10:
+        return (+12, 'Chart Pattern',
+                f'Flag/Pennant: strong breakout (body {body_ratio:.1f}x ATR, vol {vol_ratio:.1f}x avg) '
+                f'+ {bars}-bar calm consolidation -- high-probability pattern (lessons 19-22)')
+    elif is_flag:
+        return (+6, 'Chart Pattern',
+                f'Strong prior breakout (flag-like) but {bars} bars since -- check if still valid')
+    elif is_cup and fib_zone == 'GOLDEN_ZONE' and bars >= 10:
+        return (+8, 'Chart Pattern',
+                f'Cup base: moderate breakout + {bars}-bar handle + Fib golden zone -- solid base pattern')
+    elif is_cup:
+        return (+3, 'Chart Pattern',
+                f'Possible base formation: breakout {body_ratio:.1f}x ATR, {bars} bars since')
+    elif body_ratio < 0.5:
+        return (-6, 'Chart Pattern',
+                f'Weak prior breakout (body {body_ratio:.1f}x ATR) -- no clear pattern structure')
+    return None
+
+
 def calc_probability(r):
     """
     Iterate FACTORS registry. Each factor returns (delta, label, explanation) or None to skip.
@@ -1135,9 +1293,7 @@ def calc_probability(r):
         if result is None:
             continue
         delta, label, expl = result
-        score += delta
-        d, label, explain = result
-        score += d
-        factors.append((label, d, explain))
+        score  += delta
+        factors.append((label, delta, expl))
     probability = max(15, min(92, round(score)))
     return probability, factors

@@ -26,7 +26,7 @@ from ct_config import (
     MAX_DIST_STOCK, MAX_DIST_CRYPTO, MAX_DIST_COMMODITY, MAX_DIST_INTL,
 )
 from ct_indicators import (
-    rsi, atr, get_trend, swing_lows, swing_highs, get_levels,
+    rsi, atr, cci, get_trend, swing_lows, swing_highs, get_levels,
     vol_declining, get_support_quality, check_level_reliability,
     check_false_breakout, check_level_ambiguity, check_swing_broken,
     calc_macd, calc_bollinger, estimate_time_horizon,
@@ -746,6 +746,61 @@ def _fetch_market_data(ticker, is_crypto=False, is_commodity=False,
     except Exception:
         _adx_weekly = {}
 
+    # Factor 32 — CCI (Commodity Channel Index, period=20, course threshold ±200)
+    try:
+        df['CCI'] = cci(df['High'], df['Low'], df['Close'])
+        _cci_val  = float(df['CCI'].iloc[-1]) if not pd.isna(df['CCI'].iloc[-1]) else 0.0
+    except Exception:
+        _cci_val = 0.0
+
+    # Factor 33 — RSI Divergence (price vs RSI at last 2 swing lows/highs)
+    try:
+        _rsi_series  = df['RSI'].values
+        _price_close = df['Close'].values
+        n = len(_price_close)
+        # Find last 2 swing lows (local minima over ±3 bars) for bullish divergence
+        _sw_lows = [i for i in range(3, n - 1)
+                    if _price_close[i] == min(_price_close[i-3:i+2])][-3:]
+        # Bullish divergence: price lower low, RSI higher low
+        _bull_div = False
+        if len(_sw_lows) >= 2:
+            a, b = _sw_lows[-2], _sw_lows[-1]
+            if (_price_close[b] < _price_close[a]     # price: lower low
+                    and _rsi_series[b] > _rsi_series[a]):  # RSI: higher low
+                _bull_div = True
+        # Find last 2 swing highs for bearish divergence
+        _sw_highs = [i for i in range(3, n - 1)
+                     if _price_close[i] == max(_price_close[i-3:i+2])][-3:]
+        _bear_div = False
+        if len(_sw_highs) >= 2:
+            a, b = _sw_highs[-2], _sw_highs[-1]
+            if (_price_close[b] > _price_close[a]      # price: higher high
+                    and _rsi_series[b] < _rsi_series[a]):  # RSI: lower high
+                _bear_div = True
+        _rsi_divergence = 'BULLISH' if _bull_div else ('BEARISH' if _bear_div else 'NONE')
+    except Exception:
+        _rsi_divergence = 'NONE'
+
+    # Bars since breakout — reuse _bk_quality window, store count per direction
+    # (used by 5-candle retest window filter in _detect_setup)
+    _bars_since_breakout: dict = {}
+    try:
+        _bars12 = df.tail(13)
+        _c13 = _bars12['Close'].values.astype(float)
+        for _bdir, _blevel in [('LONG', support), ('SHORT', resistance)]:
+            _found = None
+            for _bi in range(1, len(_c13)):
+                if _bdir == 'LONG'  and _c13[_bi] > _blevel and _c13[_bi-1] <= _blevel:
+                    _found = _bi; break
+                if _bdir == 'SHORT' and _c13[_bi] < _blevel and _c13[_bi-1] >= _blevel:
+                    _found = _bi; break
+            if _found is not None:
+                _bars_since_breakout[_bdir] = len(_c13) - 1 - _found
+            else:
+                _bars_since_breakout[_bdir] = 99   # no breakout found in 12-bar window
+    except Exception:
+        _bars_since_breakout = {'LONG': 99, 'SHORT': 99}
+
     return {
         'df': df, 'price': price, 'rsi_val': rsi_val, 'atr_val': atr_val,
         'macd_data': macd_data, 'boll_data': boll_data, 'trend': trend,
@@ -753,6 +808,9 @@ def _fetch_market_data(ticker, is_crypto=False, is_commodity=False,
         'vol_ok': vol_ok, '_vol_ratio': _vol_ratio, '_dir_vol_ratio': _dir_vol_ratio,
         '_candle_bodies': _norm_cb, '_breakout_quality': _bk_quality,
         '_adx_weekly': _adx_weekly,
+        '_cci_val': _cci_val,
+        '_rsi_divergence': _rsi_divergence,
+        '_bars_since_breakout': _bars_since_breakout,
         '_surge_vol': _surge_vol, '_candle_pattern': _candle_pattern,
         'earn_date': earn_date, 'earn_days': earn_days, 'earn_warn': earn_warn,
         'earn_approaching': earn_approaching, 'atr_pct': atr_pct,
@@ -886,59 +944,8 @@ def _detect_setup(ticker, portfolio_size, market, is_crypto, asset_type, max_dis
     _setup['_candle_bodies']      = market.get('_candle_bodies', [])
     # Factor 26 — Breakout Quality
     _setup['_breakout_quality']   = market.get('_breakout_quality', {})
-    return _finalize_setup(_setup, direction, ticker, atr_val,
-                           m_analysis, is_crypto, is_commodity,
-                           is_israel, is_intl, cached_info=market['cached_info'])
-
-
-# ── Backward-compatible shims ────────────────────────────────────────────────
-def _detect_long_setup(ticker, portfolio_size, market, is_crypto, asset_type, max_dist,
-                       is_commodity=False, is_israel=False, is_intl=False):
-    return _detect_setup(ticker, portfolio_size, market, is_crypto, asset_type, max_dist,
-                         'LONG', is_commodity, is_israel, is_intl)
-
-
-def _detect_short_setup(ticker, portfolio_size, market, is_crypto, asset_type, max_dist,
-                        is_commodity=False, is_israel=False, is_intl=False):
-    return _detect_setup(ticker, portfolio_size, market, is_crypto, asset_type, max_dist,
-                         'SHORT', is_commodity, is_israel, is_intl)
-
-
-def analyze(ticker, portfolio_size, is_crypto=False, is_israel=False,
-            is_commodity=False, is_intl=False, interval='1wk', period='2y'):
-    """
-    Coordinator — fetch market data once (the only network I/O), then run
-    both LONG/SHORT detectors against it. ~20 lines, matches Candidate B
-    in architecture-review-cycles-scanner.html.
-    Returns a list of valid setups (could be LONG, SHORT, or both).
-    """
-    setups = []
-    try:
-        market = _fetch_market_data(ticker, is_crypto=is_crypto, is_commodity=is_commodity,
-                                    is_israel=is_israel, is_intl=is_intl,
-                                    interval=interval, period=period)
-        if market is None:
-            return setups
-        for direction in ('LONG', 'SHORT'):
-            setup = _detect_setup(
-                ticker, portfolio_size, market, is_crypto, asset_type,
-                MAX_DIST_STOCK, direction,
-                is_commodity=is_commodity, is_israel=is_israel, is_intl=is_intl,
-            )
-            if setup:
-                setups.append(setup)
-    except Exception as e:
-        pass
-    return setups
-
-
-# ── Backward-compatible shims ────────────────────────────────────────────────
-def _detect_long_setup(ticker, portfolio_size, market, is_crypto, asset_type, max_dist,
-                       is_commodity=False, is_israel=False, is_intl=False):
-    return _detect_setup(ticker, portfolio_size, market, is_crypto, asset_type, max_dist,
-                         'LONG', is_commodity, is_israel, is_intl)
-
-def _detect_short_setup(ticker, portfolio_size, market, is_crypto, asset_type, max_dist,
-                        is_commodity=False, is_israel=False, is_intl=False):
-    return _detect_setup(ticker, portfolio_size, market, is_crypto, asset_type, max_dist,
-                         'SHORT', is_commodity, is_israel, is_intl)
+    # Factor 32 — CCI
+    _setup['_cci_val']            = market.get('_cci_val', 0.0)
+    # Factor 33 — RSI Divergence
+    _setup['_rsi_divergence']     = market.get('_rsi_divergence', 'NONE')
+    # 5-candle retest window — lesson 14: must wait ≥5 

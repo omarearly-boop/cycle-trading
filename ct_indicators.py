@@ -52,6 +52,13 @@ def atr(high, low, close, n=14):
     ], axis=1).max(axis=1)
     return tr.rolling(n).mean()
 
+def cci(high, low, close, n=20):
+    """Commodity Channel Index — CCI = (TP - SMA_TP) / (0.015 * MeanDev)"""
+    tp   = (high + low + close) / 3
+    sma  = tp.rolling(n).mean()
+    mad  = tp.rolling(n).apply(lambda x: np.mean(np.abs(x - x.mean())), raw=True)
+    return (tp - sma) / (0.015 * mad.replace(0, float('nan')))
+
 def get_trend(df):
     """
     Determine weekly trend using SMA crossover + price slope.
@@ -526,10 +533,4 @@ def estimate_time_horizon(entry, target, atr_val):
     if   weeks <= 2.5:
         return round(weeks, 1), 'WEEKLY',  '⚡ שבועי',    '#3fb950', '1–2 שבועות'
     elif weeks <= 6:
-        return round(weeks, 1), 'MONTHLY', '📅 חודשי',    '#58a6ff', '3–6 שבועות'
-    elif weeks <= 12:
-        return round(weeks, 1), 'MEDIUM',  '📈 בינוני',   '#d29922', '2–3 חודשים'
-    else:
-        return round(weeks, 1), 'LONG',    '🎯 ארוך טווח','#8b949e', '3+ חודשים'
-
-
+ 
