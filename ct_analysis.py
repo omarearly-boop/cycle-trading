@@ -951,3 +951,61 @@ def _detect_setup(ticker, portfolio_size, market, is_crypto, asset_type, max_dis
         monthly_sr=market.get('monthly_sr', {}))
     # Pass quantitative volume ratio to factors (Factor 3 enhancement)
     _setup['_vol_ratio']     = market.get('_vol_ratio', 1.0)
+    _setup['_dir_vol_ratio'] = market.get('_dir_vol_ratio', 1.0)
+    # Factor 25 -- Pullback Candle Compression
+    _setup['_candle_bodies']      = market.get('_candle_bodies', [])
+    # Factor 26 -- Breakout Quality
+    _setup['_breakout_quality']   = market.get('_breakout_quality', {})
+    # Factor 32 -- CCI
+    _setup['_cci_val']            = market.get('_cci_val', 0.0)
+    # Factor 33 -- RSI Divergence
+    _setup['_rsi_divergence']     = market.get('_rsi_divergence', 'NONE')
+    # 5-candle retest window (lesson 14)
+    _setup['_bars_since_breakout'] = market.get('_bars_since_breakout', 0)
+    # Factors 34-38 -- secondary trend, chart pattern, gap, dow phase
+    _setup['_secondary_trend']    = market.get('_secondary_trend', {})
+    _setup['_chart_pattern']      = market.get('_chart_pattern', {})
+    _setup['_price_gap']          = market.get('_price_gap', {})
+    _setup['_dow_phase']          = market.get('_dow_phase', 'UNKNOWN')
+    _setup['_candle_pattern']     = market.get('_candle_pattern', {})
+    _setup['_adx_weekly']         = market.get('_adx_weekly', {})
+    _setup['_spy_rs']             = market.get('_spy_rs', {})
+    _setup['_monthly_sr']         = market.get('monthly_sr', {})
+    return _finalize_setup(_setup, direction, ticker, atr_val,
+                           m_analysis, is_crypto, is_commodity,
+                           is_israel, is_intl, cached_info=market['cached_info'])
+
+
+def analyze(ticker, portfolio_size, is_crypto=False, is_israel=False,
+            is_commodity=False, is_intl=False, interval='1wk', period='2y'):
+    """
+    Coordinator -- fetch market data once, then run LONG/SHORT detectors.
+    Returns a list of valid setups (LONG, SHORT, or both).
+    """
+    setups = []
+    try:
+        market = _fetch_market_data(ticker, is_crypto=is_crypto,
+                                    is_commodity=is_commodity,
+                                    is_israel=is_israel, is_intl=is_intl,
+                                    interval=interval, period=period)
+        if market is None:
+            return setups
+        if is_crypto:
+            _atype, _mdist = 'CRYPTO',    MAX_DIST_CRYPTO
+        elif is_commodity:
+            _atype, _mdist = 'COMMODITY', MAX_DIST_COMMODITY
+        elif is_israel or is_intl:
+            _atype, _mdist = 'INTL',      MAX_DIST_INTL
+        else:
+            _atype, _mdist = 'STOCK',     MAX_DIST_STOCK
+        for direction in ('LONG', 'SHORT'):
+            setup = _detect_setup(
+                ticker, portfolio_size, market, is_crypto, _atype, _mdist,
+                direction,
+                is_commodity=is_commodity, is_israel=is_israel, is_intl=is_intl,
+            )
+            if setup:
+                setups.append(setup)
+    except Exception:
+        pass
+    return setups
