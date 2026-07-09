@@ -29,8 +29,156 @@ except ImportError:
 
 # ---------------------------------------------------------------------------
 BASE_DIR    = Path(__file__).parent
-REPORTS_DIR = BASE_DIR / 'REPORTS'
+REPORTS_DIR  = BASE_DIR / 'REPORTS'
+HISTORY_FILE = BASE_DIR / 'run_history.json'
 REPORTS_DIR.mkdir(exist_ok=True)
+
+HIST_LOCK = threading.Lock()
+
+# Live price check cache (background thread, refreshed every 60 s)
+LIVECHECK_CACHE = {'ts': 0.0, 'data': [], 'running': False}
+LIVE_LOCK       = threading.Lock()
+
+
+_STATUS_ZONE = {
+    'GREEN':       'IN_ZONE',
+    'YELLOW':      'WAIT',
+    'RED':         'NOT_YET',
+    'NO_LEVEL':    'NOT_YET',
+    'FETCH_ERROR': 'UNKNOWN',
+}
+
+def _zone_status(entry: dict, price: float) -> str:
+    """Map watch-checker status to display zone.
+    Uses the stored status field (already computed by ct_watch_checker.py)
+    rather than re-deriving from live price, so the dashboard stays in sync
+    with the checker's logic.
+    Falls back to price-vs-entry heuristic if status is missing.
+    """
+    stored = entry.get('status', '')
+    if stored in _STATUS_ZONE:
+        return _STATUS_ZONE[stored]
+
+    # Fallback: price-vs-entry heuristic
+    if not price or not entry.get('entry_price'):
+        return 'UNKNOWN'
+    ep  = float(entry['entry_price'])
+    dir = entry.get('direction', 'LONG')
+    pct = (price - ep) / ep * 100
+
+    if dir == 'LONG':
+        if 0.0 <= pct <= 1.0:  return 'IN_ZONE'   # at support
+        if 1.0 < pct <= 7.0:   return 'WAIT'       # approaching support
+        if pct > 7.0:          return 'NOT_YET'    # too far above
+        return 'NOT_YET'                            # below support = broken
+    else:
+        if -1.0 <= pct <= 0.0: return 'IN_ZONE'
+        if -7.0 <= pct < -1.0: return 'WAIT'
+        return 'NOT_YET'
+
+
+def _refresh_livecheck() -> None:
+    """Fetch live prices for all watchlist tickers and update cache."""
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    wf = BASE_DIR / 'watch_alerts.json'
+    if not wf.exists():
+        return
+    try:
+        raw  = wf.read_bytes()
+        text = raw.decode('utf-8', errors='replace')
+        try:
+            wdata = json.loads(text)
+        except json.JSONDecodeError:
+            for sep in ('\r\n    {', '\n    {'):
+                idx = text.rfind('},' + sep[:-1])
+                if idx >= 0:
+                    text = text[:idx + 1] + '\n  ]\n}'
+                    break
+            wdata = json.loads(text)
+        entries = wdata.get('tickers', [])
+    except Exception:
+        return
+
+    if not entries:
+        return
+
+    try:
+        import yfinance as yf
+    except ImportError:
+        return
+
+    def _fetch(entry):
+        try:
+            fi = yf.Ticker(entry['ticker']).fast_info
+            p  = (fi.get('last_price') or fi.get('lastPrice')
+                  or fi.get('regularMarketPrice'))
+            return entry['ticker'], float(p) if p else None
+        except Exception:
+            return entry['ticker'], None
+
+    prices = {}
+    with ThreadPoolExecutor(max_workers=min(20, len(entries))) as pool:
+        futs = {pool.submit(_fetch, e): e for e in entries}
+        for fut in as_completed(futs):
+            tk, px = fut.result()
+            prices[tk] = px
+
+    results = []
+    for entry in entries:
+        price    = prices.get(entry['ticker'])
+        ep_raw   = entry.get('entry_price')
+        zone     = _zone_status(entry, price)   # reads stored status first; price used as fallback only
+        pct_away = None
+        if price and ep_raw:
+            pct_away = round((price - float(ep_raw)) / float(ep_raw) * 100, 1)
+        results.append({
+            'ticker':       entry['ticker'],
+            'direction':    entry.get('direction', ''),
+            'entry_price':  ep_raw,
+            'stop_price':   entry.get('stop_price'),
+            'target_price': entry.get('target_price'),
+            'rr':           entry.get('rr'),
+            'prob':         entry.get('prob'),
+            'cur_price':    round(price, 2) if price else None,
+            'pct_away':     pct_away,
+            'zone':         zone,
+            'timeframe':    entry.get('timeframe', 'WEEKLY'),
+        })
+
+    with LIVE_LOCK:
+        LIVECHECK_CACHE['ts']      = time.time()
+        LIVECHECK_CACHE['data']    = results
+        LIVECHECK_CACHE['running'] = False
+
+
+def _livecheck_loop() -> None:
+    """Background thread: refresh live prices every 60 s."""
+    time.sleep(6)          # small startup delay
+    while True:
+        try:
+            with LIVE_LOCK:
+                LIVECHECK_CACHE['running'] = True
+            _refresh_livecheck()
+        except Exception:
+            with LIVE_LOCK:
+                LIVECHECK_CACHE['running'] = False
+        time.sleep(60)
+
+
+threading.Thread(target=_livecheck_loop, daemon=True).start()
+
+
+def _append_history(entry: dict) -> None:
+    """Append one run record to run_history.json (keep last 100)."""
+    with HIST_LOCK:
+        try:
+            hist = json.loads(HISTORY_FILE.read_text(encoding='utf-8')) if HISTORY_FILE.exists() else []
+        except Exception:
+            hist = []
+        hist.append(entry)
+        HISTORY_FILE.write_text(json.dumps(hist[-100:], indent=2), encoding='utf-8')
+
 
 app      = Flask(__name__)
 JOBS     = {}
@@ -38,10 +186,10 @@ JOB_LOCK = threading.Lock()
 
 TASKS = {
     'weekly': {
-        'label':    'Weekly Retest',
+        'label':    'Cycles Report',
         'icon':     '📊',
-        'desc':     'RSI 30-67 · Near S/R · 26 Factors',
-        'schedule': 'Sunday 08:00',
+        'desc':     'RSI 30-67 · Near S/R · 31 Factors',
+        'schedule': 'Hourly Mon-Fri 09:30-17:30',
         'color':    '#3fb950',
         'cmd':      [sys.executable, 'cycles_trading_scanner.py'],
         'report':   'cycles_report_*.html',
@@ -50,7 +198,7 @@ TASKS = {
         'label':    'Momentum',
         'icon':     '🚀',
         'desc':     'RSI 55-78 · Above MA20/50 · SPY >2%',
-        'schedule': 'Sunday 08:00',
+        'schedule': 'Hourly Mon-Fri 09:30-17:30',
         'color':    '#d29922',
         'cmd':      [sys.executable, 'cycles_trading_scanner.py', 'momentum'],
         'report':   'momentum_report_*.html',
@@ -77,7 +225,7 @@ TASKS = {
         'label':    'Watch Checker',
         'icon':     '🔔',
         'desc':     'Checks watchlist · Email on GREEN hit',
-        'schedule': 'Daily 08:00 · 09:45 · 16:45',
+        'schedule': 'Hourly (after each scan)',
         'color':    '#f85149',
         'cmd':      [sys.executable, 'ct_watch_checker.py'],
         'report':   'watch_report_*.html',
@@ -86,7 +234,7 @@ TASKS = {
         'label':    'Full Pipeline',
         'icon':     '⚡',
         'desc':     "Runs today's scheduled tasks",
-        'schedule': 'Daily 08:00 (auto-decide)',
+        'schedule': 'Hourly Mon-Fri (auto)',
         'color':    '#58a6ff',
         'cmd':      [sys.executable, 'ct_pipeline.py'],
         'report':   None,
@@ -108,8 +256,9 @@ TASKS = {
 # ---------------------------------------------------------------------------
 
 def _run_job(job_id: str, task: str):
-    info = TASKS[task]
-    env  = os.environ.copy()
+    info    = TASKS[task]
+    t_start = JOBS[job_id].get('start', time.time())
+    env     = os.environ.copy()
     env.setdefault('CT_PORTFOLIO_SIZE', '25000')
     env['PYTHONUNBUFFERED']  = '1'
     env['PYTHONUTF8']        = '1'
@@ -139,8 +288,21 @@ def _run_job(job_id: str, task: str):
         status = 'error'
         lines += ['', f'✗  Exception: {e}']
 
+    t_end = time.time()
     with JOB_LOCK:
-        JOBS[job_id].update({'status': status, 'log': lines, 'end': time.time()})
+        JOBS[job_id].update({'status': status, 'log': lines, 'end': t_end})
+
+    _append_history({
+        'id':           job_id,
+        'task':         task,
+        'label':        info['label'],
+        'icon':         info.get('icon', '⚙'),
+        'triggered_by': os.environ.get('CT_TRIGGERED_BY', 'manual'),
+        'started':      datetime.datetime.fromtimestamp(t_start).strftime('%Y-%m-%d %H:%M'),
+        'ended':        datetime.datetime.fromtimestamp(t_end).strftime('%H:%M'),
+        'status':       status,
+        'duration_sec': max(0, int(t_end - t_start)),
+    })
 
 
 # ---------------------------------------------------------------------------
@@ -162,6 +324,40 @@ def api_today():
         'date':    now.strftime('%d/%m/%Y'),
         'time':    now.strftime('%H:%M'),
         'planned': planned,
+    })
+
+
+@app.route('/api/schedule')
+def api_schedule():
+    now  = datetime.datetime.now()
+    fire = [(8, 0), (9, 45), (16, 45)]   # daily pipeline trigger times
+    remaining = [f'{h:02d}:{m:02d}' for h, m in fire
+                 if now < now.replace(hour=h, minute=m, second=0, microsecond=0)]
+    if remaining:
+        nh, nm  = map(int, remaining[0].split(':'))
+        nxt     = now.replace(hour=nh, minute=nm, second=0, microsecond=0)
+        day_lbl = 'Today'
+    else:
+        nxt     = (now + datetime.timedelta(days=1)).replace(
+                      hour=8, minute=0, second=0, microsecond=0)
+        day_lbl = 'Tomorrow'
+    mins_away = max(0, int((nxt - now).total_seconds() / 60))
+    nwday = nxt.weekday()
+    if nwday == 6:   # Sunday
+        tasks = ['weekly', 'momentum', 'review', 'daily']
+        if nxt.day <= 7:
+            tasks.insert(3, 'monthly')
+    else:
+        tasks = ['daily']
+    LABELS = {'weekly': 'Cycles Report', 'momentum': 'Momentum',
+              'review': 'Weekly Review',  'monthly':  'Monthly S/R',
+              'daily':  'Watch Checker'}
+    return jsonify({
+        'next_label':       f"{day_lbl} {nxt.strftime('%H:%M')}",
+        'mins_until':       mins_away,
+        'next_tasks':       tasks,
+        'next_task_labels': [LABELS[t] for t in tasks],
+        'remaining_today':  remaining,
     })
 
 
@@ -262,6 +458,84 @@ def api_watchlist():
         return jsonify({'tickers': []})
 
 
+@app.route('/api/history')
+def api_history():
+    try:
+        hist = json.loads(HISTORY_FILE.read_text(encoding='utf-8')) if HISTORY_FILE.exists() else []
+    except Exception:
+        hist = []
+    return jsonify(list(reversed(hist[-25:])))
+
+
+@app.route('/api/hotlist')
+def api_hotlist():
+    wf = BASE_DIR / 'watch_alerts.json'
+    if not wf.exists():
+        return jsonify({'tickers': [], 'updated': None, 'total': 0})
+    try:
+        raw  = wf.read_bytes()
+        text = raw.decode('utf-8', errors='replace')
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError:
+            # Recover from file truncated mid-write
+            for sep in ('\r\n    {', '\n    {'):
+                idx = text.rfind('},' + sep[:-1])
+                if idx >= 0:
+                    text = text[:idx + 1] + '\n  ]\n}'
+                    break
+            data = json.loads(text)
+        tickers = data.get('tickers', [])
+        updated = max((t.get('last_checked', '') for t in tickers), default=None)
+        return jsonify({'tickers': tickers, 'updated': updated, 'total': len(tickers)})
+    except Exception as e:
+        return jsonify({'tickers': [], 'updated': None, 'total': 0, 'error': str(e)})
+
+
+@app.route('/api/livecheck')
+def api_livecheck():
+    with LIVE_LOCK:
+        ts      = LIVECHECK_CACHE['ts']
+        data    = LIVECHECK_CACHE['data'][:]
+        running = LIVECHECK_CACHE['running']
+    updated = datetime.datetime.fromtimestamp(ts).strftime('%H:%M:%S') if ts else None
+    age_sec = int(time.time() - ts) if ts else None
+    return jsonify({'data': data, 'updated': updated,
+                    'age_sec': age_sec, 'running': running, 'total': len(data)})
+
+
+@app.route('/api/cycles-status')
+def api_cycles_status():
+    import re as _re
+    rpts = sorted(REPORTS_DIR.glob('cycles_report*.html'),
+                  key=lambda p: p.stat().st_mtime, reverse=True)
+    if not rpts:
+        return jsonify({'cards': [], 'updated': None, 'total': 0})
+    try:
+        html = rpts[0].read_text(encoding='utf-8', errors='replace')
+        cards, pat = [], _re.compile(
+            r'<div class="card (long|short)-card"[^>]*'
+            r'data-horizon="([^"]+)"[^>]*data-tl="([^"]+)"'
+        )
+        for m in pat.finditer(html):
+            direction = 'LONG' if m.group(1) == 'long' else 'SHORT'
+            horizon, tl = m.group(2), m.group(3)
+            chunk  = html[m.end():m.end() + 600]
+            tk_m   = _re.search(r'<span class="ticker">([A-Z0-9.]+)</span>', chunk)
+            pb_m   = _re.search(r'(\d{2,3})%', chunk)
+            if tk_m:
+                cards.append({'ticker': tk_m.group(1), 'direction': direction,
+                              'tl': tl, 'horizon': horizon,
+                              'prob': int(pb_m.group(1)) if pb_m else None})
+        updated  = datetime.datetime.fromtimestamp(
+            rpts[0].stat().st_mtime).strftime('%Y-%m-%d %H:%M')
+        filtered = [c for c in cards if c['tl'] in ('GREEN', 'YELLOW')]
+        return jsonify({'cards': filtered, 'updated': updated,
+                        'report': rpts[0].name, 'total': len(cards)})
+    except Exception as e:
+        return jsonify({'cards': [], 'updated': None, 'total': 0, 'error': str(e)})
+
+
 @app.route('/report/<path:filename>')
 def serve_report(filename):
     p = (REPORTS_DIR / filename).resolve()
@@ -279,693 +553,47 @@ def index():
 # Jenkins-style Pipeline Dashboard
 # ---------------------------------------------------------------------------
 
-DASHBOARD_HTML = r"""<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Cycles Trading Pipeline</title>
-<style>
-:root{
-  --bg:#0d1117;--surface:#161b22;--border:#30363d;
-  --text:#e6edf3;--muted:#8b949e;--dim:#484f58;
-  --blue:#58a6ff;--green:#3fb950;--amber:#d29922;
-  --red:#f85149;--violet:#a371f7;--sky:#79c0ff;
-}
-*{box-sizing:border-box;margin:0;padding:0}
-body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;
-     background:var(--bg);color:var(--text);min-height:100vh}
 
-/* ── Header ── */
-.hdr{background:#0d1117;border-bottom:1px solid var(--border);
-     padding:10px 20px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
-.hdr-logo{color:var(--blue);font-size:15px;font-weight:700;letter-spacing:-.3px}
-.hdr-time{color:var(--muted);font-size:12px;flex:1;min-width:100px}
-.hdr-pill{background:var(--surface);border:1px solid var(--border);
-          border-radius:20px;padding:3px 12px;font-size:11px;color:var(--muted)}
-.btn-h{border:none;border-radius:6px;padding:6px 14px;font-size:12px;font-weight:700;
-       cursor:pointer;color:#fff;transition:opacity .15s;white-space:nowrap}
-.btn-h:hover{opacity:.82}.btn-h:disabled{opacity:.3;cursor:not-allowed}
+# ---------------------------------------------------------------------------
+# Jenkins-style Pipeline Dashboard
+# ---------------------------------------------------------------------------
 
-/* ── Today bar ── */
-.today-bar{background:var(--surface);border-bottom:1px solid var(--border);
-           padding:5px 20px;display:flex;align-items:center;gap:8px;
-           font-size:11px;color:var(--muted);flex-wrap:wrap}
-.plan-pill{border-radius:20px;padding:2px 10px;font-size:10px;
-           font-weight:700;border:1px solid;background:transparent}
 
-/* ══════════════════════════════════════════
-   JENKINS PIPELINE
-══════════════════════════════════════════ */
-.jk-wrap{padding:28px 24px 20px;overflow-x:auto}
+# ---------------------------------------------------------------------------
+# Jenkins-style Pipeline Dashboard
+# ---------------------------------------------------------------------------
 
-/* Main horizontal pipe row */
-.jk-pipe{display:flex;align-items:center;min-width:900px;gap:0;position:relative}
 
-/* Horizontal connector line */
-.jk-line{height:3px;background:var(--border);flex:1;min-width:20px;transition:background .4s}
-.jk-line.lit{background:var(--green)}
+# ---------------------------------------------------------------------------
+# Jenkins-style Pipeline Dashboard
+# ---------------------------------------------------------------------------
 
-/* ── Stage wrapper ── */
-.jk-stage{display:flex;flex-direction:column;align-items:center;flex-shrink:0;
-          position:relative;min-width:72px}
 
-/* ── Circle bubble ── */
-.jk-circle{
-  width:54px;height:54px;border-radius:50%;
-  border:3px solid var(--dim);
-  background:var(--surface);
-  display:flex;align-items:center;justify-content:center;
-  font-size:22px;cursor:pointer;
-  transition:border-color .3s,box-shadow .3s,background .3s;
-  position:relative;z-index:2;user-select:none;
-}
-.jk-circle:hover{border-color:var(--blue);box-shadow:0 0 10px #58a6ff44}
-.jk-circle.no-click{cursor:default}
-.jk-circle.no-click:hover{border-color:var(--dim);box-shadow:none}
+# ---------------------------------------------------------------------------
+# Jenkins-style Pipeline Dashboard
+# ---------------------------------------------------------------------------
 
-/* Stage label */
-.jk-label{font-size:11px;font-weight:600;color:var(--muted);
-          margin-top:9px;text-align:center;max-width:76px;line-height:1.3}
-.jk-sub{font-size:10px;color:var(--dim);text-align:center;
-        margin-top:3px;max-width:80px;min-height:14px}
 
-/* Run button */
-.jk-btn{margin-top:6px;font-size:9px;padding:2px 10px;border-radius:10px;
-        background:transparent;border:1px solid var(--border);color:var(--dim);
-        cursor:pointer;transition:all .15s;white-space:nowrap}
-.jk-btn:hover{border-color:var(--blue);color:var(--blue)}
-.jk-btn:disabled{opacity:.3;cursor:not-allowed;pointer-events:none}
+# ---------------------------------------------------------------------------
+# Jenkins-style Pipeline Dashboard
+# ---------------------------------------------------------------------------
 
-/* ── States ── */
-.s-idle   .jk-circle{border-color:var(--dim)}
-.s-queued .jk-circle{border-color:var(--amber);opacity:.65}
-.s-running .jk-circle{border-color:var(--blue)!important;
-            animation:jk-glow 1.1s ease-in-out infinite}
-.s-done   .jk-circle{border-color:var(--green)!important;background:#0d2318}
-.s-error  .jk-circle{border-color:var(--red)!important;background:#2a0d0d}
 
-.s-running .jk-label{color:var(--blue)}
-.s-done    .jk-label{color:var(--green)}
-.s-error   .jk-label{color:var(--red)}
-.s-queued  .jk-label{color:var(--amber)}
+# ---------------------------------------------------------------------------
+# Jenkins-style Pipeline Dashboard
+# ---------------------------------------------------------------------------
 
-/* Status dot (bottom-right of circle) */
-.jk-dot{position:absolute;bottom:-3px;right:-3px;width:18px;height:18px;
-        border-radius:50%;font-size:10px;font-weight:700;
-        display:flex;align-items:center;justify-content:center;
-        background:var(--dim);border:2px solid var(--bg);color:#fff;
-        transition:background .3s;pointer-events:none}
-.s-running .jk-dot{background:var(--blue)}
-.s-done    .jk-dot{background:var(--green)}
-.s-error   .jk-dot{background:var(--red)}
-.s-queued  .jk-dot{background:var(--amber)}
 
-/* Today highlight ring */
-.today-ring .jk-circle{box-shadow:0 0 0 3px #58a6ff22}
+# ---------------------------------------------------------------------------
+# Jenkins-style Pipeline Dashboard
+# ---------------------------------------------------------------------------
 
-@keyframes jk-glow{
-  0%,100%{box-shadow:0 0 4px 1px #58a6ff33}
-  50%{box-shadow:0 0 14px 4px #58a6ff66}
-}
-@keyframes spin{0%{transform:rotate(0deg)}100%{transform:rotate(360deg)}}
-.spin{display:inline-block;animation:spin .7s linear infinite}
 
-/* ── Parallel scanners block ── */
-.jk-para-wrap{
-  display:flex;flex-direction:column;gap:0;
-  position:relative;flex-shrink:0;
-}
+# ---------------------------------------------------------------------------
+# Jenkins-style Pipeline Dashboard
+# ---------------------------------------------------------------------------
 
-/* Vertical left + right bars connecting the parallel branches */
-.jk-para-wrap::before,
-.jk-para-wrap::after{
-  content:'';position:absolute;
-  top:27px;       /* center of top circle */
-  bottom:27px;    /* center of bottom circle */
-  width:3px;background:var(--border);z-index:1;
-  transition:background .4s;
-}
-.jk-para-wrap::before{left:0}
-.jk-para-wrap::after{right:0}
-.jk-para-wrap.all-done::before,
-.jk-para-wrap.all-done::after{background:var(--green)}
-
-/* Each parallel row */
-.jk-para-row{
-  display:flex;align-items:center;gap:0;
-  padding:6px 0;position:relative;
-}
-
-/* Horizontal stubs from vertical bar to circle */
-.jk-stub{width:22px;height:3px;background:var(--border);flex-shrink:0;transition:background .4s}
-.jk-stub.lit{background:var(--green)}
-
-/* Smaller circle for parallel items */
-.jk-circle-sm{
-  width:46px;height:46px;border-radius:50%;
-  border:3px solid var(--dim);
-  background:var(--surface);
-  display:flex;align-items:center;justify-content:center;
-  font-size:18px;cursor:pointer;
-  transition:border-color .3s,box-shadow .3s,background .3s;
-  position:relative;z-index:2;user-select:none;flex-shrink:0;
-}
-.jk-circle-sm:hover{border-color:var(--blue);box-shadow:0 0 8px #58a6ff44}
-
-/* Parallel item label area */
-.jk-para-info{margin-left:10px;min-width:100px}
-.jk-para-name{font-size:11px;font-weight:600;color:var(--muted);line-height:1.3}
-.jk-para-badge{font-size:10px;color:var(--dim);margin-top:2px}
-.jk-para-btn{
-  display:inline-block;margin-top:4px;font-size:9px;padding:1px 8px;
-  border-radius:8px;background:transparent;border:1px solid var(--border);
-  color:var(--dim);cursor:pointer;transition:all .15s;
-}
-.jk-para-btn:hover{border-color:var(--blue);color:var(--blue)}
-.jk-para-btn:disabled{opacity:.3;cursor:not-allowed;pointer-events:none}
-
-/* Parallel item states (applied on the .jk-para-row) */
-.ps-idle    .jk-circle-sm{border-color:var(--dim)}
-.ps-queued  .jk-circle-sm{border-color:var(--amber);opacity:.65}
-.ps-running .jk-circle-sm{border-color:var(--blue)!important;animation:jk-glow 1.1s ease-in-out infinite}
-.ps-done    .jk-circle-sm{border-color:var(--green)!important;background:#0d2318}
-.ps-error   .jk-circle-sm{border-color:var(--red)!important;background:#2a0d0d}
-.ps-running .jk-para-name{color:var(--blue)}
-.ps-done    .jk-para-name{color:var(--green)}
-.ps-error   .jk-para-name{color:var(--red)}
-.ps-queued  .jk-para-name{color:var(--amber)}
-.ps-running .jk-para-badge{color:var(--blue)}
-.ps-done    .jk-para-badge{color:var(--green)}
-
-/* ── Data Store ── */
-.jk-store{margin-top:8px;text-align:center}
-.jk-count{font-size:20px;font-weight:700;color:var(--text)}
-.jk-count-lbl{font-size:9px;color:var(--dim);margin-top:1px}
-.jk-tickers{margin-top:6px;display:flex;flex-direction:column;gap:2px;
-             max-height:90px;overflow-y:auto;min-width:110px}
-.jk-tick{display:flex;align-items:center;gap:5px;padding:2px 5px;
-         background:var(--surface);border-radius:3px;font-size:9px}
-.jk-tick .sym{font-weight:700;min-width:32px;color:var(--text)}
-.jk-tick .sta{margin-left:auto;color:var(--dim)}
-
-/* ── Reports ── */
-.jk-reports{margin-top:8px;min-width:148px}
-.jk-rep{display:flex;align-items:center;justify-content:space-between;
-        gap:5px;padding:3px 6px;background:var(--surface);border-radius:4px;
-        margin-bottom:3px}
-.jk-rep .rn{font-size:9px;color:var(--muted);overflow:hidden;
-             text-overflow:ellipsis;white-space:nowrap;flex:1}
-.btn-open{font-size:9px;padding:1px 7px;border-radius:4px;
-          border:1px solid var(--blue);color:var(--blue);
-          background:transparent;cursor:pointer;text-decoration:none;
-          white-space:nowrap;flex-shrink:0}
-.btn-open:hover{background:var(--blue);color:#000}
-
-/* ── Terminal ── */
-.term-wrap{margin:0 20px 20px;background:#0d1117;
-           border:1px solid var(--border);border-radius:8px;overflow:hidden}
-.term-bar{background:var(--surface);border-bottom:1px solid var(--border);
-          padding:7px 14px;display:flex;align-items:center;gap:8px}
-.dot{width:10px;height:10px;border-radius:50%}
-.dot-r{background:#f85149}.dot-y{background:#d29922}.dot-g{background:#3fb950}
-.term-title{font-size:12px;color:var(--muted);flex:1}
-.job-tag{font-size:10px;padding:2px 10px;border-radius:10px;
-         background:var(--surface);color:var(--dim)}
-.job-tag.running{color:var(--blue);animation:blink .9s infinite}
-.job-tag.done{color:var(--green)}.job-tag.error{color:var(--red)}
-@keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
-.btn-clear{background:transparent;border:1px solid var(--border);color:var(--dim);
-           border-radius:5px;padding:3px 10px;font-size:11px;cursor:pointer}
-.btn-clear:hover{border-color:var(--muted);color:var(--text)}
-pre#terminal{font-family:'JetBrains Mono','Courier New',monospace;font-size:11px;
-             line-height:1.6;color:#8b949e;padding:14px 16px;
-             min-height:150px;max-height:300px;overflow-y:auto;
-             white-space:pre-wrap;word-break:break-all;background:transparent}
-</style>
-</head>
-<body>
-
-<!-- ── Header ── -->
-<div class="hdr">
-  <div class="hdr-logo">&#9889; Cycles Trading Pipeline</div>
-  <div class="hdr-time" id="hdr-time">Loading...</div>
-  <span class="hdr-pill" id="hdr-day">&#x2014;</span>
-  <button class="btn-h" id="btn-today" onclick="runTask('pipeline')"
-          style="background:#1f6feb">&#9654; Run Today</button>
-  <button class="btn-h" id="btn-all" onclick="startFullWorkflow()"
-          style="background:#b91c1c">&#128293; Run All</button>
-  <button class="btn-h" id="btn-stop" onclick="stopAll()"
-          style="background:#161b22;border:1px solid #6e0f0f;color:#f85149">&#9632; Stop</button>
-</div>
-
-<!-- ── Today bar ── -->
-<div class="today-bar">
-  <b>Today&rsquo;s plan:</b>
-  <span id="plan-pills">Loading...</span>
-</div>
-
-<!-- ══ JENKINS PIPELINE ══ -->
-<div class="jk-wrap">
-<div class="jk-pipe">
-
-  <!-- ① Scheduler -->
-  <div class="jk-stage s-done" id="node-scheduler">
-    <div class="jk-circle no-click">
-      &#9889;
-      <div class="jk-dot">&#10003;</div>
-    </div>
-    <div class="jk-label">Scheduler</div>
-    <div class="jk-sub" id="sch-day">auto</div>
-  </div>
-
-  <div class="jk-line" id="line-to-scan"></div>
-
-  <!-- ② Parallel Scanners -->
-  <div class="jk-para-wrap" id="para-wrap">
-
-    <!-- Weekly -->
-    <div class="jk-para-row ps-idle" id="node-weekly">
-      <div class="jk-stub" id="stub-l-weekly"></div>
-      <div class="jk-circle-sm" onclick="runTask('weekly')">&#128202;</div>
-      <div class="jk-para-info">
-        <div class="jk-para-name">Weekly Retest</div>
-        <div class="jk-para-badge" id="badge-weekly">idle &middot; Sunday</div>
-        <button class="jk-para-btn" id="btn-weekly" onclick="runTask('weekly')">&#9654; Run</button>
-      </div>
-      <div class="jk-stub jk-stub-r" id="stub-r-weekly"></div>
-    </div>
-
-    <!-- Momentum -->
-    <div class="jk-para-row ps-idle" id="node-momentum">
-      <div class="jk-stub" id="stub-l-momentum"></div>
-      <div class="jk-circle-sm" onclick="runTask('momentum')">&#128640;</div>
-      <div class="jk-para-info">
-        <div class="jk-para-name">Momentum</div>
-        <div class="jk-para-badge" id="badge-momentum">idle &middot; Sunday</div>
-        <button class="jk-para-btn" id="btn-momentum" onclick="runTask('momentum')">&#9654; Run</button>
-      </div>
-      <div class="jk-stub jk-stub-r" id="stub-r-momentum"></div>
-    </div>
-
-    <!-- Weekly Review -->
-    <div class="jk-para-row ps-idle" id="node-review">
-      <div class="jk-stub" id="stub-l-review"></div>
-      <div class="jk-circle-sm" onclick="runTask('review')">&#128203;</div>
-      <div class="jk-para-info">
-        <div class="jk-para-name">Weekly Review</div>
-        <div class="jk-para-badge" id="badge-review">idle &middot; Sunday</div>
-        <button class="jk-para-btn" id="btn-review" onclick="runTask('review')">&#9654; Run</button>
-      </div>
-      <div class="jk-stub jk-stub-r" id="stub-r-review"></div>
-    </div>
-
-    <!-- Monthly -->
-    <div class="jk-para-row ps-idle" id="node-monthly">
-      <div class="jk-stub" id="stub-l-monthly"></div>
-      <div class="jk-circle-sm" onclick="runTask('monthly')">&#128197;</div>
-      <div class="jk-para-info">
-        <div class="jk-para-name">Monthly S/R</div>
-        <div class="jk-para-badge" id="badge-monthly">idle &middot; 1st Sunday</div>
-        <button class="jk-para-btn" id="btn-monthly" onclick="runTask('monthly')">&#9654; Run</button>
-      </div>
-      <div class="jk-stub jk-stub-r" id="stub-r-monthly"></div>
-    </div>
-
-  </div><!-- /para-wrap -->
-
-  <div class="jk-line" id="line-to-store"></div>
-
-  <!-- ③ Data Store -->
-  <div class="jk-stage s-done" id="node-store">
-    <div class="jk-circle no-click" style="font-size:20px">
-      &#128190;
-      <div class="jk-dot">&#10003;</div>
-    </div>
-    <div class="jk-label">Data Store</div>
-    <div class="jk-store">
-      <div class="jk-count" id="store-count">—</div>
-      <div class="jk-count-lbl">watched</div>
-      <div class="jk-tickers" id="store-tickers"></div>
-    </div>
-  </div>
-
-  <div class="jk-line" id="line-to-checker"></div>
-
-  <!-- ④ Watch Checker -->
-  <div class="jk-stage s-idle" id="node-daily">
-    <div class="jk-circle" onclick="runTask('daily')">
-      &#128276;
-      <div class="jk-dot">&#8212;</div>
-    </div>
-    <div class="jk-label">Watch Checker</div>
-    <div class="jk-sub" id="badge-daily">Daily</div>
-    <button class="jk-btn" id="btn-daily" onclick="runTask('daily')">&#9654; Run</button>
-  </div>
-
-  <div class="jk-line" id="line-to-out"></div>
-
-  <!-- ⑤ Output -->
-  <div class="jk-stage" id="node-output">
-    <div class="jk-circle no-click" style="font-size:20px">
-      &#128231;
-      <div class="jk-dot" style="background:var(--dim)">&#8212;</div>
-    </div>
-    <div class="jk-label">Output</div>
-    <div class="jk-reports" id="output-reports">
-      <div style="color:var(--dim);font-size:10px;margin-top:6px">Loading&hellip;</div>
-    </div>
-  </div>
-
-</div><!-- /jk-pipe -->
-</div><!-- /jk-wrap -->
-
-<!-- ── Terminal ── -->
-<div class="term-wrap">
-  <div class="term-bar">
-    <div class="dot dot-r"></div><div class="dot dot-y"></div><div class="dot dot-g"></div>
-    <span class="term-title">Log Output</span>
-    <span class="job-tag" id="job-tag">IDLE</span>
-    <button class="btn-clear" onclick="clearLog()">Clear</button>
-  </div>
-  <pre id="terminal">$ Cycles Trading Dashboard ready.
-$ Click any stage to run it individually, or use Run All.</pre>
-</div>
-
-<script>
-// ── State ──────────────────────────────────────────────────────────────────
-const SCAN_KEYS = ['weekly','momentum','review','monthly'];
-const ALL_KEYS  = ['weekly','momentum','review','monthly','daily'];
-
-let currentJob = null, activeTask = null, pollTimer = null;
-let nodeStates = {};
-let todayTasks = [];
-
-ALL_KEYS.forEach(k => nodeStates[k] = 'idle');
-
-// ── Node state setters ─────────────────────────────────────────────────────
-function setScannerState(key, state, badge) {
-  const row   = document.getElementById('node-'+key);
-  const bdg   = document.getElementById('badge-'+key);
-  const btn   = document.getElementById('btn-'+key);
-  const stubL = document.getElementById('stub-l-'+key);
-  const stubR = document.getElementById('stub-r-'+key);
-  if (!row) return;
-
-  // Remove old ps- class, add new
-  row.className = row.className.replace(/\bps-\w+/g,'').trim() + ' ps-'+state;
-
-  if (bdg) {
-    const icons = {running:'<span class="spin">&#9696;</span> running&hellip;',
-                   done:'&#10003; done', error:'&#10007; error',
-                   queued:'&#8230; queued', idle:'idle'};
-    bdg.innerHTML = badge ? badge : (icons[state] || state);
-  }
-  if (btn) btn.disabled = (state === 'running');
-  if (stubL && state === 'done') stubL.classList.add('lit');
-  else if (stubL) stubL.classList.remove('lit');
-  if (stubR && state === 'done') stubR.classList.add('lit');
-  else if (stubR) stubR.classList.remove('lit');
-
-  nodeStates[key] = state;
-
-  // Light up vertical bars when all scanners done
-  const allDone = SCAN_KEYS.every(k => nodeStates[k] === 'done');
-  const pw = document.getElementById('para-wrap');
-  if (pw) pw.classList.toggle('all-done', allDone);
-}
-
-function setCheckerState(state, badge) {
-  const node = document.getElementById('node-daily');
-  const bdg  = document.getElementById('badge-daily');
-  const btn  = document.getElementById('btn-daily');
-  const dot  = node ? node.querySelector('.jk-dot') : null;
-  if (!node) return;
-
-  node.className = node.className.replace(/\bs-\w+/g,'').trim() + ' s-'+state
-                   + (todayTasks.includes('daily') ? ' today-ring' : '');
-
-  if (dot) {
-    const icons = {running:'<span class="spin">&#9696;</span>',done:'&#10003;',
-                   error:'&#10007;',queued:'&#8230;',idle:'&#8212;'};
-    dot.innerHTML = icons[state] || '&#8212;';
-  }
-  if (bdg) bdg.textContent = badge || (state==='idle'?'Daily':state);
-  if (btn) btn.disabled = (state === 'running');
-  nodeStates['daily'] = state;
-
-  // Light up line after checker when done
-  const lineOut = document.getElementById('line-to-out');
-  if (lineOut) lineOut.classList.toggle('lit', state === 'done');
-}
-
-function setNodeState(key, state, badge) {
-  if (key === 'daily') { setCheckerState(state, badge); return; }
-  if (SCAN_KEYS.includes(key)) { setScannerState(key, state, badge); return; }
-}
-
-function resetAll() {
-  ALL_KEYS.forEach(k => setNodeState(k, 'idle'));
-  document.querySelectorAll('.jk-btn,.jk-para-btn').forEach(b => b.disabled = false);
-  ['btn-today','btn-all'].forEach(id => { const b=document.getElementById(id); if(b) b.disabled=false; });
-  // Reset lit lines
-  ['line-to-store','line-to-checker','line-to-out'].forEach(id => {
-    const el = document.getElementById(id); if(el) el.classList.remove('lit');
-  });
-  document.querySelectorAll('.jk-stub').forEach(s => s.classList.remove('lit'));
-  const pw = document.getElementById('para-wrap');
-  if (pw) pw.classList.remove('all-done');
-}
-
-// ── Task runners ───────────────────────────────────────────────────────────
-function startFullWorkflow() {
-  if (currentJob && !confirm('A task is running. Start anyway?')) return;
-  if (currentJob) stopPoll();
-  ALL_KEYS.forEach(k => setNodeState(k, 'queued', 'waiting…'));
-  activeTask = 'all';
-  lockButtons();
-  setJobTag('Running Full Workflow…', 'running');
-  setLog(['▶ Starting Full Workflow — all 5 scans in sequence…']);
-  fetch('/api/run/all', {method:'POST'})
-    .then(r => r.json())
-    .then(d => {
-      if (d.error) { setLog(['Error: '+d.error]); setJobTag('ERROR','error'); resetAll(); return; }
-      currentJob = d.job_id; startPoll();
-    })
-    .catch(e => { setLog(['Error: '+e]); setJobTag('ERROR','error'); resetAll(); });
-}
-
-function runTask(task) {
-  if (currentJob && !confirm('A task is running. Start anyway?')) return;
-  if (currentJob) stopPoll();
-  activeTask = task;
-  lockButtons();
-  if (ALL_KEYS.includes(task)) setNodeState(task, 'running', 'starting…');
-  setJobTag('Starting…', 'running');
-  setLog(['▶ Starting: ' + task]);
-  fetch('/api/run/'+task, {method:'POST'})
-    .then(r => r.json())
-    .then(d => {
-      if (d.error) { setLog(['Error: '+d.error]); setJobTag('ERROR','error'); resetAll(); return; }
-      currentJob = d.job_id; startPoll();
-    })
-    .catch(e => { setLog(['Error: '+e]); setJobTag('ERROR','error'); resetAll(); });
-}
-
-// ── Pipeline log parser ────────────────────────────────────────────────────
-function parsePipelineLog(lines) {
-  const MAP = {
-    'Weekly Retest Scan' : 'weekly',
-    'Momentum Scan'      : 'momentum',
-    'Weekly Review'      : 'review',
-    'Monthly S/R Scan'   : 'monthly',
-    'Daily Watch Checker': 'daily',
-  };
-  let cur = null;
-  lines.forEach(l => {
-    const m = l.match(/>>>\s+(.+)/);
-    if (m) {
-      const k = MAP[m[1].trim()];
-      if (k) {
-        if (cur && cur !== k) setNodeState(cur, 'done');
-        cur = k;
-        setNodeState(k, 'running');
-      }
-    }
-    if ((l.includes('OK in') || l.includes('Exit code: 0')) && cur) {
-      setNodeState(cur, 'done'); cur = null;
-    }
-    if ((l.includes('FAILED') || l.includes('TIMEOUT') || l.includes('EXCEPTION')) && cur) {
-      setNodeState(cur, 'error'); cur = null;
-    }
-  });
-}
-
-// ── Polling ────────────────────────────────────────────────────────────────
-function startPoll() {
-  stopPoll();
-  pollTimer = setInterval(() => {
-    fetch('/api/job/'+currentJob)
-      .then(r => r.json())
-      .then(d => {
-        setLog(d.log);
-        const el = d.elapsed < 60 ? d.elapsed+'s'
-                                  : Math.floor(d.elapsed/60)+'m'+(d.elapsed%60)+'s';
-
-        if (activeTask === 'pipeline' || activeTask === 'all') parsePipelineLog(d.log);
-
-        if (d.status === 'running' || d.status === 'starting') {
-          setJobTag('Running ' + el, 'running');
-          if (activeTask !== 'pipeline' && activeTask !== 'all' && ALL_KEYS.includes(activeTask))
-            setNodeState(activeTask, 'running', el);
-        } else {
-          stopPoll(); currentJob = null;
-          const ok = d.status === 'done';
-
-          if (activeTask !== 'pipeline' && activeTask !== 'all') {
-            setNodeState(activeTask, ok ? 'done' : 'error');
-          } else {
-            // Mark any remaining queued/running nodes
-            ALL_KEYS.forEach(k => {
-              if (nodeStates[k] !== 'done') setNodeState(k, ok ? 'done' : 'error');
-            });
-          }
-
-          // Light up lines when everything is done
-          if (ok) {
-            ['line-to-store','line-to-checker','line-to-out'].forEach(id => {
-              const el = document.getElementById(id); if(el) el.classList.add('lit');
-            });
-          }
-
-          setJobTag(ok ? 'Done ' + el : 'Error', ok ? 'done' : 'error');
-          unlockButtons();
-          loadReports(); loadWatchlist();
-          activeTask = null;
-        }
-      }).catch(() => {});
-  }, 600);
-}
-
-function stopPoll() { if (pollTimer) { clearInterval(pollTimer); pollTimer = null; } }
-
-function stopAll() {
-
-  fetch('/api/stop/all', {method:'POST'})
-    .then(r => r.json())
-    .then(() => {
-      stopPoll();
-      setJobTag('Stopped', 'error');
-      resetAll(); currentJob = null; activeTask = null;
-    }).catch(() => {});
-}
-
-// -- UI helpers
-function lockButtons() {
-  ['btn-today','btn-all'].forEach(id => { const b=document.getElementById(id); if(b) b.disabled=true; });
-  document.querySelectorAll('.jk-btn,.jk-para-btn').forEach(b => b.disabled=true);
-}
-function unlockButtons() {
-  ['btn-today','btn-all'].forEach(id => { const b=document.getElementById(id); if(b) b.disabled=false; });
-  document.querySelectorAll('.jk-btn,.jk-para-btn').forEach(b => b.disabled=false);
-}
-
-function setLog(lines) {
-  const el = document.getElementById('terminal');
-  el.textContent = lines.join('\n');
-  el.scrollTop = el.scrollHeight;
-}
-function clearLog() {
-  document.getElementById('terminal').textContent = '$ Log cleared.';
-  setJobTag('IDLE', '');
-  resetAll();
-}
-function setJobTag(msg, cls) {
-  const el = document.getElementById('job-tag');
-  el.textContent = msg;
-  el.className = 'job-tag ' + (cls || '');
-}
-
-// -- Data loaders
-function loadToday() {
-  fetch('/api/today').then(r => r.json()).then(d => {
-    document.getElementById('hdr-time').textContent = d.date + '  ' + d.time;
-    document.getElementById('hdr-day').textContent  = d.day;
-    document.getElementById('sch-day').textContent  = d.day;
-    todayTasks = d.planned;
-    const C = {weekly:'#3fb950',momentum:'#d29922',review:'#a371f7',
-               monthly:'#79c0ff',daily:'#f85149',pipeline:'#58a6ff'};
-    const L = {weekly:'Weekly',momentum:'Momentum',review:'Review',monthly:'Monthly',daily:'Checker'};
-    document.getElementById('plan-pills').innerHTML = d.planned
-      .filter(k => k !== 'pipeline')
-      .map(k => '<span class="plan-pill" style="color:'+C[k]+';border-color:'+C[k]+'55">'
-               +(L[k]||k)+'</span>')
-      .join(' ');
-    d.planned.forEach(k => {
-      const n = document.getElementById('node-'+k);
-      if (n && !n.className.includes('today-ring')) n.className += ' today-ring';
-    });
-  }).catch(() => {});
-}
-
-function loadReports() {
-  fetch('/api/reports').then(r => r.json()).then(list => {
-    const el = document.getElementById('output-reports');
-    if (!list.length) {
-      el.innerHTML='<div style="color:var(--dim);font-size:10px;margin-top:6px">No reports yet.</div>';
-      return;
-    }
-    const C = {cycles:'#3fb950',momentum:'#d29922',weekly_review:'#a371f7',monthly:'#79c0ff',watch:'#f85149'};
-    el.innerHTML = list.slice(0,5).map(r => {
-      const key = Object.keys(C).find(k => r.name.startsWith(k)) || '';
-      const c   = C[key] || '#8b949e';
-      const lbl = r.name.replace(/_\d{8}_\d{4}\.html$/, '').replace(/_/g,' ');
-      return '<div class="jk-rep"><div class="rn" style="color:'+c+'">'+lbl+'</div>'
-           + '<a class="btn-open" href="/report/'+r.name+'" target="_blank">Open</a></div>';
-    }).join('');
-  }).catch(() => {});
-}
-
-function loadWatchlist() {
-  fetch('/api/watchlist').then(r => r.json()).then(data => {
-    const list = data.tickers || [];
-    document.getElementById('store-count').textContent = list.length;
-    const el = document.getElementById('store-tickers');
-    if (!list.length) {
-      el.innerHTML='<div style="color:var(--dim);font-size:9px">Empty</div>';
-      return;
-    }
-    const SC = {GREEN:'#3fb950',YELLOW:'#d29922',RED:'#f85149'};
-    el.innerHTML = list.slice(0,8).map(t => {
-      const dc = t.direction === 'LONG' ? '#3fb950' : '#f85149';
-      const sc = SC[t.status] || '#484f58';
-      return '<div class="jk-tick"><span class="sym">'+t.ticker+'</span>'
-           + '<span style="color:'+dc+';font-size:9px;font-weight:700">'+t.direction+'</span>'
-           + '<span class="sta" style="color:'+sc+'">'+( t.status||'?')+'</span></div>';
-    }).join('') + (list.length > 8
-      ? '<div style="color:var(--dim);font-size:9px;margin-top:2px">+' + (list.length-8) + ' more</div>'
-      : '');
-  }).catch(() => {});
-}
-
-function refreshTime() {
-  fetch('/api/today').then(r => r.json()).then(d => {
-    document.getElementById('hdr-time').textContent = d.date + '  ' + d.time;
-  }).catch(() => {});
-}
-
-// -- Init
-loadToday();
-loadReports();
-loadWatchlist();
-setInterval(refreshTime, 60000);
-setInterval(loadReports, 20000);
-setInterval(loadWatchlist, 20000);
-</script>
-</body>
-</html>
-"""
-
+DASHBOARD_HTML = '\\\n<!DOCTYPE html>\n<html lang="en">\n<head>\n<meta charset="UTF-8">\n<meta name="viewport" content="width=device-width,initial-scale=1">\n<title>Cycles Trading Pipeline</title>\n<style>\n:root{--bg:#0d1117;--sf:#161b22;--br:#30363d;--tx:#e6edf3;--mu:#adbac7;--dm:#768390;\n      --bl:#58a6ff;--gn:#3fb950;--am:#d29922;--rd:#f85149;--vl:#a371f7;--sk:#79c0ff}\n*{box-sizing:border-box;margin:0;padding:0}\nbody{font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',sans-serif;background:var(--bg);color:var(--tx);min-height:100vh}\n/* Header */\n.hdr{background:var(--bg);border-bottom:1px solid var(--br);padding:10px 20px;\n     display:flex;align-items:center;gap:10px;flex-wrap:wrap}\n.logo{color:var(--bl);font-size:15px;font-weight:700}\n.hdr-t{color:var(--mu);font-size:12px;flex:1}\n.pill{background:var(--sf);border:1px solid var(--br);border-radius:20px;\n      padding:3px 12px;font-size:11px;color:var(--mu)}\n.btn{border:none;border-radius:6px;padding:6px 14px;font-size:12px;font-weight:700;\n     cursor:pointer;color:#fff;transition:opacity .15s;white-space:nowrap}\n.btn:hover{opacity:.82}.btn:disabled{opacity:.3;cursor:not-allowed}\n/* Today bar */\n.tbar{background:var(--sf);border-bottom:1px solid var(--br);padding:5px 20px;\n      display:flex;align-items:center;gap:8px;font-size:11px;color:var(--mu);flex-wrap:wrap}\n.tpill{border-radius:20px;padding:2px 10px;font-size:10px;font-weight:700;border:1px solid;background:transparent}\n/* Pipeline */\n.pw{padding:24px 20px 12px;overflow-x:auto}\n.pipe{display:flex;align-items:flex-start;min-width:1100px;position:relative}\n/* Stage */\n.st{display:flex;flex-direction:column;align-items:center;flex-shrink:0;min-width:90px}\n/* Line connector */\n.ln{height:3px;background:var(--br);flex:1;min-width:18px;margin-top:26px;transition:background .4s}\n.ln.lit{background:var(--gn)}\n/* Circle */\n.ci{width:52px;height:52px;border-radius:50%;border:3px solid var(--dm);background:var(--sf);\n    display:flex;align-items:center;justify-content:center;font-size:20px;\n    cursor:pointer;transition:border-color .3s,box-shadow .3s,background .3s;\n    position:relative;z-index:2;user-select:none;flex-shrink:0}\n.ci:hover{border-color:var(--bl);box-shadow:0 0 10px #58a6ff44}\n.ci.nc{cursor:default}.ci.nc:hover{border-color:var(--dm);box-shadow:none}\n/* Dot */\n.dot{position:absolute;bottom:-3px;right:-3px;width:17px;height:17px;border-radius:50%;\n     font-size:10px;display:flex;align-items:center;justify-content:center;\n     background:var(--dm);border:2px solid var(--bg);color:#fff;pointer-events:none;font-weight:700}\n/* Stage label / sub */\n.sl{font-size:11px;font-weight:700;color:var(--tx);margin-top:8px;text-align:center;max-width:88px;line-height:1.3}\n.ss{font-size:9px;color:var(--mu);text-align:center;margin-top:3px;max-width:90px;line-height:1.4}\n.sch-lbl{font-size:8px;color:var(--am);text-align:center;margin-top:2px;max-width:90px;font-weight:700}\n/* Run btn */\n.rb{margin-top:6px;font-size:9px;padding:2px 10px;border-radius:10px;background:transparent;\n    border:1px solid var(--br);color:var(--mu);cursor:pointer;transition:all .15s;white-space:nowrap}\n.rb:hover{border-color:var(--bl);color:var(--bl)}\n.rb:disabled{opacity:.3;cursor:not-allowed;pointer-events:none}\n/* Report cards */\n.rc{background:var(--sf);border:1px solid var(--br);border-radius:8px;padding:12px 16px;\n    display:flex;flex-direction:column;gap:8px;min-width:180px;flex:1;max-width:220px}\n.rc-hd{display:flex;align-items:center;gap:8px}\n.rc-ico{font-size:18px}\n.rc-nm{font-size:12px;font-weight:700;color:var(--tx)}\n.rc-dt{font-size:10px;color:var(--mu);margin-top:-4px}\n.rc-open{display:block;text-align:center;margin-top:4px;padding:5px 0;border-radius:6px;\n         border:1px solid var(--bl);color:var(--bl);background:transparent;\n         text-decoration:none;font-size:11px;font-weight:700;cursor:pointer}\n.rc-open:hover{background:var(--bl);color:#000}\n/* States */\n.s-idle .ci{border-color:var(--dm)}\n.s-queued .ci{border-color:var(--am);opacity:.7}\n.s-running .ci{border-color:var(--bl)!important;animation:glow 1.1s ease-in-out infinite}\n.s-done .ci{border-color:var(--gn)!important;background:#0d2318}\n.s-error .ci{border-color:var(--rd)!important;background:#2a0d0d}\n.s-running .sl{color:var(--bl)}.s-done .sl{color:var(--gn)}\n.s-error .sl{color:var(--rd)}.s-queued .sl{color:var(--am)}\n.s-running .dot{background:var(--bl)}.s-done .dot{background:var(--gn)}\n.s-error .dot{background:var(--rd)}.s-queued .dot{background:var(--am)}\n.today .ci{box-shadow:0 0 0 3px #58a6ff22}\n.opt .ci{opacity:.5}.opt .sl{opacity:.5}.opt .ss{opacity:.5}.opt .sch-lbl{opacity:.5}\n@keyframes glow{0%,100%{box-shadow:0 0 4px 1px #58a6ff33}50%{box-shadow:0 0 14px 4px #58a6ff66}}\n@keyframes spin{0%{transform:rotate(0)}100%{transform:rotate(360deg)}}\n.spin{display:inline-block;animation:spin .7s linear infinite}\n/* Schedule bar */\n.sbar{padding:7px 20px;background:var(--sf);border-bottom:1px solid var(--br);\n      display:flex;gap:0;flex-wrap:wrap;align-items:center;font-size:10px}\n.sbar-title{color:var(--tx);font-weight:700;margin-right:16px;white-space:nowrap}\n.sbar-item{display:flex;align-items:center;gap:6px;padding:2px 16px;border-left:1px solid var(--br)}\n.sbar-time{color:var(--am);font-weight:700;white-space:nowrap}\n.sbar-tasks{color:var(--mu)}\n/* Hot stocks */\n.hot-sec{padding:12px 20px 4px}\n.hot-hdr{display:flex;align-items:center;gap:10px;margin-bottom:10px}\n.hot-title{font-size:13px;font-weight:700;color:var(--tx)}\n.hot-upd{font-size:10px;color:var(--dm)}\n.hot-cnt{font-size:10px;color:var(--dm);margin-left:auto}\n.hot-grid{display:flex;flex-wrap:wrap;gap:8px;min-height:44px}\n.hcard{border-radius:8px;padding:9px 13px;min-width:120px;border:1px solid;\n       transition:transform .15s,box-shadow .15s}\n.hcard:hover{transform:translateY(-2px);box-shadow:0 4px 12px #0004}\n.hcard.green{background:#071d0f;border-color:#2ea043}\n.hcard.yellow{background:#1a1600;border-color:#9e6a03}\n.hcard.dim{background:var(--sf);border-color:var(--br);opacity:.7}\n.hcard-top{display:flex;align-items:baseline;gap:5px}\n.hcard-tk{font-size:14px;font-weight:800;color:var(--tx)}\n.hcard-dir{font-size:9px;font-weight:700}\n.long{color:#3fb950}.short{color:#f85149}\n.hcard-st{font-size:9px;font-weight:700;margin-top:3px}\n.hcard-st.green{color:#3fb950}.hcard-st.yellow{color:#d29922}.hcard-st.dim{color:var(--dm)}\n.hcard-meta{font-size:9px;color:var(--dm);margin-top:2px;line-height:1.4}\n/* Live Watch / Cycles Status panels */\n.lw-sec{padding:8px 20px 4px;display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start}\n.lw-panel{flex:1;min-width:280px;max-width:560px}\n.lw-phdr{display:flex;align-items:center;gap:8px;margin-bottom:8px}\n.lw-ptitle{font-size:12px;font-weight:700;color:var(--tx)}\n.lw-pupd{font-size:10px;color:var(--dm)}\n.lw-pcnt{font-size:10px;color:var(--dm);margin-left:auto}\n.lw-grid{display:flex;flex-wrap:wrap;gap:6px;min-height:36px}\n.lwc{border-radius:7px;padding:7px 11px;min-width:110px;border:1px solid;transition:transform .15s}\n.lwc:hover{transform:translateY(-2px)}\n.lwc.wait{background:#1a1600;border-color:#9e6a03}\n.lwc.inzone{background:#071d0f;border-color:#2ea043}\n.lwc.notyet{background:#1a0d0d;border-color:#6e2020}\n.lwc-top{display:flex;align-items:center;gap:4px;flex-wrap:wrap}\n.lwc-tk{font-size:13px;font-weight:800;color:var(--tx)}\n.lwc-tf{font-size:8px;font-weight:700;padding:1px 5px;border-radius:4px;background:#ffffff1a;color:var(--mu)}\n.lwc-st{font-size:9px;font-weight:700;margin-top:2px}\n.lwc-st.inzone{color:#3fb950}.lwc-st.wait{color:#d29922}.lwc-st.notyet{color:#f85149}\n.lwc-price{font-size:10px;color:var(--tx);margin-top:3px;font-weight:600}\n.lwc-dist{font-size:9px;color:var(--dm);margin-top:1px}\n.cyc{border-radius:7px;padding:7px 11px;min-width:110px;border:1px solid;transition:transform .15s}\n.cyc:hover{transform:translateY(-2px)}\n.cyc.go{background:#071d0f;border-color:#2ea043}\n.cyc.wait{background:#1a1600;border-color:#9e6a03}\n.cyc-top{display:flex;align-items:center;gap:4px;flex-wrap:wrap}\n.cyc-tk{font-size:13px;font-weight:800;color:var(--tx)}\n.cyc-tf{font-size:8px;font-weight:700;padding:1px 5px;border-radius:4px;background:#ffffff1a;color:var(--mu)}\n.cyc-st{font-size:9px;font-weight:700;margin-top:2px}\n.cyc-st.go{color:#3fb950}.cyc-st.wait{color:#d29922}\n/* Terminal */\n.term{margin:0 20px 20px;background:#0d1117;border:1px solid var(--br);border-radius:8px;overflow:hidden}\n.tbar2{background:var(--sf);border-bottom:1px solid var(--br);padding:7px 14px;\n       display:flex;align-items:center;gap:8px}\n.d{width:10px;height:10px;border-radius:50%}\n.dr{background:#f85149}.dy{background:#d29922}.dg{background:#3fb950}\n.ttl{font-size:12px;color:var(--mu);flex:1}\n.jtag{font-size:10px;padding:2px 10px;border-radius:10px;background:var(--sf);color:var(--mu)}\n.jtag.running{color:var(--bl);animation:blink .9s infinite}\n.jtag.done{color:var(--gn)}.jtag.error{color:var(--rd)}\n@keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}\n.clr{background:transparent;border:1px solid var(--br);color:var(--mu);border-radius:5px;padding:3px 10px;font-size:11px;cursor:pointer}\n.clr:hover{border-color:var(--mu);color:var(--tx)}\npre#log{font-family:\'JetBrains Mono\',\'Courier New\',monospace;font-size:11px;line-height:1.6;\n        color:#c9d1d9;padding:14px 16px;min-height:120px;max-height:260px;overflow-y:auto;\n        white-space:pre-wrap;word-break:break-all}\n/* Run History */\n.hist-sec{margin:0 20px 16px;border:1px solid var(--br);border-radius:8px;overflow:hidden}\n.hist-hdr2{background:var(--sf);border-bottom:1px solid var(--br);padding:7px 14px;\n           display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none}\n.hist-hdr2:hover{background:#1c2128}\n.hist-ttl{font-size:12px;color:var(--mu);flex:1}\n.hist-chev{font-size:10px;color:var(--dm);transition:transform .2s}\n.hist-chev.open{transform:rotate(90deg)}\n.hist-body2{overflow:hidden}\n.hist-col-hdr{display:grid;grid-template-columns:130px 1fr 90px 75px 65px;\n              padding:5px 14px;font-size:9px;color:var(--dm);border-bottom:1px solid #21262d;gap:8px}\n.hist-row2{display:grid;grid-template-columns:130px 1fr 90px 75px 65px;\n           padding:6px 14px;font-size:10px;border-bottom:1px solid #21262d;gap:8px;align-items:center}\n.hist-row2:last-child{border-bottom:none}\n.hist-row2:hover{background:#21262d}\n.hbadge{border-radius:10px;padding:1px 8px;font-size:9px;font-weight:700}\n.hbadge.manual{background:#1b3557;color:#58a6ff}\n.hbadge.scheduler{background:#0f2d1f;color:#3fb950}\n.hok{color:#3fb950}.herr{color:#f85149}.hstop{color:#d29922}\n</style>\n</head>\n<body>\n\n<div class="hdr">\n  <div class="logo">&#9889; Cycles Trading Pipeline</div>\n  <div class="hdr-t" id="hdr-t">Loading...</div>\n  <span class="pill" id="hdr-day">&#x2014;</span>\n  <button class="btn" id="btn-today" onclick="runTask(\'pipeline\')" style="background:#1f6feb">&#9654; Run Today</button>\n  <button class="btn" id="btn-all"   onclick="runTask(\'all\')"      style="background:#b91c1c">&#128293; Run All</button>\n  <button class="btn" id="btn-stop"  onclick="stopAll()"            style="background:#161b22;border:1px solid #6e0f0f;color:#f85149">&#9632; Stop</button>\n</div>\n\n<div class="tbar">\n  <b>Today&#8217;s plan:</b><span id="plan-pills">Loading...</span>\n</div>\n\n<div class="pw">\n<div class="pipe">\n\n  <!-- 1. Scheduler -->\n  <div class="st s-done" id="node-scheduler">\n    <div class="ci nc">&#9889;<div class="dot">&#10003;</div></div>\n    <div class="sl">Scheduler</div>\n    <div class="ss" id="sch-next">&#8212;</div>\n    <div class="ss" id="sch-tasks" style="color:var(--mu);line-height:1.6"></div>\n  </div>\n  <div class="ln lit" id="ln-1"></div>\n\n  <!-- 2. Cycles Report -->\n  <div class="st s-idle" id="node-weekly">\n    <div class="ci" onclick="runTask(\'weekly\')">&#128202;<div class="dot">&#8212;</div></div>\n    <div class="sl">Cycles Report</div>\n    <div class="ss">cycles_trading_scanner.py<br>&#8594; cycles_report.html</div>\n    <div class="sch-lbl">&#9201; Hourly Mon-Fri 09:30-17:30</div>\n    <button class="rb" id="btn-weekly" onclick="runTask(\'weekly\')">&#9654; Run</button>\n  </div>\n  <div class="ln" id="ln-2"></div>\n\n  <!-- 3. Momentum Scan -->\n  <div class="st s-idle" id="node-momentum">\n    <div class="ci" onclick="runTask(\'momentum\')">&#128640;<div class="dot">&#8212;</div></div>\n    <div class="sl">Momentum Scan</div>\n    <div class="ss">cycles_trading_scanner.py momentum<br>&#8594; momentum_report.html</div>\n    <div class="sch-lbl">&#9201; Hourly Mon-Fri 09:30-17:30</div>\n    <button class="rb" id="btn-momentum" onclick="runTask(\'momentum\')">&#9654; Run</button>\n  </div>\n  <div class="ln" id="ln-3"></div>\n\n  <!-- 4. Weekly Review -->\n  <div class="st s-idle" id="node-review">\n    <div class="ci" onclick="runTask(\'review\')">&#128203;<div class="dot">&#8212;</div></div>\n    <div class="sl">Weekly Review</div>\n    <div class="ss">ct_weekly_review.py<br>&#8594; weekly_review.html</div>\n    <div class="sch-lbl">&#128197; Every Sunday 08:00</div>\n    <button class="rb" id="btn-review" onclick="runTask(\'review\')">&#9654; Run</button>\n  </div>\n  <div class="ln" id="ln-4"></div>\n\n  <!-- 5. Monthly S/R (optional) -->\n  <div class="st s-idle opt" id="node-monthly">\n    <div class="ci" onclick="runTask(\'monthly\')">&#128197;<div class="dot">&#8212;</div></div>\n    <div class="sl">Monthly S/R</div>\n    <div class="ss" id="monthly-ss">cycles_trading_scanner.py monthly</div>\n    <div class="sch-lbl">&#128197; 1st Sunday 08:00</div>\n    <button class="rb" id="btn-monthly" onclick="runTask(\'monthly\')">&#9654; Run</button>\n  </div>\n  <div class="ln" id="ln-5"></div>\n\n  <!-- 6. Watch Store (read-only) -->\n  <div class="st s-done" id="node-store">\n    <div class="ci nc">&#128190;<div class="dot">&#10003;</div></div>\n    <div class="sl">Watch Store</div>\n    <div class="ss">watch_alerts.json<br>active watchlist</div>\n    <div class="ss" id="store-cnt" style="margin-top:6px;font-size:11px;color:var(--tx);font-weight:700">&#8212; tickers</div>\n  </div>\n  <div class="ln lit" id="ln-6"></div>\n\n  <!-- 7. Watch Checker -->\n  <div class="st s-idle" id="node-daily">\n    <div class="ci" onclick="runTask(\'daily\')">&#128276;<div class="dot">&#8212;</div></div>\n    <div class="sl">Watch Checker</div>\n    <div class="ss">ct_watch_checker.py</div>\n    <div class="sch-lbl">&#9201; Hourly (after each scan)</div>\n    <button class="rb" id="btn-daily" onclick="runTask(\'daily\')">&#9654; Run</button>\n  </div>\n  <div class="ln" id="ln-7"></div>\n\n  <!-- 8. Email Output -->\n  <div class="st" id="node-output">\n    <div class="ci nc">&#128231;<div class="dot" style="background:var(--dm)">&#8212;</div></div>\n    <div class="sl">Email Output</div>\n    <div class="ss">Alert on GREEN hit<br>&#8594; omarearly@gmail.com</div>\n  </div>\n\n</div>\n</div>\n\n<!-- Schedule overview bar -->\n<div class="sbar">\n  <span class="sbar-title">&#128197; SCHEDULE</span>\n  <span class="sbar-item">\n    <span class="sbar-time">Every hour</span>\n    <span class="sbar-tasks">Mon-Fri 09:30-17:30 &#8594; &#128202; Cycles &#183; &#128640; Momentum &#183; &#128276; Checker</span>\n  </span>\n  <span class="sbar-item">\n    <span class="sbar-time">Every Sunday</span>\n    <span class="sbar-tasks">08:00 &#8594; &#128203; Weekly Review</span>\n  </span>\n  <span class="sbar-item">\n    <span class="sbar-time">1st Sunday</span>\n    <span class="sbar-tasks">08:00 &#8594; + &#128197; Monthly S/R</span>\n  </span>\n</div>\n\n<!-- Live Watch + Cycles Status -->\n<div class="lw-sec">\n  <div class="lw-panel">\n    <div class="lw-phdr">\n      <span class="lw-ptitle">&#128308; Live Watch</span>\n      <span class="lw-pupd" id="lw-upd"></span>\n      <span class="lw-pcnt" id="lw-cnt"></span>\n    </div>\n    <div class="lw-grid" id="lw-grid">\n      <div style="color:var(--dm);font-size:10px;padding:4px">Loading...</div>\n    </div>\n  </div>\n  <div class="lw-panel">\n    <div class="lw-phdr">\n      <span class="lw-ptitle">&#128202; Cycles Status</span>\n      <span class="lw-pupd" id="cy-upd"></span>\n      <span class="lw-pcnt" id="cy-cnt"></span>\n    </div>\n    <div class="lw-grid" id="cy-grid">\n      <div style="color:var(--dm);font-size:10px;padding:4px">Loading...</div>\n    </div>\n  </div>\n</div>\n\n<!-- Reports row -->\n<div id="rep-sec" style="padding:4px 20px 16px;display:flex;gap:12px;flex-wrap:wrap"></div>\n\n<!-- Run History -->\n<div class="hist-sec">\n  <div class="hist-hdr2" onclick="toggleHist()">\n    <span style="font-size:13px">&#128196;</span>\n    <span class="hist-ttl">Run History</span>\n    <span class="hist-chev open" id="hist-chev">&#9655;</span>\n  </div>\n  <div class="hist-body2" id="hist-body2">\n    <div class="hist-col-hdr">\n      <span>Started</span><span>Task</span><span>Triggered by</span><span>Status</span><span>Duration</span>\n    </div>\n    <div id="hist-rows">\n      <div style="color:var(--dm);font-size:10px;padding:10px 14px">No runs recorded yet. Run any task to see history here.</div>\n    </div>\n  </div>\n</div>\n\n<div class="term">\n  <div class="tbar2">\n    <div class="d dr"></div><div class="d dy"></div><div class="d dg"></div>\n    <span class="ttl">Log Output</span>\n    <span class="jtag" id="jtag">IDLE</span>\n    <button class="clr" onclick="clearLog()">Clear</button>\n  </div>\n  <pre id="log">$ Cycles Trading Pipeline Dashboard ready.\n$ Click any stage to run it, or use Run Today / Run All.</pre>\n</div>\n\n<script>\nconst SCAN_KEYS = [\'weekly\',\'momentum\',\'review\',\'monthly\'];\nconst ALL_KEYS  = [\'weekly\',\'momentum\',\'review\',\'monthly\',\'daily\'];\nconst LINE_AFTER = {weekly:\'ln-2\',momentum:\'ln-3\',review:\'ln-4\',monthly:\'ln-5\',daily:\'ln-7\'};\nconst DOT_ICONS  = {running:\'<span class="spin">&#8635;</span>\',done:\'&#10003;\',error:\'&#10007;\',queued:\'&#8230;\',idle:\'&#8212;\'};\nconst TASK_ICONS = {weekly:\'&#128202;\',momentum:\'&#128640;\',review:\'&#128203;\',monthly:\'&#128197;\',daily:\'&#128276;\',pipeline:\'&#9889;\',all:\'&#128293;\'};\n\nlet currentJob=null, activeTask=null, pollTimer=null, todayTasks=[], nodeStates={};\nlet histOpen=true;\nALL_KEYS.forEach(k=>nodeStates[k]=\'idle\');\n\nfunction setNodeState(key,state,badge){\n  const node=document.getElementById(\'node-\'+key);\n  if(!node)return;\n  node.className=node.className.replace(/\\bs-\\w+/g,\'\').replace(/\\btoday\\b/g,\'\').trim()\n    +\' s-\'+state+(todayTasks.includes(key)?\' today\':\'\');\n  const dot=node.querySelector(\'.dot\');\n  if(dot)dot.innerHTML=DOT_ICONS[state]||\'&#8212;\';\n  const btn=document.getElementById(\'btn-\'+key);\n  if(btn)btn.disabled=(state===\'running\');\n  if(state===\'done\'){\n    const lnId=LINE_AFTER[key];\n    if(lnId){const l=document.getElementById(lnId);if(l)l.classList.add(\'lit\');}\n  }\n  nodeStates[key]=state;\n}\n\nfunction resetAll(){\n  ALL_KEYS.forEach(k=>setNodeState(k,\'idle\'));\n  document.querySelectorAll(\'.rb\').forEach(b=>b.disabled=false);\n  [\'btn-today\',\'btn-all\'].forEach(id=>{const b=document.getElementById(id);if(b)b.disabled=false;});\n  [\'ln-2\',\'ln-3\',\'ln-4\',\'ln-5\',\'ln-7\'].forEach(id=>{const l=document.getElementById(id);if(l)l.classList.remove(\'lit\');});\n}\n\nfunction runTask(task){\n  if(currentJob&&!confirm(\'A task is running. Start anyway?\'))return;\n  if(currentJob)stopPoll();\n  activeTask=task;\n  lockBtns();\n  if(ALL_KEYS.includes(task))setNodeState(task,\'running\');\n  else if(task===\'all\'||task===\'pipeline\')ALL_KEYS.forEach(k=>setNodeState(k,\'queued\'));\n  setJTag(\'Starting…\',\'running\');\n  setLog([\'&#9654; Starting: \'+task]);\n  fetch(\'/api/run/\'+task,{method:\'POST\'}).then(r=>r.json()).then(d=>{\n    if(d.error){setLog([\'Error: \'+d.error]);setJTag(\'ERROR\',\'error\');resetAll();return;}\n    currentJob=d.job_id;startPoll();\n  }).catch(e=>{setLog([\'Error: \'+e]);setJTag(\'ERROR\',\'error\');resetAll();});\n}\n\nfunction parsePipelineLog(lines){\n  const MAP={\'Weekly Retest Scan\':\'weekly\',\'Momentum Scan\':\'momentum\',\n             \'Weekly Review\':\'review\',\'Monthly S/R Scan\':\'monthly\',\'Daily Watch Checker\':\'daily\'};\n  let cur=null;\n  lines.forEach(l=>{\n    const m=l.match(/>>>\\s+(.+)/);\n    if(m){const k=MAP[m[1].trim()];if(k){if(cur&&cur!==k)setNodeState(cur,\'done\');cur=k;setNodeState(k,\'running\');}}\n    if((l.includes(\'OK in\')||l.includes(\'Exit code: 0\'))&&cur){setNodeState(cur,\'done\');cur=null;}\n    if((l.includes(\'FAILED\')||l.includes(\'TIMEOUT\')||l.includes(\'EXCEPTION\'))&&cur){setNodeState(cur,\'error\');cur=null;}\n  });\n}\n\nfunction startPoll(){\n  stopPoll();\n  pollTimer=setInterval(()=>{\n    fetch(\'/api/job/\'+currentJob).then(r=>r.json()).then(d=>{\n      setLog(d.log);\n      const e=d.elapsed<60?d.elapsed+\'s\':Math.floor(d.elapsed/60)+\'m\'+(d.elapsed%60)+\'s\';\n      if(activeTask===\'pipeline\'||activeTask===\'all\')parsePipelineLog(d.log);\n      if(d.status===\'running\'||d.status===\'starting\'){\n        setJTag(\'Running \'+e,\'running\');\n        if(activeTask!==\'pipeline\'&&activeTask!==\'all\'&&ALL_KEYS.includes(activeTask))\n          setNodeState(activeTask,\'running\');\n      }else{\n        stopPoll();currentJob=null;\n        const ok=d.status===\'done\';\n        if(activeTask!==\'pipeline\'&&activeTask!==\'all\'){setNodeState(activeTask,ok?\'done\':\'error\');}\n        else{ALL_KEYS.forEach(k=>{if(nodeStates[k]!==\'done\')setNodeState(k,ok?\'done\':\'error\');});}\n        setJTag(ok?\'Done \'+e:\'Error\',ok?\'done\':\'error\');\n        unlockBtns();loadReports();loadWatchlist();loadHistory();loadLiveCheck();loadCyclesStatus();activeTask=null;\n      }\n    }).catch(()=>{});\n  },600);\n}\n\nfunction stopPoll(){if(pollTimer){clearInterval(pollTimer);pollTimer=null;}}\n\nfunction stopAll(){\n  fetch(\'/api/stop/all\',{method:\'POST\'}).then(r=>r.json()).then(()=>{\n    stopPoll();setJTag(\'Stopped\',\'error\');resetAll();currentJob=null;activeTask=null;\n  }).catch(()=>{});\n}\n\nfunction lockBtns(){\n  [\'btn-today\',\'btn-all\'].forEach(id=>{const b=document.getElementById(id);if(b)b.disabled=true;});\n  document.querySelectorAll(\'.rb\').forEach(b=>b.disabled=true);\n}\nfunction unlockBtns(){\n  [\'btn-today\',\'btn-all\'].forEach(id=>{const b=document.getElementById(id);if(b)b.disabled=false;});\n  document.querySelectorAll(\'.rb\').forEach(b=>b.disabled=false);\n}\nfunction setLog(lines){const el=document.getElementById(\'log\');\n  el.innerHTML=(Array.isArray(lines)?lines:[\'\'+lines]).join(\'\\n\');el.scrollTop=el.scrollHeight;}\nfunction clearLog(){document.getElementById(\'log\').textContent=\'$ Log cleared.\';setJTag(\'IDLE\',\'\');resetAll();}\nfunction setJTag(msg,cls){const el=document.getElementById(\'jtag\');el.textContent=msg;el.className=\'jtag \'+(cls||\'\');}\n\n/* ── Today / clock ─────────────────────────────────────────────────────── */\nfunction loadToday(){\n  fetch(\'/api/today\').then(r=>r.json()).then(d=>{\n    document.getElementById(\'hdr-t\').textContent=d.date+\'  \'+d.time;\n    document.getElementById(\'hdr-day\').textContent=d.day;\n    todayTasks=d.planned;\n    const C={weekly:\'#3fb950\',momentum:\'#d29922\',review:\'#a371f7\',monthly:\'#79c0ff\',daily:\'#f85149\'};\n    const L={weekly:\'Cycles\',momentum:\'Momentum\',review:\'Review\',monthly:\'Monthly\',daily:\'Checker\'};\n    document.getElementById(\'plan-pills\').innerHTML=\' \'+d.planned.filter(k=>k!==\'pipeline\')\n      .map(k=>\'<span class="tpill" style="color:\'+C[k]+\';border-color:\'+C[k]+\'55">\'+L[k]+\'</span>\').join(\' \');\n    d.planned.forEach(k=>{\n      const n=document.getElementById(\'node-\'+k);\n      if(n&&!n.className.includes(\'today\'))n.className+=\' today\';\n    });\n    const isFirstSun=(d.day===\'Sun\'&&parseInt(d.date)<=7);\n    const mn=document.getElementById(\'node-monthly\');\n    if(mn){if(isFirstSun)mn.classList.remove(\'opt\');else mn.classList.add(\'opt\');}\n  }).catch(()=>{});\n}\n\n/* ── Scheduler node ────────────────────────────────────────────────────── */\nfunction loadSchedule(){\n  fetch(\'/api/schedule\').then(r=>r.json()).then(d=>{\n    const nx=document.getElementById(\'sch-next\');\n    if(nx)nx.textContent=\'Next: \'+d.next_label+\' (in \'+d.mins_until+\'m)\';\n    const tk=document.getElementById(\'sch-tasks\');\n    if(tk)tk.textContent=d.next_task_labels.join(\' · \');\n  }).catch(()=>{});\n}\n\n/* ── Reports ───────────────────────────────────────────────────────────── */\nfunction loadReports(){\n  fetch(\'/api/reports\').then(r=>r.json()).then(list=>{\n    const sec=document.getElementById(\'rep-sec\');\n    if(!list.length){sec.innerHTML=\'<div style="color:var(--dm);font-size:11px;padding:8px">No reports yet.</div>\';return;}\n    const CFG={\n      cycles_report:   {ico:\'&#128202;\',nm:\'Cycles Report\',  c:\'#3fb950\'},\n      momentum_report: {ico:\'&#128640;\',nm:\'Momentum Scan\',  c:\'#d29922\'},\n      weekly_review:   {ico:\'&#128203;\',nm:\'Weekly Review\',  c:\'#a371f7\'},\n      monthly_scan:    {ico:\'&#128197;\',nm:\'Monthly S/R\',    c:\'#79c0ff\'},\n      watch_report:    {ico:\'&#128276;\',nm:\'Watch Checker\',  c:\'#f85149\'}\n    };\n    sec.innerHTML=list.slice(0,5).map(r=>{\n      const key=Object.keys(CFG).find(k=>r.name.startsWith(k))||\'\';\n      const cfg=CFG[key]||{ico:\'&#128196;\',nm:r.name,c:\'#8b949e\'};\n      const d=new Date(r.mtime*1000);\n      const dt=d.toLocaleDateString()+\' \'+d.toLocaleTimeString([],{hour:\'2-digit\',minute:\'2-digit\'});\n      return \'<div class="rc"><div class="rc-hd"><span class="rc-ico">\'+cfg.ico+\'</span>\'\n            +\'<div><div class="rc-nm" style="color:\'+cfg.c+\'">\'+cfg.nm+\'</div>\'\n            +\'<div class="rc-dt">\'+dt+\'</div></div></div>\'\n            +\'<a class="rc-open" href="/report/\'+r.name+\'" target="_blank">Open Report</a></div>\';\n    }).join(\'\');\n  }).catch(()=>{});\n}\n\n/* ── Watchlist count ───────────────────────────────────────────────────── */\nfunction loadWatchlist(){\n  fetch(\'/api/watchlist\').then(r=>r.json()).then(data=>{\n    const list=data.tickers||[];\n    const el=document.getElementById(\'store-cnt\');\n    if(el)el.textContent=(list.length||\'0\')+\' tickers\';\n  }).catch(()=>{});\n}\n\n/* ── Live Watch (IN_ZONE green + WAIT yellow + live price) ─────────────── */\nfunction loadLiveCheck(){\n  fetch(\'/api/livecheck\').then(r=>r.json()).then(data=>{\n    const grid=document.getElementById(\'lw-grid\');\n    const upd=document.getElementById(\'lw-upd\');\n    const cnt=document.getElementById(\'lw-cnt\');\n    if(!grid)return;\n    const spin=data.running?\'<span class=\"spin\">&#8635;</span> \':\'\';\n    if(upd)upd.innerHTML=spin+(data.updated?\'updated: \'+data.updated:\'waiting...\');\n    const items=data.data||[];\n    const actionable=items.filter(t=>t.zone===\'IN_ZONE\'||t.zone===\'WAIT\')\n      .sort((a,b)=>(a.zone===\'IN_ZONE\'?0:1)-(b.zone===\'IN_ZONE\'?0:1));\n    const inZ=items.filter(t=>t.zone===\'IN_ZONE\').length;\n    const wZ=items.filter(t=>t.zone===\'WAIT\').length;\n    if(cnt)cnt.textContent=(inZ?inZ+\' at entry\':\'\')\n      +(inZ&&wZ?\' · \':\'\')\n      +(wZ?wZ+\' near\':\'\')\n      +\' / \'+(data.total||0)+\' watching\';\n    if(!actionable.length){\n      grid.innerHTML=\'<div style=\"color:var(--dm);font-size:10px;padding:4px\">\'\n        +(data.total?\'No tickers near entry zone.\':\'No watchlist data. Run Watch Checker first.\')\n        +\'</div>\';\n      return;\n    }\n    grid.innerHTML=actionable.map(t=>{\n      const isInZone=t.zone===\'IN_ZONE\';\n      const cls=isInZone?\'inzone\':\'wait\';\n      const stLabel=isInZone?\'&#128994; AT ENTRY\':\'&#9889; NEAR ZONE\';\n      const isLong=(t.direction||\'LONG\')===\'LONG\';\n      const dirCls=isLong?\'long\':\'short\';\n      const dirLbl=isLong?\'&#9650; L\':\'&#9660; S\';\n      const tf=((t.timeframe||\'WEEKLY\').charAt(0));\n      const price=t.cur_price?(+t.cur_price>=100?\'$\'+(+t.cur_price).toFixed(0):\'$\'+(+t.cur_price).toFixed(2)):\'--\';\n      const pctNum=t.pct_away!=null?(+t.pct_away):null;\n      const pct=pctNum!=null?((pctNum>=0?\'+\':\'\')+pctNum.toFixed(1)+\'%\'):\'\';\n      const entry=t.entry_price?(\'entry $\'+(+t.entry_price>=100?(+t.entry_price).toFixed(0):(+t.entry_price).toFixed(2))):\'\';\n      const stop=t.stop_price?(\'stop $\'+(+t.stop_price>=100?(+t.stop_price).toFixed(0):(+t.stop_price).toFixed(2))):\'\';\n      const rr=t.rr?(\'R:R \'+t.rr):\'\';\n      const prob=t.prob?(t.prob+\'%\'):\'\';\n      return \'<div class=\"lwc \'+cls+\'\">\'\n        +\'<div class=\"lwc-top\"><span class=\"lwc-tk\">\'+t.ticker+\'</span>\'\n        +\'<span class=\"lwc-tf\">\'+tf+\'</span>\'\n        +\'<span class=\"lwc-dir \'+dirCls+\'\">\'+dirLbl+\'</span>\'\n        +(prob?\'<span style=\"font-size:9px;color:var(--dm);margin-left:3px\">\'+prob+\'</span>\':\'\')\n        +\'</div>\'\n        +\'<div class=\"lwc-st \'+cls+\'\">\'+stLabel+\'</div>\'\n        +(price!==\'--\'?\'<div class=\"lwc-price\">\'+price+(pct?\' <span style=\"color:var(--dm);font-size:9px\">\'+pct+\'</span>\':\'\')+\'</div>\':\'\')\n        +((entry||stop||rr)?\'<div class=\"lwc-dist\">\'\n          +(entry?entry:\'\')\n          +(stop&&entry?\' · \'+stop:stop?stop:\'\')\n          +(rr?(entry||stop?\' · \':\'\')+rr:\'\')\n          +\'</div>\':\'\')\n        +\'</div>\';\n    }).join(\'\');\n  }).catch(()=>{});\n}\n\n/* ── Cycles Status (GO / WAIT for approval) ────────────────────────────── */\nfunction loadCyclesStatus(){\n  fetch(\'/api/cycles-status\').then(r=>r.json()).then(data=>{\n    const grid=document.getElementById(\'cy-grid\');\n    const upd=document.getElementById(\'cy-upd\');\n    const cnt=document.getElementById(\'cy-cnt\');\n    if(!grid)return;\n    if(upd)upd.textContent=data.updated?\'as of \'+data.updated:\'\';\n    const cards=data.cards||[];\n    if(cnt)cnt.textContent=cards.length+\' signals / \'+(data.total||0)+\' total\';\n    if(!cards.length){\n      grid.innerHTML=\'<div style="color:var(--dm);font-size:10px;padding:4px">No GO/WAIT signals in latest cycles report.</div>\';\n      return;\n    }\n    grid.innerHTML=cards.map(c=>{\n      const isGo=c.tl===\'GREEN\';\n      const cls=isGo?\'go\':\'wait\';\n      const stLabel=isGo?\'&#128994; GO\':\'&#9889; WAIT\';\n      const tf=c.horizon===\'MONTHLY\'?\'M\':\'W\';\n      const isLong=(c.direction||\'\').toUpperCase()===\'LONG\';\n      const dirStr=c.direction?(isLong?\'&#9650; LONG\':\'&#9660; SHORT\'):\'\';\n      return \'<div class="cyc \'+cls+\'">\'\n        +\'<div class="cyc-top"><span class="cyc-tk">\'+c.ticker+\'</span>\'\n        +\'<span class="cyc-tf">\'+tf+\'</span></div>\'\n        +\'<div class="cyc-st \'+cls+\'">\'+stLabel+\'</div>\'\n        +(dirStr?\'<div style="font-size:9px;color:var(--dm);margin-top:2px">\'+dirStr+\'</div>\':\'\')\n        +\'</div>\';\n    }).join(\'\');\n  }).catch(()=>{});\n}\n\n/* ── Run History table ─────────────────────────────────────────────────── */\nfunction toggleHist(){\n  histOpen=!histOpen;\n  const body=document.getElementById(\'hist-body2\');\n  const chev=document.getElementById(\'hist-chev\');\n  body.style.display=histOpen?\'block\':\'none\';\n  if(chev){chev.classList.toggle(\'open\',histOpen);}\n}\n\nfunction loadHistory(){\n  fetch(\'/api/history\').then(r=>r.json()).then(rows=>{\n    const el=document.getElementById(\'hist-rows\');\n    if(!rows.length){\n      el.innerHTML=\'<div style="color:var(--dm);font-size:10px;padding:10px 14px">No runs recorded yet.</div>\';\n      return;\n    }\n    el.innerHTML=rows.map(r=>{\n      const ok=r.status===\'done\',err=r.status===\'error\';\n      const dur=r.duration_sec<60?r.duration_sec+\'s\':Math.floor(r.duration_sec/60)+\'m \'+(r.duration_sec%60)+\'s\';\n      const by=r.triggered_by===\'scheduler\'\n        ?\'<span class="hbadge scheduler">&#9201; scheduler</span>\'\n        :\'<span class="hbadge manual">&#128100; manual</span>\';\n      const st=ok?\'<span class="hok">&#10003; done</span>\'\n               :err?\'<span class="herr">&#10007; error</span>\'\n               :\'<span class="hstop">&#9632; stopped</span>\';\n      const ico=(TASK_ICONS[r.task]||\'&#9881;\');\n      return \'<div class="hist-row2">\'\n        +\'<span style="color:var(--dm)">\'+r.started+\'</span>\'\n        +\'<span>\'+ico+\' \'+r.label+\'</span>\'\n        +\'<span>\'+by+\'</span>\'\n        +\'<span>\'+st+\'</span>\'\n        +\'<span style="color:var(--dm)">\'+dur+\'</span>\'\n        +\'</div>\';\n    }).join(\'\');\n  }).catch(()=>{});\n}\n\n/* ── Init ──────────────────────────────────────────────────────────────── */\nloadToday();loadReports();loadWatchlist();loadSchedule();loadHistory();loadLiveCheck();loadCyclesStatus();\nsetInterval(()=>fetch(\'/api/today\').then(r=>r.json()).then(d=>{\n  document.getElementById(\'hdr-t\').textContent=d.date+\'  \'+d.time;\n}).catch(()=>{}),60000);\nsetInterval(loadReports,      20000);\nsetInterval(loadWatchlist,    20000);\nsetInterval(loadSchedule,     60000);\nsetInterval(loadHistory,      30000);\nsetInterval(loadLiveCheck,    60000);\nsetInterval(loadCyclesStatus, 120000);\n</script>\n</body>\n</html>'
 
 
 # ---------------------------------------------------------------------------

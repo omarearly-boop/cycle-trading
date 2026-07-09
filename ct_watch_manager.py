@@ -33,6 +33,13 @@ def load():
 
 def save(data):
     data['last_updated'] = datetime.datetime.now().isoformat()
+    # Backup before every write — protects against truncation on crash
+    bak = WATCH_FILE.with_suffix('.json.bak')
+    if WATCH_FILE.exists():
+        try:
+            bak.write_bytes(WATCH_FILE.read_bytes())
+        except Exception:
+            pass
     WATCH_FILE.write_text(
         json.dumps(data, ensure_ascii=False, indent=2),
         encoding='utf-8'
@@ -183,6 +190,11 @@ def auto_add_to_watchlist(setup: dict) -> bool:
             return False
 
     note = f"auto: {tl} Prob {prob}% (scanner {datetime.date.today().isoformat()})"
+
+    def _f(val, decimals=2):
+        try: return round(float(val), decimals) if val is not None else None
+        except (TypeError, ValueError): return None
+
     entry = {
         'ticker':       ticker,
         'direction':    direction,
@@ -191,6 +203,15 @@ def auto_add_to_watchlist(setup: dict) -> bool:
         'last_alerted': None,
         'alert_count':  0,
         'auto':         True,
+        # Setup levels -- used by livecheck / dashboard
+        'prob':         prob,
+        'entry_price':  _f(setup.get('Entry')),
+        'stop_price':   _f(setup.get('Stop')),
+        'target_price': _f(setup.get('Target')),
+        'rr':           _f(setup.get('R:R'), 1),
+        'timeframe':    setup.get('Horizon', 'WEEKLY'),
+        'adx_label':    setup.get('ADX_label', ''),
+        'spy_rs':       setup.get('SPY_RS', ''),
     }
     tickers.append(entry)
     data['tickers'] = tickers
