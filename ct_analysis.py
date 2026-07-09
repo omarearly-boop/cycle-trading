@@ -961,7 +961,9 @@ def _detect_setup(ticker, portfolio_size, market, is_crypto, asset_type, max_dis
     # Factor 33 -- RSI Divergence
     _setup['_rsi_divergence']     = market.get('_rsi_divergence', 'NONE')
     # 5-candle retest window (lesson 14)
-    _setup['_bars_since_breakout'] = market.get('_bars_since_breakout', 0)
+    # _bars_since_breakout is a per-direction dict {'LONG': N, 'SHORT': N} — extract the right value
+    _bsb = market.get('_bars_since_breakout', {})
+    _setup['_bars_since_breakout'] = _bsb.get(direction, 99) if isinstance(_bsb, dict) else int(_bsb)
     # Factors 34-38 -- secondary trend, chart pattern, gap, dow phase
     _setup['_secondary_trend']    = market.get('_secondary_trend', {})
     _setup['_chart_pattern']      = market.get('_chart_pattern', {})
@@ -969,7 +971,7 @@ def _detect_setup(ticker, portfolio_size, market, is_crypto, asset_type, max_dis
     _setup['_dow_phase']          = market.get('_dow_phase', 'UNKNOWN')
     _setup['_candle_pattern']     = market.get('_candle_pattern', {})
     _setup['_adx_weekly']         = market.get('_adx_weekly', {})
-    _setup['_spy_rs']             = market.get('_spy_rs', {})
+    _setup['_spy_rs']             = market.get('spy_rs', {})   # fix: key is 'spy_rs' not '_spy_rs'
     _setup['_monthly_sr']         = market.get('monthly_sr', {})
     return _finalize_setup(_setup, direction, ticker, atr_val,
                            m_analysis, is_crypto, is_commodity,
@@ -1001,11 +1003,4 @@ def analyze(ticker, portfolio_size, is_crypto=False, is_israel=False,
         for direction in ('LONG', 'SHORT'):
             setup = _detect_setup(
                 ticker, portfolio_size, market, is_crypto, _atype, _mdist,
-                direction,
-                is_commodity=is_commodity, is_israel=is_israel, is_intl=is_intl,
-            )
-            if setup:
-                setups.append(setup)
-    except Exception:
-        pass
-    return setups
+                
