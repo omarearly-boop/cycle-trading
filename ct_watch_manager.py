@@ -209,7 +209,7 @@ def auto_add_to_watchlist(setup: dict) -> bool:
         'stop_price':   _f(setup.get('Stop')),
         'target_price': _f(setup.get('Target')),
         'rr':           _f(setup.get('R:R'), 1),
-        'timeframe':    setup.get('Horizon', 'WEEKLY'),
+        'timeframe':    setup.get('TimeHorizon', 'WEEKLY'),
         'adx_label':    setup.get('ADX_label', ''),
         'spy_rs':       setup.get('SPY_RS', ''),
     }

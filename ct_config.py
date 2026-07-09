@@ -52,6 +52,11 @@ PM_SWING_LOOKBACK = 2     # bars each side to confirm a weekly swing pivot
 PM_MOMENTUM_WEEKS = 3     # consecutive up/down weeks to trigger momentum rule
 PM_STOP_BUFFER    = 0.01  # 1 % buffer below swing low / above swing high
 
+# ── Liquidity / pre-filters (course lesson 30) ──────────────
+MIN_WEEKLY_VOL_US    = 5_000_000  # weekly bars ≈ 1M shares/day (course: Avg Vol > 1M/day)
+MIN_WEEKLY_VOL_OTHER = 10_000     # crypto / commodity / TASE / intl
+PE_PREFILTER         = None       # set to 25 to enforce course P/E < 25 hard gate (None = off)
+
 # Max distance from key level to enter
 MAX_DIST_STOCK     = 0.12   # 12% for stocks
 MAX_DIST_CRYPTO    = 0.20   # 20% for crypto (more volatile)
@@ -301,7 +306,7 @@ _INTL_FALLBACK = [
     'WIPRO.NS',       # Wipro
     'AXISBANK.NS',    # Axis Bank
     'TATAMOTORS.NS',  # Tata Motors
-    # ── Hong Kong / China (.HK) ────────────────────────────────
+    # ── Hong Kong / China (.HK) ────────────────────────────
     '0700.HK',  # Tencent
     '9988.HK',  # Alibaba (HK)
     '3690.HK',  # Meituan
@@ -313,6 +318,3 @@ _INTL_FALLBACK = [
     '1211.HK',  # BYD
     '0005.HK',  # HSBC (HK)
 ]
-
-
-

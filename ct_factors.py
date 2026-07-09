@@ -1065,17 +1065,29 @@ def _factor_candle_quality(r):
     ctype   = cp.get("type", "NEUTRAL")
     is_long = "LONG" in r["Dir"]
 
-    bullish_candles = {"HAMMER", "BULL_ENGULF"}
-    bearish_candles = {"SHOOTING_STAR", "BEAR_ENGULF"}
+    strong_bull = {"HAMMER", "BULL_ENGULF", "MARUBOZU_BULL"}
+    strong_bear = {"SHOOTING_STAR", "BEAR_ENGULF", "MARUBOZU_BEAR"}
+    weak_bull   = {"HARAMI_BULL"}    # inside bar after down bar -- mild reversal hint
+    weak_bear   = {"HARAMI_BEAR"}
 
-    if is_long and ctype in bullish_candles:
-        return (+8, "Candle Pattern", f"{ctype} on weekly -- bullish rejection / reversal candle aligned with LONG setup.")
-    elif not is_long and ctype in bearish_candles:
-        return (+8, "Candle Pattern", f"{ctype} on weekly -- bearish rejection / reversal candle aligned with SHORT setup.")
-    elif is_long and ctype in bearish_candles:
+    if ctype == "DOJI":
+        return (0, "Candle Pattern", "DOJI on weekly -- indecision; wait for next bar to confirm direction (lesson 9).")
+    if is_long and ctype in strong_bull:
+        return (+8, "Candle Pattern", f"{ctype} on weekly -- bullish rejection / conviction candle aligned with LONG setup.")
+    elif not is_long and ctype in strong_bear:
+        return (+8, "Candle Pattern", f"{ctype} on weekly -- bearish rejection / conviction candle aligned with SHORT setup.")
+    elif is_long and ctype in weak_bull:
+        return (+4, "Candle Pattern", f"{ctype} (harami) on weekly -- mild bullish reversal hint for LONG (lesson 9).")
+    elif not is_long and ctype in weak_bear:
+        return (+4, "Candle Pattern", f"{ctype} (harami) on weekly -- mild bearish reversal hint for SHORT (lesson 9).")
+    elif is_long and ctype in strong_bear:
         return (-6, "Candle Pattern", f"{ctype} on weekly -- bearish candle against LONG setup. Caution.")
-    elif not is_long and ctype in bullish_candles:
+    elif not is_long and ctype in strong_bull:
         return (-6, "Candle Pattern", f"{ctype} on weekly -- bullish candle against SHORT setup. Caution.")
+    elif is_long and ctype in weak_bear:
+        return (-3, "Candle Pattern", f"{ctype} on weekly -- mild bearish hint against LONG.")
+    elif not is_long and ctype in weak_bull:
+        return (-3, "Candle Pattern", f"{ctype} on weekly -- mild bullish hint against SHORT.")
     else:
         return (0,  "Candle Pattern", f"Candle: {ctype} -- no strong reversal signal. Neutral.")
 
@@ -1206,15 +1218,24 @@ def _factor_retest_window(r):
 def _factor_secondary_trend(r):
     """
     Factor 35 -- Secondary Trend Validation (lessons 10, 16).
-    Course: a valid setup requires:
-      1. Primary uptrend (confirmed by get_trend -- already gated upstream)
-      2. Intermediate correction of 8-15 bars before retest
-    Too short a pullback (<5 bars) = not a true correction, probably noise.
-    Too long (>20 bars) = trend may be broken, not just correcting.
+    Course: a valid entry requires the SECONDARY (intermediate) trend to have
+    pulled back before the breakout/retest. Buying while price sits within 3%
+    of the recent 8-bar high (LONG) means NO intermediate correction occurred
+    = extended entry (lesson 16). After that gate, the depth/length of the
+    correction is scored: ideal 8-15 bars; <5 bars = noise; >20 = suspect.
     """
-    bars = r.get('_bars_since_breakout', 99)  # reuse -- bars since price crossed key level
-    # When bars_since_breakout = 99 it means no breakout in 12-bar window.
-    # In that case look at LateEntry distance as proxy for pullback depth.
+    is_long = 'LONG' in r['Dir']
+    sec_all = r.get('_secondary_trend') or {}
+    sec     = sec_all.get('LONG' if is_long else 'SHORT', {})
+
+    # Primary gate (lesson 16): did an intermediate correction occur at all?
+    if sec and not sec.get('corrected', True):
+        ref = '8-bar high' if is_long else '8-bar low'
+        return (-10, 'Secondary Trend',
+                f'No intermediate correction -- price within 3% of the {ref}. '
+                f'Extended entry; wait for the secondary pullback (lesson 16)')
+
+    bars = r.get('_bars_since_breakout', 99)  # bars since price crossed key level
     if bars < 99:
         if bars < 5:
             return (-10, 'Secondary Trend', f'Correction only {bars} bars -- too brief, likely noise not real pullback')
@@ -1224,6 +1245,13 @@ def _factor_secondary_trend(r):
             return (+4,  'Secondary Trend', f'{bars}-bar correction -- extended but trend intact')
         else:
             return (-6,  'Secondary Trend', f'{bars}+ bars since breakout -- prolonged; check if trend still valid')
+
+    # No breakout in window -- score the correction depth directly
+    if sec and sec.get('corrected'):
+        ref = '8-bar high' if is_long else '8-bar low'
+        return (+6, 'Secondary Trend',
+                f'Intermediate correction present -- {sec.get("dist_pct", 0):.1f}% off the {ref}')
+
     # Fallback: use LateEntry (distance from key level) as depth proxy
     late_pct = r.get('LateEntry', 0) or 0
     if late_pct >= 5:
@@ -1240,12 +1268,32 @@ def _factor_chart_pattern(r):
 
     Flag: after strong rally (>10% in 5 bars), consolidation <5% range for 3-8 bars.
     Cup base: price forms a U-shape over 10-30 bars, returns near prior high.
+
+    Geometric detection first (detect_chart_pattern: Cup & Handle, Head &
+    Shoulders), falling back to the flag/pennant proxy from breakout stats.
     """
-    bq = r.get('_breakout_quality', {})
     is_long = 'LONG' in r['Dir']
+    geo     = r.get('_chart_pattern') or {}
+    gtype   = geo.get('type')
+
+    if gtype == 'CUP_HANDLE':
+        if is_long:
+            return (+14, 'Chart Pattern',
+                    f'Cup & Handle: rim {geo.get("rim")}, depth {geo.get("depth_pct")}% '
+                    f'-- highest-reliability continuation pattern (lessons 21-22)')
+        return (-10, 'Chart Pattern', 'Cup & Handle (bullish) conflicts with SHORT setup')
+
+    if gtype == 'HEAD_SHOULDERS':
+        if not is_long:
+            return (+12, 'Chart Pattern',
+                    f'Head & Shoulders: neckline {geo.get("neckline")} '
+                    f'-- most reliable reversal pattern (lesson 19)')
+        return (-12, 'Chart Pattern', 'Head & Shoulders forming -- bearish reversal risk for LONG')
+
+    bq = r.get('_breakout_quality', {})
     direction = 'LONG' if is_long else 'SHORT'
 
-    # Use breakout quality data as proxy for prior impulse strength
+    # Fallback: use breakout quality data as proxy for prior impulse strength
     bk = bq.get(direction)
     if not bk:
         return None
@@ -1288,46 +1336,38 @@ def _factor_chart_pattern(r):
 def _factor_price_gaps(r):
     """
     Factor 37 -- Price Gap Analysis (lesson 23).
-    Course teaches 4 gap types: breakaway, runaway, exhaustion, common.
-    Breakaway gap up with high volume at support = strong LONG entry signal.
-    Exhaustion gap at resistance = warning to exit / avoid entry.
-    We detect gaps in the weekly OHLC using open vs prior close.
+    Real gap detection (Open vs prior weekly Close) via detect_price_gaps():
+      BREAKAWAY  (vol >= 2.0x avg)  -- new-trend signal:      aligned +12 / against -10
+      RUNAWAY    (vol >= 1.2x avg)  -- trend continuation:    aligned +6
+      EXHAUSTION (vol <  0.8x avg)  -- move may be ending:    recent aligned -10
+      COMMON / filled gaps          -- no remaining signal:   0
     """
-    bq  = r.get('_breakout_quality', {})
-    is_long = 'LONG' in r['Dir']
-    direction = 'LONG' if is_long else 'SHORT'
-    bk = bq.get(direction)
-    if not bk:
+    gap = r.get('_price_gap') or {}
+    if not gap or gap.get('type') is None:
         return None
 
-    vol_ratio  = bk.get('vol_ratio', 1.0)
-    body_ratio = bk.get('body_ratio', 0.0)
+    is_long  = 'LONG' in r['Dir']
+    gtype    = gap.get('type')
+    gdir     = gap.get('direction', 'UP')
+    aligned  = (is_long and gdir == 'UP') or (not is_long and gdir == 'DOWN')
+    bars_ago = gap.get('bars_ago', 99)
+    filled   = gap.get('filled', False)
+    desc     = (f"{gap.get('gap_pct', 0):+.1f}% gap {gdir} {bars_ago}w ago, "
+                f"vol {gap.get('vol_ratio', 1.0)}x avg")
 
-    # Breakaway gap proxy: breakout candle has very large body AND high volume
-    # (a true gap shows as an outsized body when using weekly OHLC)
-    is_breakaway  = body_ratio >= 2.0 and vol_ratio >= 2.0
-    is_strong     = body_ratio >= 1.5 and vol_ratio >= 1.5
-    is_exhaustion = body_ratio >= 1.5 and vol_ratio < 0.8  # big body but low vol -- suspect
-
-    # Late entry: if bars since breakout < 3 it is likely an exhaustion gap, not safe
-    bars = r.get('_bars_since_breakout', 99)
-    at_resistance = r.get('LateEntry', 0) > 8  # price far from level -- extended
-
-    if is_breakaway and not at_resistance:
-        return (+14, 'Price Gap',
-                f'Breakaway gap: body {body_ratio:.1f}x ATR, vol {vol_ratio:.1f}x avg -- '
-                f'high-conviction directional move (lesson 23 breakaway pattern)')
-    elif is_exhaustion and bars <= 3:
-        return (-12, 'Price Gap',
-                f'Possible exhaustion gap: large body but weak vol ({vol_ratio:.1f}x) -- '
-                f'buying/selling may be ending; caution on entry')
-    elif is_strong:
-        return (+7, 'Price Gap',
-                f'Strong impulse move: body {body_ratio:.1f}x ATR, vol {vol_ratio:.1f}x avg')
-    elif body_ratio < 0.3:
-        return (-4, 'Price Gap',
-                f'Weak prior breakout (body {body_ratio:.1f}x ATR) -- no gap/impulse confirmation')
-    return None
+    if filled:
+        return (0, 'Price Gap', f'Gap already filled: {desc} -- no remaining signal (lesson 23)')
+    if gtype == 'BREAKAWAY' and aligned:
+        return (+12, 'Price Gap', f'Breakaway gap: {desc} -- high-volume new-trend signal (lesson 23)')
+    if gtype == 'BREAKAWAY' and not aligned:
+        return (-10, 'Price Gap', f'Breakaway gap AGAINST setup direction: {desc} -- strong opposing signal')
+    if gtype == 'RUNAWAY' and aligned:
+        return (+6, 'Price Gap', f'Runaway gap: {desc} -- trend continuation confirmed')
+    if gtype == 'EXHAUSTION' and aligned and bars_ago <= 3:
+        return (-10, 'Price Gap', f'Exhaustion gap: {desc} -- weak volume, move may be ending; caution on entry')
+    if not aligned and gap.get('vol_ratio', 1.0) >= 1.2:
+        return (-5, 'Price Gap', f'Gap against direction: {desc}')
+    return (0, 'Price Gap', f'Common gap: {desc} -- low significance, usually closes')
 
 
 @factor
@@ -1349,8 +1389,9 @@ def _factor_dow_theory_phase(r):
     m_trend = r.get('MonthlyTrend')
     vol_ratio = r.get('_vol_ratio', 1.0)
     dir_vol   = r.get('_dir_vol_ratio', 1.0)   # down-bar vol / up-bar vol
-    spy_rs    = r.get('spy_rs') or {}
-    spy_trend = spy_rs.get('spy_trend', 'NEUTRAL')
+    spy_rs    = r.get('_spy_rs') or {}
+    spy_ret   = spy_rs.get('spy_ret')   # SPY 13-week return %
+    spy_trend = 'NEUTRAL' if spy_ret is None else ('UP' if spy_ret > 0 else 'DOWN')
 
     # Markup phase: monthly LONG + up-bar volume dominates (dir_vol < 0.7) + SPY up
     is_markup       = (m_trend == 'LONG'  and dir_vol <= 0.7 and spy_trend != 'DOWN')
@@ -1387,6 +1428,56 @@ def _factor_dow_theory_phase(r):
         elif is_accumulation:
             return (-6,  'Dow Phase: Accum.',
                     'Accumulation phase -- no clear short thesis yet')
+    return None
+
+
+@factor
+def _factor_gann_levels(r):
+    """
+    Factor 39 -- Gann Level Confluence (lesson 31).
+      gann_100 = major swing low x 2 (100% advance) -- acts as MAJOR RESISTANCE
+      gann_50  = major high x 0.5 (50% off high)    -- acts as strong support
+
+    Scoring:
+      LONG : target/resistance within 3% of gann_100 -> +8 (credible target zone)
+             support within 3% of gann_50            -> +8 (structural support)
+             gann_100 barely overhead (<5% above)    -> -6 (major barrier caps upside)
+      SHORT: target/support within 3% of gann_50     -> +8
+             resistance within 3% of gann_100        -> +6 (barrier backs the short)
+    """
+    g = r.get('_gann') or {}
+    if not g:
+        return None
+    is_long = 'LONG' in r['Dir']
+    g100    = g.get('gann_100') or 0
+    g50     = g.get('gann_50') or 0
+    price   = r.get('Price', 0)
+    sup     = r.get('Support', 0)
+    res     = r.get('Resist', 0)
+
+    def _near(a, b, tol=0.03):
+        return a > 0 and b > 0 and abs(a - b) / b <= tol
+
+    if is_long:
+        if _near(res, g100):
+            return (+8, 'Gann 100%',
+                    f'Target/resistance {res} sits at the Gann 100% level ({g100} = swing low x2) '
+                    f'-- high-probability target zone (lesson 31)')
+        if _near(sup, g50):
+            return (+8, 'Gann 50%',
+                    f'Support {sup} sits at the Gann 50%-of-high level ({g50}) '
+                    f'-- strong structural support (lesson 31)')
+        if price > 0 and g100 > price and (g100 - price) / price <= 0.05:
+            return (-6, 'Gann 100%',
+                    f'Gann 100% resistance ({g100}) only {(g100 - price) / price * 100:.1f}% overhead '
+                    f'-- major barrier caps the upside')
+    else:
+        if _near(sup, g50):
+            return (+8, 'Gann 50%',
+                    f'Target/support {sup} at the Gann 50% level ({g50}) -- credible SHORT target (lesson 31)')
+        if _near(res, g100):
+            return (+6, 'Gann 100%',
+                    f'Resistance {res} at the Gann 100% level ({g100}) -- strong barrier backs the SHORT')
     return None
 
 

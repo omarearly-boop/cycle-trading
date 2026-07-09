@@ -329,7 +329,8 @@ def manage_positions(send_email: bool = False) -> list:
             continue
 
         current = float(df['Close'].iloc[-1])
-        pnl_pct = round((current - pos['entry']) / pos['entry'] * 100, 1)
+        raw_pct = (current - pos['entry']) / pos['entry'] * 100
+        pnl_pct = round(raw_pct if d == 'LONG' else -raw_pct, 1)  # SHORT profits when price falls
         sign    = '+' if pnl_pct >= 0 else ''
         tps     = (f'TP1{"✓" if pos.get("tp1_hit") else "○"} '
                    f'TP2{"✓" if pos.get("tp2_hit") else "○"} '
@@ -413,6 +414,7 @@ def manage_positions(send_email: bool = False) -> list:
             print(f'  ║   {a}')
         print(f'  ╚{"═"*58}╝')
         if send_email and all_alerts:
+            from ct_analysis import send_email_summary   # local import avoids circular import at module load
             body = '\n'.join(all_alerts)
             send_email_summary(
                 f'🔔 Cycles Position Alert — {datetime.now().strftime("%Y-%m-%d")}',
@@ -441,5 +443,3 @@ def list_positions(show_closed: bool = False):
               f'{p["stop"]:>7.2f} {p["tp1"]:>7.2f} {p["tp2"]:>7.2f} '
               f'{p["tp3"]:>7.2f}  {tps}{closed_mark}')
     print()
-
-

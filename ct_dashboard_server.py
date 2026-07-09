@@ -291,13 +291,6 @@ def _run_job(job_id: str, task: str):
     t_end = time.time()
     with JOB_LOCK:
         JOBS[job_id].update({'status': status, 'log': lines, 'end': t_end})
-        # Keep only last 50 completed jobs to prevent unbounded memory growth
-        if len(JOBS) > 50:
-            # Remove oldest completed/error jobs first
-            done_ids = [jid for jid, j in JOBS.items()
-                        if j.get('status') in ('done', 'error', 'stopped') and jid != job_id]
-            for jid in list(done_ids)[:-49]:
-                JOBS.pop(jid, None)
 
     _append_history({
         'id':           job_id,
@@ -605,4 +598,16 @@ DASHBOARD_HTML = '\\\n<!DOCTYPE html>\n<html lang="en">\n<head>\n<meta charset="
 
 # ---------------------------------------------------------------------------
 # Main
-# --------------------------------------------
+# ---------------------------------------------------------------------------
+
+if __name__ == '__main__':
+    port = 5050
+    if '--port' in sys.argv:
+        idx  = sys.argv.index('--port')
+        port = int(sys.argv[idx + 1])
+
+    print(f'  Cycles Trading Dashboard')
+    print(f'  Open: http://localhost:{port}')
+    print(f'  Press Ctrl+C to stop.')
+    print()
+    app.run(host='127.0.0.1', port=port, debug=False, threaded=True)

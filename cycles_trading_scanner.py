@@ -159,18 +159,18 @@ def main():
     #  OPTION 1 — Portfolio size
     # ══════════════════════════════════════════════════════════
     global PORTFOLIO_SIZE
-    if PORTFOLIO_SIZE is None:
-        _env_ps = os.environ.get("CT_PORTFOLIO_SIZE", "").strip()
-        if _env_ps:
-            PORTFOLIO_SIZE = float(_env_ps)
-            print(f"      -> Portfolio: ${PORTFOLIO_SIZE:,.0f}  (env)")
-        else:
-            try:
-                raw = input("  [1] Enter your portfolio size in $  (e.g. 1000): ").replace(',','').strip()
-                PORTFOLIO_SIZE = float(raw) if raw else 1000
-            except (EOFError, ValueError):
-                PORTFOLIO_SIZE = 1000
-            print(f"      -> Portfolio set to: ${PORTFOLIO_SIZE:,.0f}")
+    _env_ps = os.environ.get("CT_PORTFOLIO_SIZE", "").strip()
+    if _env_ps:
+        PORTFOLIO_SIZE = float(_env_ps)
+        print(f"      -> Portfolio: ${PORTFOLIO_SIZE:,.0f}  (env)")
+    else:
+        try:
+            raw = input(f"  [1] Enter your portfolio size in $  (ENTER = {PORTFOLIO_SIZE:,.0f}): ").replace(',','').strip()
+            if raw:
+                PORTFOLIO_SIZE = float(raw)
+        except (EOFError, ValueError):
+            pass   # non-interactive run (e.g. pipeline) — keep config default
+        print(f"      -> Portfolio set to: ${PORTFOLIO_SIZE:,.0f}")
 
     # ══════════════════════════════════════════════════════════
     #  OPTION 2 — Specific ticker or scan all
@@ -399,8 +399,8 @@ def main():
                 f"<td style='padding:6px 10px'>{r.get('Entry','')}</td>"
                 f"<td style='padding:6px 10px'>{r.get('Stop','')}</td>"
                 f"<td style='padding:6px 10px'>{r.get('Target','')}</td>"
-                f"<td style='padding:6px 10px'>{r.get('Horizon','')}</td>"
-                f"<td style='padding:6px 10px'>${r.get('Pos$',0):,.0f} ({r.get('Pos%',0)}%)</td>"
+                f"<td style='padding:6px 10px'>{r.get('HorizonRange','')}</td>"
+                f"<td style='padding:6px 10px'>${r.get('Pos$',0):,.0f} ({r.get('PosPct',0)}%)</td>"
                 f"</tr>"
             )
         html_body = f"""

@@ -421,6 +421,145 @@ def check_swing_broken(df: pd.DataFrame, direction: str = 'down') -> tuple:
 
 
 
+def detect_price_gaps(df, min_gap_pct: float = 1.0, lookback: int = 8) -> dict:
+    """
+    Weekly price-gap detection (lesson 23) — real gaps: Open vs prior Close.
+
+    Gap types per the course:
+      BREAKAWAY  — gap on volume >= 2.0x 20-bar avg → new-trend signal
+      RUNAWAY    — gap on volume >= 1.2x avg        → trend continuation
+      EXHAUSTION — gap on weak volume (< 0.8x avg)  → possible trend end
+      COMMON     — ordinary gap, low significance
+
+    Returns the most significant gap in the last `lookback` bars, or {}.
+    Keys: type, direction ('UP'/'DOWN'), gap_pct, vol_ratio, bars_ago, filled
+    (filled = price later traded back through the gap origin — gap closed).
+    """
+    try:
+        n = len(df)
+        if n < 25:
+            return {}
+        avg20  = float(df['Volume'].tail(20).mean())
+        opens  = df['Open'].values
+        closes = df['Close'].values
+        highs  = df['High'].values
+        lows   = df['Low'].values
+        vols   = df['Volume'].values
+
+        best = {}
+        for i in range(max(1, n - lookback), n):
+            prev_c = float(closes[i - 1])
+            if prev_c <= 0:
+                continue
+            gap_pct = (float(opens[i]) - prev_c) / prev_c * 100
+            if abs(gap_pct) < min_gap_pct:
+                continue
+            vol_ratio = round(float(vols[i]) / avg20, 2) if avg20 > 0 else 1.0
+            direction = 'UP' if gap_pct > 0 else 'DOWN'
+            if direction == 'UP':
+                filled = bool((lows[i:] <= prev_c).any())
+            else:
+                filled = bool((highs[i:] >= prev_c).any())
+            if   vol_ratio >= 2.0: gtype = 'BREAKAWAY'
+            elif vol_ratio >= 1.2: gtype = 'RUNAWAY'
+            elif vol_ratio <  0.8: gtype = 'EXHAUSTION'
+            else:                  gtype = 'COMMON'
+            cand = {'type': gtype, 'direction': direction,
+                    'gap_pct': round(gap_pct, 1), 'vol_ratio': vol_ratio,
+                    'bars_ago': n - 1 - i, 'filled': filled}
+            if not best or abs(gap_pct) > abs(best['gap_pct']):
+                best = cand
+        return best
+    except Exception:
+        return {}
+
+
+def detect_chart_pattern(df) -> dict:
+    """
+    Geometric chart-pattern detection (lessons 19–22) — the two
+    highest-impact patterns per the course:
+
+      CUP_HANDLE     — U-shaped base (10–30 bars) recovering to within 5%
+                       of the left rim, followed by a shallow handle whose
+                       low holds the upper half of the cup.
+      HEAD_SHOULDERS — three swing highs, middle highest, outer two within
+                       4% of each other; price at/near/below the neckline.
+
+    Returns {'type': 'CUP_HANDLE' | 'HEAD_SHOULDERS' | None, ...details}
+    """
+    try:
+        result = {'type': None}
+        n = len(df)
+        if n < 20:
+            return result
+        highs  = df['High'].values
+        lows   = df['Low'].values
+        closes = df['Close'].values
+        price  = float(closes[-1])
+
+        # ── Cup & Handle (lessons 21–22 — highest-reliability continuation) ──
+        win   = min(30, n - 5)
+        seg_h = highs[-(win + 5):-5]     # cup body (last 5 bars = handle zone)
+        seg_l = lows[-(win + 5):-5]
+        if len(seg_h) >= 10:
+            rim       = float(seg_h[:len(seg_h) // 3].max())               # left rim
+            bottom    = float(seg_l[len(seg_l) // 4: 3 * len(seg_l) // 4].min())
+            right     = float(seg_h[-3:].max())                            # right side
+            depth     = (rim - bottom) / rim if rim > 0 else 0
+            handle_lo = float(lows[-5:].min())
+            if (0.12 <= depth <= 0.50
+                    and right >= rim * 0.95
+                    and handle_lo >= bottom + (rim - bottom) * 0.5
+                    and price >= rim * 0.90):
+                return {'type': 'CUP_HANDLE', 'rim': round(rim, 2),
+                        'bottom': round(bottom, 2),
+                        'depth_pct': round(depth * 100, 1)}
+
+        # ── Head & Shoulders (lesson 19 — most reliable reversal) ──
+        recent = df.tail(40)
+        piv_h  = _pm_pivot_highs(recent, lookback=2)
+        # merge plateau duplicates (adjacent near-equal pivots register twice)
+        _dedup = []
+        for j, p in piv_h:
+            if _dedup and j - _dedup[-1][0] <= 2 and p > 0 and abs(p - _dedup[-1][1]) / p < 0.001:
+                continue
+            _dedup.append((j, p))
+        piv_h = _dedup
+        if len(piv_h) >= 3:
+            (i1, s1), (i2, hd), (i3, s2) = piv_h[-3:]
+            shoulders_even = abs(s1 - s2) / max(s1, s2) <= 0.04
+            head_highest   = hd > s1 and hd > s2
+            if shoulders_even and head_highest:
+                piv_l   = _pm_pivot_lows(recent, lookback=2)
+                troughs = [p for (j, p) in piv_l if i1 < j < i3]
+                r_lows  = recent['Low'].values
+                neckline = min(troughs) if troughs else float(r_lows[-10:].min())
+                if price <= neckline * 1.03:
+                    return {'type': 'HEAD_SHOULDERS', 'head': round(hd, 2),
+                            'neckline': round(neckline, 2)}
+        return result
+    except Exception:
+        return {'type': None}
+
+
+def check_gann_levels(df) -> dict:
+    """
+    Gann levels (lesson 31):
+      gann_100 — major swing low x 2 (a 100% advance) → acts as MAJOR RESISTANCE
+      gann_50  — major high x 0.5 (50% off the high)  → acts as strong support
+    Computed over the full fetched window (~2y weekly).
+    """
+    try:
+        lo = float(df['Low'].min())
+        hi = float(df['High'].max())
+        if lo <= 0 or hi <= 0:
+            return {}
+        return {'gann_100': round(lo * 2.0, 2), 'gann_50': round(hi * 0.5, 2),
+                'swing_low': round(lo, 2), 'major_high': round(hi, 2)}
+    except Exception:
+        return {}
+
+
 # ══════════════════════════════════════════════════════════════
 #  TIME HORIZON ESTIMATOR
 # ══════════════════════════════════════════════════════════════
@@ -455,17 +594,30 @@ def calc_macd(df):
         elif hist_prev > 0 and hist_now < 0:
             cross = 'DEATH'    # bearish crossover
 
-        # Divergence detection (compare last bar vs 5 bars ago)
-        price_ll = closes.iloc[-1] < closes.iloc[-5]   # price lower low
-        price_hh = closes.iloc[-1] > closes.iloc[-5]   # price higher high
-        macd_hl  = float(macd.iloc[-1]) > float(macd.iloc[-5])  # MACD higher low
-        macd_lh  = float(macd.iloc[-1]) < float(macd.iloc[-5])  # MACD lower high
-        if price_ll and macd_hl:
-            divergence = 'BULL_DIV'   # bullish: price LL but MACD HL
-        elif price_hh and macd_lh:
-            divergence = 'BEAR_DIV'   # bearish: price HH but MACD LH
-        else:
-            divergence = None
+        # Divergence detection — swing-based (lesson 25):
+        # compare the last two confirmed price swing highs/lows against the
+        # MACD value at those same bars (not single closes N bars apart).
+        def _piv_idx(arr, mode, order=2):
+            idxs = []
+            for i in range(order, len(arr) - order):
+                seg = arr[i - order:i + order + 1]
+                if mode == 'high' and arr[i] == max(seg):
+                    idxs.append(i)
+                elif mode == 'low' and arr[i] == min(seg):
+                    idxs.append(i)
+            return idxs[-2:]
+
+        closes_a   = closes.values
+        macd_a     = macd.values
+        divergence = None
+        hi = _piv_idx(closes_a, 'high')
+        lo = _piv_idx(closes_a, 'low')
+        if (len(hi) == 2 and closes_a[hi[1]] > closes_a[hi[0]]
+                and macd_a[hi[1]] < macd_a[hi[0]]):
+            divergence = 'BEAR_DIV'   # price higher high, MACD lower high
+        elif (len(lo) == 2 and closes_a[lo[1]] < closes_a[lo[0]]
+                and macd_a[lo[1]] > macd_a[lo[0]]):
+            divergence = 'BULL_DIV'   # price lower low, MACD higher low
 
         return {
             'macd':       macd_now,
@@ -545,4 +697,3 @@ def estimate_time_horizon(entry, target, atr_val):
         return round(weeks, 1), 'MEDIUM',  '2-3 months',   '#d29922', '2-3 months'
     else:
         return round(weeks, 1), 'LONG',    '3+ months',    '#8b949e', '3+ months'
-

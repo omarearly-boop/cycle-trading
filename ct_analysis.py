@@ -24,12 +24,14 @@ from ct_config import (
     MIN_RR, EARNINGS_WARN_DAYS, FUNDAMENTAL_TIMEOUT, MIN_PROBABILITY,
     HARD_BLOCKS, RSI_LONG_MAX, RSI_SHORT_MIN, PM_STOP_BUFFER,
     MAX_DIST_STOCK, MAX_DIST_CRYPTO, MAX_DIST_COMMODITY, MAX_DIST_INTL,
+    MIN_WEEKLY_VOL_US, MIN_WEEKLY_VOL_OTHER, PE_PREFILTER,
 )
 from ct_indicators import (
     rsi, atr, cci, get_trend, swing_lows, swing_highs, get_levels,
     vol_declining, get_support_quality, check_level_reliability,
     check_false_breakout, check_level_ambiguity, check_swing_broken,
     calc_macd, calc_bollinger, estimate_time_horizon,
+    detect_price_gaps, detect_chart_pattern, check_gann_levels,
 )
 from ct_market_data import get_earnings, get_monthly_analysis, get_sector_rs, get_monthly_sr, get_spy_rs
 from ct_factors import calc_probability, check_fibonacci_zone
@@ -47,7 +49,7 @@ def clean_ticker(ticker):
 # -- Scan diagnostics (thread-safe counters) ---
 import threading as _threading
 _DIAG_LOCK = _threading.Lock()
-_DIAG = {'no_data':0,'illiquid':0,'no_trend':0,'rsi_gate':0,'dist':0,'rr':0,'passed':0}
+_DIAG = {'no_data':0,'illiquid':0,'mktcap':0,'pe_gate':0,'no_trend':0,'rsi_gate':0,'dist':0,'rr':0,'passed':0}
 def _diag(key):
     with _DIAG_LOCK: _DIAG[key] += 1
 def reset_diag():
@@ -58,6 +60,8 @@ def print_diag():
     print('\n  -- Scan funnel (per ticker+direction attempt) --')
     print(f'  No data / error   : {d["no_data"]:>4}')
     print(f'  Illiquid (OTC)    : {d["illiquid"]:>4}')
+    print(f'  Micro-cap <$300M  : {d["mktcap"]:>4}')
+    print(f'  P/E gate blocked  : {d["pe_gate"]:>4}')
     print(f'  No clear trend    : {d["no_trend"]:>4}')
     print(f'  RSI gate blocked  : {d["rsi_gate"]:>4}')
     print(f'  Too far from lvl  : {d["dist"]:>4}')
@@ -292,7 +296,7 @@ def get_traffic_light(prob, r):
     if r.get('SectorRS') in ('WEAK-', 'BELOW'):
         red_flags.append(f'Sector RS: {r.get("SectorRS")}')
     m_trend = r.get('MonthlyTrend')
-    direction = 'LONG' if '▲' in r.get('Dir','') else 'SHORT'
+    direction = 'LONG' if 'LONG' in r.get('Dir','') else 'SHORT'
     if m_trend == 'SHORT' and direction == 'LONG':
         red_flags.append('Monthly trend vs direction')
     if m_trend == 'LONG' and direction == 'SHORT':
@@ -302,7 +306,7 @@ def get_traffic_light(prob, r):
         green_flags.append('Strong support level')
     if r.get('SectorRS') in ('STRONG+', 'ABOVE'):
         green_flags.append(f'Sector RS: {r.get("SectorRS")}')
-    if r.get('MonthlyTrend') == direction[:4]:
+    if r.get('MonthlyTrend') == direction:
         green_flags.append('Monthly aligned')
 
     n_red = len(red_flags)
@@ -366,7 +370,7 @@ def _build_setup_dict(direction, ticker, price, rsi_val, support, resistance,
                       trend_confirmed=True, trend_conf_label='CONFIRMED',
                       fib_zone='UNKNOWN', fib_ret_pct=0,
                       fib_swing_low=0, fib_swing_high=0, fib_levels=None,
-                      monthly_sr=None):
+                      monthly_sr=None, gann=None):
     """
     Assemble the raw setup dict from computed values.
     Pure function — no yfinance calls, no side effects.
@@ -377,6 +381,17 @@ def _build_setup_dict(direction, ticker, price, rsi_val, support, resistance,
     dir_label = '🟢 LONG' if direction == 'LONG' else '🔴 SHORT'
     late_ref  = support if direction == 'LONG' else resistance
     late_pct  = round(abs(price - late_ref) / late_ref * 100, 1) if late_ref else 0
+    # Gann target (lesson 31): 100% level (swing_low x 2) for LONG,
+    # 50%-of-high level for SHORT; 1R measured move as fallback.
+    _g100 = (gann or {}).get('gann_100')
+    _g50  = (gann or {}).get('gann_50')
+    if direction == 'LONG' and _g100 and _g100 > entry:
+        _gann_target = round(_g100, 2)
+    elif direction == 'SHORT' and _g50 and _g50 < entry:
+        _gann_target = round(_g50, 2)
+    else:
+        _gann_target = round(entry + (entry - stop), 2) if direction == 'LONG' \
+                       else round(entry - (stop - entry), 2)
     return {
         'Ticker':         clean_ticker(ticker),
         '_raw':           ticker,
@@ -388,7 +403,7 @@ def _build_setup_dict(direction, ticker, price, rsi_val, support, resistance,
         'Entry':          round(entry, 2),
         'Stop':           round(stop, 2),
         'Target':         round(target, 2),
-        'GannTarget':     round(entry + (entry - stop), 2) if direction == 'LONG' else round(entry - (stop - entry), 2),
+        'GannTarget':     _gann_target,
         'R:R':            rratio,
         'Units':          round(units, 1),
         'Risk$':          int(risk_amt),
@@ -596,7 +611,8 @@ def _fetch_market_data(ticker, is_crypto=False, is_commodity=False,
 
     # Liquidity hard filter (skip OTC / penny / illiquid)
     avg_vol_20 = float(df['Volume'].rolling(20).mean().iloc[-1])
-    MIN_AVG_VOL = 100_000 if not (is_crypto or is_commodity or is_israel or is_intl) else 10_000
+    # Course lesson 30: Avg Volume > 1M shares/day → ~5M/week on weekly bars
+    MIN_AVG_VOL = MIN_WEEKLY_VOL_US if not (is_crypto or is_commodity or is_israel or is_intl) else MIN_WEEKLY_VOL_OTHER
     if avg_vol_20 < MIN_AVG_VOL:
         _diag('illiquid'); return None  # OTC / illiquid -- skip
 
@@ -608,6 +624,11 @@ def _fetch_market_data(ticker, is_crypto=False, is_commodity=False,
             _mktcap = _info.get('marketCap') or 0
             if _mktcap > 0 and _mktcap < 300_000_000:
                 _diag('mktcap'); return None  # micro-cap -- too small per course rules
+            # Course lesson 30: optional P/E < 25 pre-filter (PE_PREFILTER in ct_config)
+            if PE_PREFILTER:
+                _pe = _info.get('trailingPE') or _info.get('forwardPE') or 0
+                if _pe and _pe > PE_PREFILTER:
+                    _diag('pe_gate'); return None
         except Exception:
             pass  # info unavailable -- don't filter out
 
@@ -674,7 +695,11 @@ def _fetch_market_data(ticker, is_crypto=False, is_commodity=False,
             _bpct = _body / _rng
             _lpct = _l_wick / _rng
             _upct = _u_wick / _rng
-            if _lpct > 0.55 and _bpct < 0.35:
+            if _bpct < 0.10:
+                _ctype = 'DOJI'             # indecision (lesson 9)
+            elif _upct < 0.07 and _lpct < 0.07:
+                _ctype = 'MARUBOZU_BULL' if _c > _o else 'MARUBOZU_BEAR'  # full-body conviction
+            elif _lpct > 0.55 and _bpct < 0.35:
                 _ctype = 'HAMMER'           # bullish rejection from low
             elif _upct > 0.55 and _bpct < 0.35:
                 _ctype = 'SHOOTING_STAR'    # bearish rejection from high
@@ -684,9 +709,35 @@ def _fetch_market_data(ticker, is_crypto=False, is_commodity=False,
                     _ctype = 'BULL_ENGULF'  # bullish engulfing
                 elif _c < _o and _po < _pc and _c < _po and _o > _pc:
                     _ctype = 'BEAR_ENGULF'  # bearish engulfing
+                # Harami: current body inside prior body (lesson 9 inside bar)
+                elif (max(_o, _c) < max(_po, _pc) and min(_o, _c) > min(_po, _pc)):
+                    _ctype = 'HARAMI_BULL' if _po > _pc else 'HARAMI_BEAR'
         _candle_pattern = {'type': _ctype, 'body_pct': round(_body / _rng, 2) if _rng > 0 else 0}
     except Exception:
         _candle_pattern = {'type': 'NEUTRAL', 'body_pct': 0}
+
+    # ── Price gaps (lesson 23) — real Open-vs-prior-Close gaps ──
+    _price_gap = detect_price_gaps(df)
+
+    # ── Secondary trend (lessons 10/16) — has an intermediate correction occurred?
+    # LONG: price within 3% of the 8-bar high = no pullback yet = extended entry.
+    try:
+        _hi8 = float(df['High'].tail(8).max())
+        _lo8 = float(df['Low'].tail(8).min())
+        _secondary_trend = {
+            'LONG':  {'corrected': price < _hi8 * 0.97,
+                      'dist_pct': round((_hi8 - price) / _hi8 * 100, 1) if _hi8 > 0 else 0.0},
+            'SHORT': {'corrected': price > _lo8 * 1.03,
+                      'dist_pct': round((price - _lo8) / _lo8 * 100, 1) if _lo8 > 0 else 0.0},
+        }
+    except Exception:
+        _secondary_trend = {}
+
+    # ── Geometric chart pattern (lessons 19–22) ───────────
+    _chart_geo = detect_chart_pattern(df)
+
+    # ── Gann levels (lesson 31) ───────────────────────────
+    _gann = check_gann_levels(df)
 
     # ── Earnings (stocks only) ────────────────────────────
     skip_fundamentals = is_crypto or is_commodity
@@ -824,6 +875,8 @@ def _fetch_market_data(ticker, is_crypto=False, is_commodity=False,
         '_rsi_divergence': _rsi_divergence,
         '_bars_since_breakout': _bars_since_breakout,
         '_surge_vol': _surge_vol, '_candle_pattern': _candle_pattern,
+        '_price_gap': _price_gap, '_secondary_trend': _secondary_trend,
+        '_chart_pattern': _chart_geo, '_gann': _gann,
         'earn_date': earn_date, 'earn_days': earn_days, 'earn_warn': earn_warn,
         'earn_approaching': earn_approaching, 'atr_pct': atr_pct,
         'high_volatility': high_volatility, 'm_analysis': m_analysis,
@@ -948,7 +1001,7 @@ def _detect_setup(ticker, portfolio_size, market, is_crypto, asset_type, max_dis
         trend_confirmed=tr_conf, trend_conf_label=tr_conf_lbl,
         fib_zone=fib_zone, fib_ret_pct=fib_pct,
         fib_swing_low=fib_sl, fib_swing_high=fib_sh, fib_levels=fib_lvls,
-        monthly_sr=market.get('monthly_sr', {}))
+        monthly_sr=market.get('monthly_sr', {}), gann=market.get('_gann', {}))
     # Pass quantitative volume ratio to factors (Factor 3 enhancement)
     _setup['_vol_ratio']     = market.get('_vol_ratio', 1.0)
     _setup['_dir_vol_ratio'] = market.get('_dir_vol_ratio', 1.0)
@@ -970,6 +1023,7 @@ def _detect_setup(ticker, portfolio_size, market, is_crypto, asset_type, max_dis
     _setup['_price_gap']          = market.get('_price_gap', {})
     _setup['_dow_phase']          = market.get('_dow_phase', 'UNKNOWN')
     _setup['_candle_pattern']     = market.get('_candle_pattern', {})
+    _setup['_gann']               = market.get('_gann', {})
     _setup['_adx_weekly']         = market.get('_adx_weekly', {})
     _setup['_spy_rs']             = market.get('spy_rs', {})   # fix: key is 'spy_rs' not '_spy_rs'
     _setup['_monthly_sr']         = market.get('monthly_sr', {})
@@ -1003,4 +1057,11 @@ def analyze(ticker, portfolio_size, is_crypto=False, is_israel=False,
         for direction in ('LONG', 'SHORT'):
             setup = _detect_setup(
                 ticker, portfolio_size, market, is_crypto, _atype, _mdist,
-                
+                direction,
+                is_commodity=is_commodity, is_israel=is_israel, is_intl=is_intl,
+            )
+            if setup:
+                setups.append(setup)
+    except Exception:
+        pass
+    return setups
