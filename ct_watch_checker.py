@@ -107,6 +107,8 @@ def _quick_price_check(entry: dict):
 
     try:
         import yfinance as _yf
+        from ct_market_data import _yf_throttle
+        _yf_throttle()   # respect the global Yahoo request spacing
         fi    = _yf.Ticker(ticker).fast_info
         price = fi.get('lastPrice') or fi.get('regularMarketPrice')
         if not price:
@@ -156,7 +158,15 @@ def analyze_ticker(entry: dict):
 
     try:
         from ct_analysis import _fetch_market_data, _detect_setup
-        from ct_config   import MAX_DIST_STOCK
+        from ct_config   import (MAX_DIST_STOCK, MAX_DIST_CRYPTO,
+                                 MAX_DIST_COMMODITY, MAX_DIST_INTL)
+
+        # Use the same per-asset distance the scanner uses (was always 12%,
+        # which rejected crypto setups the scanner accepted at 20%)
+        max_dist = (MAX_DIST_CRYPTO    if is_crypto    else
+                    MAX_DIST_COMMODITY if is_commodity else
+                    MAX_DIST_INTL      if (is_israel or is_intl) else
+                    MAX_DIST_STOCK)
 
         market = _fetch_market_data(
             ticker,
@@ -172,7 +182,7 @@ def analyze_ticker(entry: dict):
 
         setup = _detect_setup(
             ticker, 100000, market, is_crypto, asset_type,
-            MAX_DIST_STOCK, direction,
+            max_dist, direction,
             is_commodity=is_commodity,
             is_israel=is_israel,
             is_intl=is_intl,
@@ -209,6 +219,7 @@ def send_green_alert(to_email: str, entry: dict, setup: dict) -> bool:
     stop      = setup.get('Stop', 0)
     target    = setup.get('Target', 0)
     rr        = setup.get('R:R', 0)
+    gann_tgt  = setup.get('GannTarget', 0)
     earn      = setup.get('Earn', '-')
     horizon   = setup.get('HorizonLabel', '-')
     monthly   = setup.get('MonthlyTrend', '-')
@@ -276,6 +287,10 @@ def send_green_alert(to_email: str, entry: dict, setup: dict) -> bool:
       <tr style="background:#0f172a">
         <td style="padding:10px 16px;color:#64748b;font-size:13px">Target</td>
         <td style="padding:10px 16px;color:#38bdf8;font-size:15px;font-weight:700">${target}</td>
+      </tr>
+      <tr style="background:#0f172a">
+        <td style="padding:10px 16px;color:#64748b;font-size:13px">Gann 100%</td>
+        <td style="padding:10px 16px;color:#a855f7;font-size:13px;font-weight:700">${gann_tgt if gann_tgt else '-'}</td>
       </tr>
       <tr>
         <td style="padding:10px 16px;color:#64748b;font-size:13px">Risk:Reward</td>
@@ -601,8 +616,11 @@ def _spy_weekly_gain_live() -> float:
     """SPY % gain from last Friday close to now."""
     try:
         import yfinance as yf
-        spy = yf.download('SPY', period='5d', interval='1d',
-                          auto_adjust=True, progress=False)
+        from ct_market_data import yf_history
+        spy = yf_history(yf.Ticker('SPY'), period='5d', interval='1d',
+                         auto_adjust=True, raise_errors=False)
+        if spy is None:
+            return 0.0
         closes = spy['Close'].squeeze().dropna()
         if len(closes) < 2:
             return 0.0
@@ -641,8 +659,9 @@ def _enrich_candidates_with_live_prices(candidates: list) -> list:
         current_price = scan_entry   # safe fallback
 
         try:
+            from ct_market_data import yf_history
             asset = yf.Ticker(ticker)
-            hist  = asset.history(period='2d', interval='1h', auto_adjust=True)
+            hist  = yf_history(asset, period='2d', interval='1h', auto_adjust=True)
             if hist is not None and not hist.empty:
                 current_price = float(hist['Close'].iloc[-1])
             else:
@@ -684,7 +703,9 @@ def _count_open_positions() -> int:
         if not pos_file.exists():
             return 0
         data = _j.loads(pos_file.read_text(encoding='utf-8'))
-        return sum(1 for p in data.get('positions', []) if p.get('status') == 'OPEN')
+        # positions.json uses 'closed': bool (see ct_positions.pm_add) — there
+        # is no 'status' key; the old check made the banner always read 0 open
+        return sum(1 for p in data.get('positions', []) if not p.get('closed'))
     except Exception:
         return 0
 
@@ -844,7 +865,7 @@ def check_momentum_go(email: str):
   <p style="color:#475569;font-size:11px;margin-top:16px">
     ✓ VALID = live price within 5% of scan entry — safe to enter.<br>
     ⚠ CHASING = moved >5% since scan — wait for pullback or skip.<br>
-    Stop = 20-week MA. Risk = 1% of portfolio per trade.    Stop = 20-week MA. Risk = 1% of portfolio per trade.
+    Stop = 20-week MA. Risk = 1% of portfolio per trade.
   </p>
 </body>
 </html>"""
@@ -871,6 +892,167 @@ def check_momentum_go(email: str):
         _os.replace(tmp, cand_file)
     except Exception as e:
         print(f"  Momentum GO email FAILED: {e}")
+
+
+# ---------------------------------------------------------------------------
+#  Trade Management Alerts
+# ---------------------------------------------------------------------------
+def send_partial_exit_alert(to_email: str, entry: dict, cur_price: float,
+                             pct_toward_target: float) -> bool:
+    """Send PARTIAL EXIT signal when price reaches 90%+ toward target on low vol."""
+    from_email = os.environ.get('ALERT_EMAIL_FROM', '')
+    password   = os.environ.get('ALERT_EMAIL_PASSWORD', '').replace(' ', '')
+    if not from_email or not password:
+        return False
+
+    ticker    = entry['ticker']
+    direction = entry.get('direction', 'LONG')
+    entry_p   = entry.get('entry_price') or 0
+    stop      = entry.get('stop_price')  or 0
+    target    = entry.get('target_price') or 0
+    rr        = entry.get('rr') or 0
+
+    subject = f"[PARTIAL EXIT] {ticker} {direction} -- {pct_toward_target:.0f}% to target"
+    dir_color = '#22c55e' if direction == 'LONG' else '#ef4444'
+
+    html_body = f"""
+<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"></head>
+<body style="background:#0f172a;color:#e2e8f0;font-family:sans-serif;padding:24px;margin:0">
+<div style="max-width:600px;margin:0 auto">
+  <div style="background:#1e293b;border-radius:12px;padding:24px;border-left:4px solid #f59e0b">
+    <div style="color:#f59e0b;font-size:13px;font-weight:700;letter-spacing:2px;margin-bottom:8px">
+      PARTIAL EXIT SIGNAL
+    </div>
+    <div style="font-size:28px;font-weight:800;color:#f1f5f9">{ticker}</div>
+    <div style="color:{dir_color};font-size:14px;font-weight:700;margin-top:4px">{direction}</div>
+  </div>
+  <div style="background:#1e293b;border-radius:12px;padding:20px;margin-top:12px">
+    <p style="color:#94a3b8;margin:0 0 12px 0;font-size:14px">
+      Price has reached <b style="color:#f59e0b">{pct_toward_target:.0f}%</b> of the way to target
+      on below-average volume. Consider taking a partial profit (1/3 to 1/2 of position).
+    </p>
+    <table style="width:100%;border-collapse:collapse">
+      <tr>
+        <td style="padding:6px 0;color:#64748b;font-size:13px">Entry</td>
+        <td style="padding:6px 0;color:#e2e8f0;font-size:13px;text-align:right">${entry_p:.2f}</td>
+      </tr>
+      <tr>
+        <td style="padding:6px 0;color:#64748b;font-size:13px">Current Price</td>
+        <td style="padding:6px 0;color:#f59e0b;font-size:15px;font-weight:700;text-align:right">${cur_price:.2f}</td>
+      </tr>
+      <tr>
+        <td style="padding:6px 0;color:#64748b;font-size:13px">Target</td>
+        <td style="padding:6px 0;color:#22c55e;font-size:13px;text-align:right">${target:.2f}</td>
+      </tr>
+      <tr>
+        <td style="padding:6px 0;color:#64748b;font-size:13px">Stop</td>
+        <td style="padding:6px 0;color:#ef4444;font-size:13px;text-align:right">${stop:.2f}</td>
+      </tr>
+      <tr>
+        <td style="padding:6px 0;color:#64748b;font-size:13px">R:R</td>
+        <td style="padding:6px 0;color:#e2e8f0;font-size:13px;text-align:right">{rr}</td>
+      </tr>
+    </table>
+  </div>
+  <p style="color:#475569;font-size:11px;text-align:center;margin-top:16px">
+    Cycles Trading -- automated signal -- not financial advice
+  </p>
+</div>
+</body>
+</html>"""
+
+    try:
+        msg = MIMEMultipart('alternative')
+        msg['Subject'] = subject
+        msg['From']    = from_email
+        msg['To']      = to_email
+        msg.attach(MIMEText(html_body, 'html', 'utf-8'))
+        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as srv:
+            srv.login(from_email, password)
+            srv.sendmail(from_email, to_email, msg.as_string())
+        return True
+    except Exception as e:
+        print(f"    Partial-exit email FAILED: {e}")
+        return False
+
+
+def send_trail_stop_alert(to_email: str, entry: dict, new_stop: float) -> bool:
+    """Send TRAIL STOP UPDATE when a new swing low/high allows tightening the stop."""
+    from_email = os.environ.get('ALERT_EMAIL_FROM', '')
+    password   = os.environ.get('ALERT_EMAIL_PASSWORD', '').replace(' ', '')
+    if not from_email or not password:
+        return False
+
+    ticker    = entry['ticker']
+    direction = entry.get('direction', 'LONG')
+    old_stop  = entry.get('stop_price') or entry.get('trail_stop') or 0
+    entry_p   = entry.get('entry_price') or 0
+    target    = entry.get('target_price') or 0
+
+    subject = f"[TRAIL STOP] {ticker} {direction} -- Move stop to ${new_stop:.2f}"
+    dir_color = '#22c55e' if direction == 'LONG' else '#ef4444'
+    change    = new_stop - old_stop if direction == 'LONG' else old_stop - new_stop
+
+    html_body = f"""
+<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"></head>
+<body style="background:#0f172a;color:#e2e8f0;font-family:sans-serif;padding:24px;margin:0">
+<div style="max-width:600px;margin:0 auto">
+  <div style="background:#1e293b;border-radius:12px;padding:24px;border-left:4px solid #6366f1">
+    <div style="color:#6366f1;font-size:13px;font-weight:700;letter-spacing:2px;margin-bottom:8px">
+      TRAILING STOP UPDATE
+    </div>
+    <div style="font-size:28px;font-weight:800;color:#f1f5f9">{ticker}</div>
+    <div style="color:{dir_color};font-size:14px;font-weight:700;margin-top:4px">{direction}</div>
+  </div>
+  <div style="background:#1e293b;border-radius:12px;padding:20px;margin-top:12px">
+    <p style="color:#94a3b8;margin:0 0 12px 0;font-size:14px">
+      A new swing {'low' if direction=='LONG' else 'high'} has formed above your current stop.
+      Move your stop to lock in more profit (improvement: <b style="color:#6366f1">+${change:.2f}</b>).
+    </p>
+    <table style="width:100%;border-collapse:collapse">
+      <tr>
+        <td style="padding:6px 0;color:#64748b;font-size:13px">Entry</td>
+        <td style="padding:6px 0;color:#e2e8f0;font-size:13px;text-align:right">${entry_p:.2f}</td>
+      </tr>
+      <tr>
+        <td style="padding:6px 0;color:#64748b;font-size:13px">Old Stop</td>
+        <td style="padding:6px 0;color:#ef4444;font-size:13px;text-align:right">${old_stop:.2f}</td>
+      </tr>
+      <tr>
+        <td style="padding:6px 0;color:#6366f1;font-size:15px;font-weight:700">NEW STOP</td>
+        <td style="padding:6px 0;color:#6366f1;font-size:15px;font-weight:700;text-align:right">${new_stop:.2f}</td>
+      </tr>
+      <tr>
+        <td style="padding:6px 0;color:#64748b;font-size:13px">Target</td>
+        <td style="padding:6px 0;color:#22c55e;font-size:13px;text-align:right">${target:.2f}</td>
+      </tr>
+    </table>
+  </div>
+  <p style="color:#475569;font-size:11px;text-align:center;margin-top:16px">
+    Cycles Trading -- automated signal -- not financial advice
+  </p>
+</div>
+</body>
+</html>"""
+
+    try:
+        msg = MIMEMultipart('alternative')
+        msg['Subject'] = subject
+        msg['From']    = from_email
+        msg['To']      = to_email
+        msg.attach(MIMEText(html_body, 'html', 'utf-8'))
+        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as srv:
+            srv.login(from_email, password)
+            srv.sendmail(from_email, to_email, msg.as_string())
+        return True
+    except Exception as e:
+        print(f"    Trail-stop email FAILED: {e}")
+        return False
+
 
 
 def run_check():
@@ -969,6 +1151,98 @@ def run_check():
             entry['alert_count']  = entry.get('alert_count', 0) + 1
             alerts_sent += 1
             print(f"    Email sent OK")
+
+
+    # -- Phase 4: Trade Management (Partial Exit + Trail Stop) ----------------
+    print()
+    print("  Phase 4: trade management checks...")
+    try:
+        import yfinance as _yf
+        from ct_indicators import swing_lows as _swing_lows, swing_highs as _swing_highs
+    except Exception as _e:
+        print(f"    Skipping Phase 4 (import error: {_e})")
+        _yf = None
+
+    if _yf is not None:
+        active_entries = [e for e in data.get('tickers', [])
+                          if e.get('last_alerted')]
+        for _entry in active_entries:
+            _ticker     = _entry['ticker']
+            _direction  = _entry.get('direction', 'LONG')
+            _is_long    = 'LONG' in _direction
+            _entry_p    = _entry.get('entry_price') or 0
+            _stop_p     = _entry.get('trail_stop') or _entry.get('stop_price') or 0
+            _target_p   = _entry.get('target_price') or 0
+
+            if _entry_p <= 0 or _stop_p <= 0 or _target_p <= 0:
+                continue
+
+            try:
+                from ct_market_data import yf_history as _yfh
+                _hist = _yfh(_yf.Ticker(_ticker), period='6mo', interval='1wk')
+                if _hist is None or _hist.empty or len(_hist) < 6:
+                    continue
+                _close_s = _hist['Close']
+                _vol_s   = _hist['Volume']
+                _cur_p   = float(_close_s.iloc[-1])
+            except Exception:
+                continue
+
+            # --- Partial Exit check ---
+            if _is_long:
+                _dist_total = _target_p - _entry_p
+                _dist_done  = _cur_p - _entry_p
+            else:
+                _dist_total = _entry_p - _target_p
+                _dist_done  = _entry_p - _cur_p
+
+            if _dist_total > 0:
+                _pct = (_dist_done / _dist_total) * 100
+            else:
+                _pct = 0
+
+            _avg_vol    = float(_vol_s.rolling(10).mean().iloc[-1]) if len(_vol_s) >= 10 else 0
+            _cur_vol    = float(_vol_s.iloc[-1])
+            _vol_low    = _avg_vol > 0 and _cur_vol < _avg_vol
+            _partial_key = _entry.get('partial_exit_alerted', '')
+
+            if _pct >= 90 and _vol_low and _partial_key != today:
+                print(f"    {_ticker}: {_pct:.0f}% toward target, low vol -> PARTIAL EXIT")
+                _sent = send_partial_exit_alert(email, _entry, _cur_p, _pct)
+                if _sent:
+                    _entry['partial_exit_alerted'] = today
+                    alerts_sent += 1
+
+            # --- Trail Stop check ---
+            _prev_close = _close_s.iloc[:-1]  # exclude current bar
+            if _is_long:
+                _swings = _swing_lows(_prev_close, order=2)
+                if _swings:
+                    # Rule 1: most RECENT confirmed swing low, with the 1% buffer
+                    # (was max of last 3 — could place the stop above structure)
+                    from ct_config import PM_STOP_BUFFER as _buf
+                    _new_stop = round(_swings[-1] * (1 - _buf), 2)
+                    _trail_stored = _entry.get('trail_stop') or _stop_p
+                    if _new_stop > _trail_stored and _new_stop < _cur_p:
+                        print(f"    {_ticker}: new swing low {_new_stop:.2f} > stop {_trail_stored:.2f} -> TRAIL STOP")
+                        _sent = send_trail_stop_alert(email, _entry, _new_stop)
+                        if _sent:
+                            _entry['trail_stop'] = _new_stop
+                            _entry['stop_price']  = _new_stop
+                            alerts_sent += 1
+            else:
+                _swings = _swing_highs(_prev_close, order=2)
+                if _swings:
+                    from ct_config import PM_STOP_BUFFER as _buf
+                    _new_stop = round(_swings[-1] * (1 + _buf), 2)  # most recent swing high + buffer
+                    _trail_stored = _entry.get('trail_stop') or _stop_p
+                    if _new_stop < _trail_stored and _new_stop > _cur_p:
+                        print(f"    {_ticker}: new swing high {_new_stop:.2f} < stop {_trail_stored:.2f} -> TRAIL STOP")
+                        _sent = send_trail_stop_alert(email, _entry, _new_stop)
+                        if _sent:
+                            _entry['trail_stop'] = _new_stop
+                            _entry['stop_price']  = _new_stop
+                            alerts_sent += 1
 
     # Auto-prune: remove tickers out of zone for 21+ days
     NOT_IN_ZONE_DAYS = 21

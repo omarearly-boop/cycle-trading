@@ -42,8 +42,11 @@ def _spy_weekly_gain() -> float:
     """Return SPY % change over the last full trading week. Returns 0 on error."""
     try:
         import yfinance as yf
-        spy = yf.download("SPY", period="1mo", interval="1wk",
-                          auto_adjust=True, progress=False)
+        from ct_market_data import yf_history
+        spy = yf_history(yf.Ticker("SPY"), period="1mo", interval="1wk",
+                         auto_adjust=True, raise_errors=False)
+        if spy is None:
+            return 0.0
         closes = spy["Close"].squeeze().dropna()
         if len(closes) < 2:
             return 0.0
@@ -71,9 +74,10 @@ def _check_momentum(ticker: str, portfolio_size: float = 25000) -> dict | None:
     try:
         import yfinance as yf
         import numpy as np
+        from ct_market_data import yf_history
 
         asset = yf.Ticker(ticker)
-        df = asset.history(period="1y", interval="1wk", auto_adjust=True)
+        df = yf_history(asset, period="1y", interval="1wk", auto_adjust=True)
         if df is None or len(df) < 52:
             return None
 
@@ -88,13 +92,12 @@ def _check_momentum(ticker: str, portfolio_size: float = 25000) -> dict | None:
         if price <= ma20 or price <= ma50:
             return None
 
-        # ── Filter 2: RSI 55–78 ──────────────────────────────────
-        delta = closes.diff()
-        gain  = delta.clip(lower=0).rolling(14).mean()
-        loss  = (-delta.clip(upper=0)).rolling(14).mean()
-        rs    = gain / loss
-        rsi_series = 100 - 100 / (1 + rs)
+        # ── Filter 2: RSI 55–78 (Wilder-smoothed, same as main scanner) ──
+        from ct_indicators import rsi as _rsi_fn
+        rsi_series = _rsi_fn(closes)
         rsi   = float(rsi_series.iloc[-1])
+        if rsi != rsi:   # NaN guard
+            return None
         if rsi < 55 or rsi > 78:
             return None
 
@@ -245,7 +248,11 @@ def scan_momentum(min_spy_pct: float = 2.0):
     def _scan_one(t):
         return _check_momentum(t, portfolio_size)
 
-    with ThreadPoolExecutor(max_workers=8) as ex:
+    try:
+        from ct_config import SCAN_MAX_WORKERS as _workers
+    except Exception:
+        _workers = 2
+    with ThreadPoolExecutor(max_workers=_workers) as ex:
         futures = {ex.submit(_scan_one, t): t for t in us_tickers}
         done = 0
         for fut in as_completed(futures):
@@ -393,7 +400,7 @@ def _write_html(results, out_path, spy_pct, is_rally, portfolio_size):
 
 <table>
   <thead><tr>
-    <th>Ticker</th><th>Price</th><th>RSI</th><th>MA20</th>    <th>Ticker</th><th>Price</th><th>RSI</th><th>MA20</th><th>MA50</th>
+    <th>Ticker</th><th>Price</th><th>RSI</th><th>MA20</th><th>MA50</th>
     <th>Entry</th><th>Stop</th><th>Target</th><th>R:R</th>
     <th>Position</th><th>Volume</th><th>Earnings</th>
   </tr></thead>

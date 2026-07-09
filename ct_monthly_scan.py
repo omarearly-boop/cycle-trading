@@ -53,12 +53,13 @@ def _save_watchlist(data):
 def _scan_monthly(ticker: str) -> dict:
     try:
         import yfinance as yf
-        from ct_indicators import swing_lows, swing_highs
+        from ct_indicators import swing_lows, swing_highs, rsi as _rsi_fn
         from ct_factors import check_fibonacci_zone
+        from ct_market_data import yf_history
 
         asset = yf.Ticker(ticker)
-        df = asset.history(period='5y', interval='1mo',
-                           auto_adjust=True, raise_errors=False)
+        df = yf_history(asset, period='5y', interval='1mo',
+                        auto_adjust=True, raise_errors=False)
         if df is None or len(df) < 18:
             return None
         df.columns = [c.capitalize() for c in df.columns]
@@ -68,12 +69,10 @@ def _scan_monthly(ticker: str) -> dict:
         if price <= 0:
             return None
 
-        # Monthly RSI
-        delta = df['Close'].diff()
-        gain  = delta.clip(lower=0).rolling(14).mean()
-        loss  = (-delta.clip(upper=0)).rolling(14).mean()
-        rs    = gain / loss
-        rsi   = float((100 - 100 / (1 + rs)).iloc[-1])
+        # Monthly RSI (Wilder-smoothed, same as main scanner)
+        rsi = float(_rsi_fn(df['Close']).iloc[-1])
+        if rsi != rsi:   # NaN guard
+            rsi = 50.0
 
         # Monthly S/R
         lows  = swing_lows(df['Low'],  order=2)
@@ -243,7 +242,11 @@ def scan_monthly(max_dist: float = 8.0):
     results = []
     total   = len(us_tickers)
 
-    with ThreadPoolExecutor(max_workers=6) as ex:
+    try:
+        from ct_config import SCAN_MAX_WORKERS as _workers
+    except Exception:
+        _workers = 2
+    with ThreadPoolExecutor(max_workers=_workers) as ex:
         futures = {ex.submit(_scan_monthly, t): t for t in us_tickers}
         done = 0
         for fut in as_completed(futures):
