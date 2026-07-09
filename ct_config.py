@@ -52,6 +52,11 @@ PM_SWING_LOOKBACK = 2     # bars each side to confirm a weekly swing pivot
 PM_MOMENTUM_WEEKS = 3     # consecutive up/down weeks to trigger momentum rule
 PM_STOP_BUFFER    = 0.01  # 1 % buffer below swing low / above swing high
 
+# ── Yahoo Finance rate-limit protection ─────────────────────
+SCAN_MAX_WORKERS = 2     # parallel fetch threads (was 6 — tripped Yahoo rate limits)
+YF_THROTTLE_SEC  = 0.6   # min global spacing between Yahoo requests (~100/min)
+YF_MAX_RETRIES   = 3     # retries with exponential backoff on YFRateLimitError
+
 # ── Liquidity / pre-filters (course lesson 30) ──────────────
 MIN_WEEKLY_VOL_US    = 5_000_000  # weekly bars ≈ 1M shares/day (course: Avg Vol > 1M/day)
 MIN_WEEKLY_VOL_OTHER = 10_000     # crypto / commodity / TASE / intl

@@ -47,7 +47,64 @@ except: _install("yfinance"); import yfinance as yf
 try:    import pandas as pd
 except: _install("pandas"); import pandas as pd
 
-from ct_config import SECTOR_ETF
+from ct_config import SECTOR_ETF, YF_THROTTLE_SEC, YF_MAX_RETRIES
+
+# -----------------------------------------------------------------------------
+#  Yahoo rate-limit protection: global request spacing + backoff retry.
+#  ALL yfinance network calls in this codebase should go through yf_history /
+#  yf_info rather than asset.history() / asset.info directly.
+# -----------------------------------------------------------------------------
+import threading as _threading
+import time as _time
+import random as _random
+
+_YF_GATE = _threading.Lock()
+_YF_LAST = [0.0]
+
+def _yf_throttle():
+    """Enforce a minimum global spacing between Yahoo requests (thread-safe)."""
+    with _YF_GATE:
+        wait = _YF_LAST[0] + YF_THROTTLE_SEC - _time.time()
+        if wait > 0:
+            _time.sleep(wait)
+        _YF_LAST[0] = _time.time()
+
+def _is_rate_limit(e) -> bool:
+    name = type(e).__name__
+    return 'RateLimit' in name or 'Too Many Requests' in str(e) or '429' in str(e)
+
+def yf_history(asset, **kwargs):
+    """
+    asset.history() with global throttling and exponential-backoff retry
+    on Yahoo rate limits. Returns the DataFrame or None after retries.
+    """
+    for attempt in range(YF_MAX_RETRIES):
+        _yf_throttle()
+        try:
+            return asset.history(**kwargs)
+        except Exception as e:
+            if _is_rate_limit(e) and attempt < YF_MAX_RETRIES - 1:
+                pause = (2 ** attempt) * 10 + _random.uniform(0, 3)
+                print(f'  ⏳ Yahoo rate limit — backing off {pause:.0f}s...')
+                _time.sleep(pause)
+                continue
+            if _is_rate_limit(e):
+                return None
+            raise
+
+def yf_info(asset) -> dict:
+    """asset.info with throttling + rate-limit retry. Returns {} on failure."""
+    for attempt in range(YF_MAX_RETRIES):
+        _yf_throttle()
+        try:
+            return asset.info or {}
+        except Exception as e:
+            if _is_rate_limit(e) and attempt < YF_MAX_RETRIES - 1:
+                pause = (2 ** attempt) * 10 + _random.uniform(0, 3)
+                _time.sleep(pause)
+                continue
+            return {}
+    return {}
 
 # -- Sector ETF cache (persists for the lifetime of a scan run) ---------------
 _SECTOR_CACHE: dict = {}        # sector_etf -> sec_df
@@ -80,8 +137,8 @@ def get_market_regime() -> dict:
     try:
         for tkr in ('SPY', 'QQQ'):
             asset = yf.Ticker(tkr)
-            df    = asset.history(period='2y', interval='1wk',
-                                  auto_adjust=True, raise_errors=False)
+            df    = yf_history(asset, period='2y', interval='1wk',
+                               auto_adjust=True, raise_errors=False)
             if df is None or len(df) < 20:
                 print(f"  WARNING Market regime: insufficient data for {tkr}")
                 _MARKET_REGIME_CACHE = {'regime': 'NEUTRAL'}
@@ -221,7 +278,7 @@ def get_monthly_analysis(ticker, asset=None):
     try:
         if asset is None:
             asset = yf.Ticker(ticker)
-        mdf = asset.history(period='4y', interval='1mo', auto_adjust=True, raise_errors=False)
+        mdf = yf_history(asset, period='4y', interval='1mo', auto_adjust=True, raise_errors=False)
         if mdf is None or len(mdf) < 8:
             return None
         mdf.columns = [c.capitalize() for c in mdf.columns]
@@ -273,8 +330,8 @@ def get_sector_rs(ticker, df_weekly):
         sec_df = _SECTOR_CACHE.get(sector_etf)
         if sec_df is None:
             sec_asset = yf.Ticker(sector_etf)
-            sec_df = sec_asset.history(period='3mo', interval='1wk',
-                                       auto_adjust=True, raise_errors=False)
+            sec_df = yf_history(sec_asset, period='3mo', interval='1wk',
+                                auto_adjust=True, raise_errors=False)
             if sec_df is None or len(sec_df) < 5:
                 return None
             sec_df.columns = [c.capitalize() for c in sec_df.columns]
@@ -330,8 +387,8 @@ def get_spy_rs(df_weekly) -> dict:
         spy_df = _SPY_RS_CACHE.get('spy_df')
         if spy_df is None:
             spy_asset = yf.Ticker('SPY')
-            spy_df = spy_asset.history(period='1y', interval='1wk',
-                                       auto_adjust=True, raise_errors=False)
+            spy_df = yf_history(spy_asset, period='1y', interval='1wk',
+                                auto_adjust=True, raise_errors=False)
             if spy_df is None or len(spy_df) < 14:
                 return {}
             spy_df.columns = [c.capitalize() for c in spy_df.columns]
@@ -379,8 +436,8 @@ def get_daily_timing(ticker: str) -> dict:
     try:
         from ct_indicators import rsi, cci   # lazy import (avoids circular import)
         asset = yf.Ticker(ticker)
-        ddf = asset.history(period='6mo', interval='1d',
-                            auto_adjust=True, raise_errors=False)
+        ddf = yf_history(asset, period='6mo', interval='1d',
+                         auto_adjust=True, raise_errors=False)
         if ddf is not None and len(ddf) >= 30:
             ddf.columns = [c.capitalize() for c in ddf.columns]
             d_rsi = rsi(ddf['Close'])
@@ -435,8 +492,8 @@ def get_monthly_sr(ticker: str, asset, current_price: float) -> dict:
         import numpy as np
         warnings.filterwarnings('ignore')
 
-        df = asset.history(period='5y', interval='1mo',
-                           auto_adjust=True, raise_errors=False)
+        df = yf_history(asset, period='5y', interval='1mo',
+                        auto_adjust=True, raise_errors=False)
         if df is None or len(df) < 18:
             _MONTHLY_SR_CACHE[ticker] = result
             return result
@@ -446,8 +503,6 @@ def get_monthly_sr(ticker: str, asset, current_price: float) -> dict:
 
         # ── Swing pivots (order=2 = needs 2 bars each side confirmed) ────────
         from ct_indicators import swing_lows, swing_highs
-
-   
 
         lows  = swing_lows(df['Low'],  order=2)
         highs = swing_highs(df['High'], order=2)

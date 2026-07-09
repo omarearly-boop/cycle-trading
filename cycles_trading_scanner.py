@@ -256,7 +256,8 @@ def main():
         def _scan_one(ticker):
             return (ticker, analyze(ticker, PORTFOLIO_SIZE, interval=INTERVAL, period=PERIOD, **kwargs))
 
-        with ThreadPoolExecutor(max_workers=6) as executor:
+        from ct_config import SCAN_MAX_WORKERS
+        with ThreadPoolExecutor(max_workers=SCAN_MAX_WORKERS) as executor:
             futures = {executor.submit(_scan_one, t): t for t in tickers}
             for future in as_completed(futures):
                 idx += 1

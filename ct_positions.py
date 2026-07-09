@@ -299,9 +299,10 @@ def manage_positions(send_email: bool = False) -> list:
 
     def _fetch(ticker):
         try:
+            from ct_market_data import yf_history
             asset = yf.Ticker(ticker)
-            df = asset.history(period='6mo', interval='1wk',
-                               auto_adjust=True, raise_errors=False)
+            df = yf_history(asset, period='6mo', interval='1wk',
+                            auto_adjust=True, raise_errors=False)
             if df is None or len(df) < 8:
                 return None
             df.columns = [c.capitalize() for c in df.columns]

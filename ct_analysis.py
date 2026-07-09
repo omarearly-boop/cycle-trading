@@ -33,7 +33,8 @@ from ct_indicators import (
     calc_macd, calc_bollinger, estimate_time_horizon,
     detect_price_gaps, detect_chart_pattern, check_gann_levels, calc_vwap,
 )
-from ct_market_data import get_earnings, get_monthly_analysis, get_sector_rs, get_monthly_sr, get_spy_rs
+from ct_market_data import (get_earnings, get_monthly_analysis, get_sector_rs,
+                            get_monthly_sr, get_spy_rs, yf_history, yf_info)
 from ct_factors import calc_probability, check_fibonacci_zone
 from ct_learnings import load_learnings
 
@@ -135,7 +136,8 @@ def get_fundamental_analysis(ticker, info=None):
     """
     try:
         if info is None:
-            info = yf.Ticker(ticker).info or {}
+            from ct_market_data import yf_info as _yfi
+            info = _yfi(yf.Ticker(ticker))
         info = info or {}
 
         # ── Analyst consensus → signal ────────────────────────
@@ -605,8 +607,10 @@ def _fetch_market_data(ticker, is_crypto=False, is_commodity=False,
     period:   '1y' / '2y' / '5y'
     """
     asset = yf.Ticker(ticker)
-    df    = asset.history(period=period, interval=interval, auto_adjust=True,
-                          raise_errors=False)
+    df    = yf_history(asset, period=period, interval=interval, auto_adjust=True,
+                       raise_errors=False)
+    if df is None:
+        _diag('no_data'); return None
 
     # Need fewer bars for monthly, more for daily
     min_bars = {'1d': 100, '1wk': 55, '1mo': 24}.get(interval, 55)
@@ -643,7 +647,7 @@ def _fetch_market_data(ticker, is_crypto=False, is_commodity=False,
     # (crypto/commodity/israel/intl exempt — market cap not reliably available)
     if not (is_crypto or is_commodity or is_israel or is_intl):
         try:
-            _info = asset.info or {}
+            _info = yf_info(asset)
             _mktcap = _info.get('marketCap') or 0
             if _mktcap > 0 and _mktcap < 300_000_000:
                 _diag('mktcap'); return None  # micro-cap -- too small per course rules
@@ -796,7 +800,7 @@ def _fetch_market_data(ticker, is_crypto=False, is_commodity=False,
     _cached_info = None  # passed to _finalize_setup → get_fundamental_analysis
     if not skip_fundamentals:
         try:
-            _cached_info = asset.info or {}
+            _cached_info = yf_info(asset)
             short_pct = float(_cached_info.get('shortPercentOfFloat', 0) or 0)
             inst_pct  = float(_cached_info.get('heldPercentInstitutions', 0) or 0)
         except Exception:
