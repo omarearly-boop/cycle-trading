@@ -161,19 +161,50 @@ def _run(label: str, cmd: list) -> bool:
         return False
 
 
+def _run_with_new_report(label: str, cmd: list, pattern: str) -> 'Path | None':
+    """Run a scanner command and return its report only if a NEW file was created.
+    If the scan succeeded but produced no new HTML (0 setups), log that clearly
+    instead of silently returning yesterday's report.
+    """
+    before = _latest_report(pattern)
+    before_mtime = before.stat().st_mtime if before else 0.0
+
+    ok = _run(label, cmd)
+    if not ok:
+        return None
+
+    after = _latest_report(pattern)
+    if after and after.stat().st_mtime > before_mtime + 1:
+        # A genuinely new report was written
+        return after
+
+    # Scanner ran OK but no new report — 0 setups found
+    _log(f'    0 setups found — no new report generated')
+    return None
+
+
 def run_weekly() -> 'Path | None':
-    ok = _run('Weekly Retest Scan', [sys.executable, 'cycles_trading_scanner.py'])
-    return _latest_report('cycles_report_*.html') if ok else None
+    return _run_with_new_report(
+        'Weekly Retest Scan',
+        [sys.executable, 'cycles_trading_scanner.py'],
+        'cycles_report_*.html',
+    )
 
 
 def run_momentum() -> 'Path | None':
-    ok = _run('Momentum Scan', [sys.executable, 'cycles_trading_scanner.py', 'momentum'])
-    return _latest_report('momentum_report_*.html') if ok else None
+    return _run_with_new_report(
+        'Momentum Scan',
+        [sys.executable, 'cycles_trading_scanner.py', 'momentum'],
+        'momentum_report_*.html',
+    )
 
 
 def run_review() -> 'Path | None':
-    ok = _run('Weekly Review', [sys.executable, 'ct_weekly_review.py'])
-    return _latest_report('weekly_review_*.html') if ok else None
+    return _run_with_new_report(
+        'Weekly Review',
+        [sys.executable, 'ct_weekly_review.py'],
+        'weekly_review_*.html',
+    )
 
 
 def run_monthly() -> 'Path | None':
@@ -342,7 +373,7 @@ def main():
         _log('Sending email summary...')
         send_email(tasks, reports, dry_run=False)
     else:
-        _log('Email skipped (weekday run — GREEN alerts via watch checker only).')
+        _log('Email skipped (weekday run -- GREEN alerts via watch checker only).')
 
     _log('=' * 60)
 

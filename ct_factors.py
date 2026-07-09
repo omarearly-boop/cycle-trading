@@ -500,6 +500,8 @@ def _factor_directional_volume(r):
     Expert principle: high down-bar volume = sellers still in control.
     """
     ratio = r.get('_dir_vol_ratio', 1.0)
+    # Guard against zero — happens when every bar in the window is an up-bar
+    inv = (1 / ratio) if ratio > 0 else 99.0
 
     if ratio >= 2.0:
         return (-14, 'Dir.Volume', f'Down-bar vol {ratio:.1f}x up-bar vol -- heavy institutional selling. '
@@ -510,11 +512,11 @@ def _factor_directional_volume(r):
     elif ratio >= 1.1:
         return (-3,  'Dir.Volume', f'Down-bar vol {ratio:.1f}x up-bar vol -- mild selling bias, watch closely')
     elif ratio <= 0.5:
-        return (+12, 'Dir.Volume', f'Up-bar vol {1/ratio:.1f}x down-bar vol -- strong accumulation')
+        return (+12, 'Dir.Volume', f'Up-bar vol {inv:.1f}x down-bar vol -- strong accumulation')
     elif ratio <= 0.7:
-        return (+7,  'Dir.Volume', f'Up-bar vol {1/ratio:.1f}x down-bar vol -- buyers dominate')
+        return (+7,  'Dir.Volume', f'Up-bar vol {inv:.1f}x down-bar vol -- buyers dominate')
     elif ratio <= 0.9:
-        return (+3,  'Dir.Volume', f'Up-bar vol {1/ratio:.1f}x down-bar vol -- mild buying bias')
+        return (+3,  'Dir.Volume', f'Up-bar vol {inv:.1f}x down-bar vol -- mild buying bias')
     else:
         return (0,   'Dir.Volume', f'Dir.vol ratio {ratio:.1f} -- balanced pressure')
 
@@ -892,6 +894,235 @@ def _factor_breakout_quality(r):
                 f'-- average breakout quality.')
 
 
+@factor
+def _factor_adx_structure(r):
+    """
+    Factor 27 - Long-term Structure (ADX).
+
+    ADX measures trend strength on the weekly timeframe.
+    A low ADX = stock is range-bound / chopping -- setup has lower conviction.
+    A high ADX = clear directional trend -- setup has higher conviction.
+
+    Scoring:
+      ADX > 30 AND 52-week range > 30%  -> STRONG TREND      +8
+      ADX > 25                           -> TRENDING           +4
+      ADX 20-25                          -> MIXED / NEUTRAL     0
+      ADX < 20                                       -> RANGING            -6
+      ADX < 20 AND range < 20%          -> TIGHT CHOP        -12  (e.g. 7-year range stock)
+      + chronic: >70% of last 26 weeks ADX < 20 -> additional  -5
+    """
+    adx_data = r.get('_adx_weekly', {})
+    if not adx_data:
+        return None
+
+    adx       = adx_data.get('adx', 0)
+    range_pct = adx_data.get('range_pct_52', 0)
+    low_bars  = adx_data.get('low_adx_bars', 0)
+
+    if adx <= 0:
+        return None
+
+    chronic = low_bars >= 18  # >70% of last 26 weekly bars had ADX < 20
+
+    if adx > 30 and range_pct > 30:
+        delta = +8
+        expl  = (f'ADX {adx} - strong trend, 52-week range {range_pct}%. '
+                 f'Clear directional structure supports setup conviction.')
+    elif adx > 25:
+        delta = +4
+        expl  = (f'ADX {adx} - trending. Good directional conviction for the setup.')
+    elif adx >= 20:
+        delta = 0
+        expl  = (f'ADX {adx} - mixed/developing trend. Neutral structure.')
+    elif adx < 20 and range_pct < 20:
+        delta = -12
+        expl  = (f'ADX {adx} - range-bound, 52-week range only {range_pct}%. '
+                 f'Stock in tight multi-year chop - low setup conviction.')
+    else:
+        delta = -6
+        expl  = (f'ADX {adx} - weak trend, stock ranging. '
+                 f'52-week range {range_pct}%.')
+
+    if chronic:
+        delta -= 5
+        expl  += f' Chronic chop: {low_bars}/26 recent weeks ADX<20.'
+
+    return (delta, 'Long-term Structure', expl)
+
+
+@factor
+def _factor_spy_rs(r):
+    """Factor 28 - Relative Strength vs SPY (13-week / 1 quarter).
+
+    Compares the stock's 13-week return against SPY's 13-week return.
+    A stock that outperforms the market shows institutional accumulation
+    -- exactly what we want entering a setup.
+
+    Scoring:
+      RS vs SPY >= +15%  -> LEADER   +10  (crushing the market)
+      RS vs SPY >= +5%   -> STRONG    +6  (clearly outperforming)
+      RS vs SPY >=  0%   -> INLINE     0  (matching market)
+      RS vs SPY >= -5%   -> LAGGING   -4  (slightly underperforming)
+      RS vs SPY <  -5%   -> WEAK      -8  (consistently losing vs market)
+    """
+    spy_rs = r.get('_spy_rs', {})
+    if not spy_rs:
+        return None
+
+    rs      = spy_rs.get('rs_vs_spy', 0)
+    stk_ret = spy_rs.get('stock_ret', 0)
+    spy_ret = spy_rs.get('spy_ret', 0)
+
+    if rs >= 15:
+        delta = +10
+        expl  = (f'RS vs SPY: +{rs}% over 13 weeks (stock +{stk_ret}% vs SPY +{spy_ret}%). '
+                 f'Market LEADER -- strong institutional accumulation signal.')
+    elif rs >= 5:
+        delta = +6
+        expl  = (f'RS vs SPY: +{rs}% over 13 weeks (stock +{stk_ret}% vs SPY +{spy_ret}%). '
+                 f'Outperforming market -- good momentum entering setup.')
+    elif rs >= 0:
+        delta = 0
+        expl  = (f'RS vs SPY: +{rs}% over 13 weeks. Matching market -- neutral.')
+    elif rs >= -5:
+        delta = -4
+        expl  = (f'RS vs SPY: {rs}% over 13 weeks (stock {stk_ret}% vs SPY {spy_ret}%). '
+                 f'Slightly lagging market -- reduced conviction.')
+    else:
+        delta = -8
+        expl  = (f'RS vs SPY: {rs}% over 13 weeks (stock {stk_ret}% vs SPY {spy_ret}%). '
+                 f'Consistently underperforming market -- weak setup conviction.')
+
+    return (delta, 'SPY Relative Strength', expl)
+
+
+
+@factor
+def _factor_volume_surge(r):
+    """Factor 29 - Volume Surge on Breakout.
+
+    Looks at the highest-volume bar in the last 8 weekly bars.
+    A strong directional bar (up or down) with vol > 1.5x avg = institutional
+    participation = setup confirmation.
+    A high-vol bar in the WRONG direction = distribution / warning.
+
+    Scoring:
+      vol >= 2.0x AND direction aligned    -> +10
+      vol >= 1.5x AND direction aligned    ->  +6
+      vol >= 1.2x AND direction aligned    ->  +3
+      vol >= 1.5x AND direction OPPOSITE   ->  -8  (distribution)
+      vol >= 1.2x AND direction OPPOSITE   ->  -4
+    """
+    surge  = r.get("_surge_vol", {})
+    if not surge:
+        return None
+
+    ratio  = surge.get("ratio", 0)
+    s_dir  = surge.get("direction", "FLAT")
+    is_long = "LONG" in r["Dir"]
+
+    aligned = (is_long and s_dir == "UP") or (not is_long and s_dir == "DOWN")
+    opposite = (is_long and s_dir == "DOWN") or (not is_long and s_dir == "UP")
+
+    if ratio >= 2.0 and aligned:
+        return (+10, "Volume Surge", f"Vol surge {ratio}x avg ({s_dir}) -- strong institutional participation on breakout.")
+    elif ratio >= 1.5 and aligned:
+        return (+6,  "Volume Surge", f"Vol surge {ratio}x avg ({s_dir}) -- good volume confirmation.")
+    elif ratio >= 1.2 and aligned:
+        return (+3,  "Volume Surge", f"Vol {ratio}x avg ({s_dir}) -- mild vol confirmation.")
+    elif ratio >= 1.5 and opposite:
+        return (-8,  "Volume Surge", f"Vol surge {ratio}x avg but direction {s_dir} -- possible distribution. Warning.")
+    elif ratio >= 1.2 and opposite:
+        return (-4,  "Volume Surge", f"Vol {ratio}x avg ({s_dir}) -- slightly against setup direction.")
+    else:
+        return (0,   "Volume Surge", f"Vol {ratio}x avg -- no strong surge signal. Neutral.")
+
+
+@factor
+def _factor_candle_quality(r):
+    """Factor 30 - Price Action Candle Quality (last weekly bar).
+
+    Reads the pattern of the most recent weekly close candle:
+      HAMMER        -- long lower wick, small body = bullish rejection from low
+      SHOOTING_STAR -- long upper wick, small body = bearish rejection from high
+      BULL_ENGULF   -- current up bar engulfs previous down bar = bullish reversal
+      BEAR_ENGULF   -- current down bar engulfs previous up bar = bearish reversal
+      NEUTRAL       -- no clear signal
+
+    Aligned patterns boost score. Opposite patterns warn.
+
+    Scoring:
+      aligned reversal candle  -> +8
+      neutral / flat candle    ->  0
+      opposite reversal candle -> -6
+    """
+    cp     = r.get("_candle_pattern", {})
+    if not cp:
+        return None
+
+    ctype   = cp.get("type", "NEUTRAL")
+    is_long = "LONG" in r["Dir"]
+
+    bullish_candles = {"HAMMER", "BULL_ENGULF"}
+    bearish_candles = {"SHOOTING_STAR", "BEAR_ENGULF"}
+
+    if is_long and ctype in bullish_candles:
+        return (+8, "Candle Pattern", f"{ctype} on weekly -- bullish rejection / reversal candle aligned with LONG setup.")
+    elif not is_long and ctype in bearish_candles:
+        return (+8, "Candle Pattern", f"{ctype} on weekly -- bearish rejection / reversal candle aligned with SHORT setup.")
+    elif is_long and ctype in bearish_candles:
+        return (-6, "Candle Pattern", f"{ctype} on weekly -- bearish candle against LONG setup. Caution.")
+    elif not is_long and ctype in bullish_candles:
+        return (-6, "Candle Pattern", f"{ctype} on weekly -- bullish candle against SHORT setup. Caution.")
+    else:
+        return (0,  "Candle Pattern", f"Candle: {ctype} -- no strong reversal signal. Neutral.")
+
+
+@factor
+def _factor_short_squeeze(r):
+    """Factor 31 - Short Squeeze Potential.
+
+    High short interest + LONG setup = potential for a fast short squeeze move.
+    When shorts are forced to cover, price can rally 2-3x faster than usual.
+
+    For SHORT setups: very high short interest is a WARNING -- too many shorts
+    means consensus trade = crowded = vulnerable to squeeze.
+
+    Scoring (LONG):
+      Short float > 25%  -> +10  (extreme squeeze fuel)
+      Short float > 15%  -> +6   (high squeeze potential)
+      Short float > 8%   -> +2   (moderate)
+      Short float < 3%   ->  0   (no fuel)
+
+    Scoring (SHORT):
+      Short float > 25%  -> -8   (crowded -- dangerous short)
+      Short float > 15%  -> -4   (crowded short -- caution)
+    """
+    short_int = r.get("ShortInt", 0) or 0   # already as %, e.g. 18.5
+    is_long   = "LONG" in r["Dir"]
+
+    if short_int <= 0:
+        return None
+
+    if is_long:
+        if short_int > 25:
+            return (+10, "Short Squeeze", f"Short float {short_int:.1f}% -- extreme squeeze fuel. Fast move potential on LONG.")
+        elif short_int > 15:
+            return (+6,  "Short Squeeze", f"Short float {short_int:.1f}% -- high squeeze potential on LONG.")
+        elif short_int > 8:
+            return (+2,  "Short Squeeze", f"Short float {short_int:.1f}% -- moderate short interest.")
+        else:
+            return (0,   "Short Squeeze", f"Short float {short_int:.1f}% -- low, no squeeze dynamic.")
+    else:  # SHORT
+        if short_int > 25:
+            return (-8,  "Short Squeeze", f"Short float {short_int:.1f}% -- very crowded short. High squeeze risk.")
+        elif short_int > 15:
+            return (-4,  "Short Squeeze", f"Short float {short_int:.1f}% -- crowded short. Caution.")
+        elif short_int > 8:
+            return (0,   "Short Squeeze", f"Short float {short_int:.1f}% -- moderate competition on short side.")
+        else:
+            return (+2,  "Short Squeeze", f"Short float {short_int:.1f}% -- low short interest supports short thesis.")
+
 def calc_probability(r):
     """
     Iterate FACTORS registry. Each factor returns (delta, label, explanation) or None to skip.
@@ -903,6 +1134,8 @@ def calc_probability(r):
         result = fn(r)
         if result is None:
             continue
+        delta, label, expl = result
+        score += delta
         d, label, explain = result
         score += d
         factors.append((label, d, explain))

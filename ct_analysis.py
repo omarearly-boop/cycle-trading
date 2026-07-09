@@ -31,7 +31,7 @@ from ct_indicators import (
     check_false_breakout, check_level_ambiguity, check_swing_broken,
     calc_macd, calc_bollinger, estimate_time_horizon,
 )
-from ct_market_data import get_earnings, get_monthly_analysis, get_sector_rs, get_monthly_sr
+from ct_market_data import get_earnings, get_monthly_analysis, get_sector_rs, get_monthly_sr, get_spy_rs
 from ct_factors import calc_probability, check_fibonacci_zone
 from ct_learnings import load_learnings
 
@@ -431,7 +431,7 @@ def _build_setup_dict(direction, ticker, price, rsi_val, support, resistance,
         '_macd':          macd_data,
         '_boll':          boll_data,
         '_fundamental':   None,   # filled in by _finalize_setup
-        'monthly_sr':     monthly_sr or {},  # Factor 24 — Monthly S/R Confluence
+        'monthly_sr':     monthly_sr or {},  # Factor 24 -- Monthly S/R Confluence
     }
 
 
@@ -478,6 +478,82 @@ def _squeeze_level(sp, ip):
     if sp >= 0.10 or ip >= 0.80:
         return 'MEDIUM'
     return 'NONE'
+
+
+def _calc_adx(df, period=14):
+    """Compute ADX, +DI, -DI from a weekly OHLC DataFrame.
+
+    Returns dict with: adx, plus_di, minus_di, range_pct_52, low_adx_bars.
+    Returns {} if not enough data.
+    """
+    import numpy as np
+    n = len(df)
+    if n < period * 2 + 2:
+        return {}
+
+    high  = df['High'].values.astype(float)
+    low   = df['Low'].values.astype(float)
+    close = df['Close'].values.astype(float)
+
+    # True Range
+    tr = np.zeros(n)
+    for i in range(1, n):
+        tr[i] = max(high[i] - low[i],
+                    abs(high[i] - close[i - 1]),
+                    abs(low[i]  - close[i - 1]))
+
+    # Directional Movement
+    plus_dm  = np.zeros(n)
+    minus_dm = np.zeros(n)
+    for i in range(1, n):
+        up   = high[i] - high[i - 1]
+        down = low[i - 1] - low[i]
+        plus_dm[i]  = up   if (up > down   and up   > 0) else 0.0
+        minus_dm[i] = down if (down > up   and down > 0) else 0.0
+
+    # Wilder smoothing
+    def wilder(arr, p):
+        out = np.zeros(n)
+        out[p] = arr[1:p + 1].sum()
+        for i in range(p + 1, n):
+            out[i] = out[i - 1] - out[i - 1] / p + arr[i]
+        return out
+
+    atr_s   = wilder(tr,       period)
+    plus_s  = wilder(plus_dm,  period)
+    minus_s = wilder(minus_dm, period)
+
+    plus_di  = np.where(atr_s > 0, 100.0 * plus_s  / atr_s, 0.0)
+    minus_di = np.where(atr_s > 0, 100.0 * minus_s / atr_s, 0.0)
+
+    dx = np.where((plus_di + minus_di) > 0,
+                  100.0 * np.abs(plus_di - minus_di) / (plus_di + minus_di),
+                  0.0)
+
+    adx = np.zeros(n)
+    start = period * 2
+    if start < n:
+        adx[start] = dx[period:start].mean()
+        for i in range(start + 1, n):
+            adx[i] = (adx[i - 1] * (period - 1) + dx[i]) / period
+
+    # 52-week high/low range as % (last 52 weekly bars ≈ 1 year)
+    last52    = close[-52:] if n >= 52 else close
+    hi52, lo52 = last52.max(), last52.min()
+    range_pct  = round((hi52 - lo52) / lo52 * 100, 1) if lo52 > 0 else 0.0
+
+    # How many of the last 26 bars (≈6 months) had ADX < 20
+    recent_adx   = adx[-26:] if n >= 26 else adx[adx > 0]
+    valid        = recent_adx[recent_adx > 0]
+    low_adx_bars = int((valid < 20).sum())
+
+    return {
+        'adx':          round(float(adx[-1]),      1),
+        'plus_di':      round(float(plus_di[-1]),  1),
+        'minus_di':     round(float(minus_di[-1]), 1),
+        'range_pct_52': range_pct,
+        'low_adx_bars': low_adx_bars,
+    }
 
 
 def _fetch_market_data(ticker, is_crypto=False, is_commodity=False,
@@ -557,6 +633,49 @@ def _fetch_market_data(ticker, is_crypto=False, is_commodity=False,
     except Exception:
         _norm_cb = []
 
+    # Factor 29 — Volume Surge: biggest vol bar in last 8 weeks vs 20-bar avg
+    try:
+        _avg_vol20 = float(df['Volume'].tail(20).mean())
+        _best_ratio = 0.0
+        _best_dir   = 'FLAT'
+        for _, row in df.tail(8).iterrows():
+            _ratio = float(row['Volume']) / _avg_vol20 if _avg_vol20 > 0 else 0
+            if _ratio > _best_ratio:
+                _best_ratio = round(_ratio, 2)
+                _chg = (float(row['Close']) - float(row['Open'])) / float(row['Open']) * 100
+                _best_dir = 'UP' if _chg > 1.0 else ('DOWN' if _chg < -1.0 else 'FLAT')
+        _surge_vol = {'ratio': _best_ratio, 'direction': _best_dir}
+    except Exception:
+        _surge_vol = {}
+
+    # Factor 30 — Price Action Candle Quality (last weekly bar)
+    try:
+        _lb  = df.iloc[-1]
+        _pb  = df.iloc[-2] if len(df) >= 2 else None
+        _o, _h, _l, _c = float(_lb['Open']), float(_lb['High']), float(_lb['Low']), float(_lb['Close'])
+        _body   = abs(_c - _o)
+        _u_wick = _h - max(_o, _c)
+        _l_wick = min(_o, _c) - _l
+        _rng    = _h - _l
+        _ctype  = 'NEUTRAL'
+        if _rng > 0:
+            _bpct = _body / _rng
+            _lpct = _l_wick / _rng
+            _upct = _u_wick / _rng
+            if _lpct > 0.55 and _bpct < 0.35:
+                _ctype = 'HAMMER'           # bullish rejection from low
+            elif _upct > 0.55 and _bpct < 0.35:
+                _ctype = 'SHOOTING_STAR'    # bearish rejection from high
+            elif _pb is not None:
+                _po, _pc = float(_pb['Open']), float(_pb['Close'])
+                if _c > _o and _po > _pc and _c > _po and _o < _pc:
+                    _ctype = 'BULL_ENGULF'  # bullish engulfing
+                elif _c < _o and _po < _pc and _c < _po and _o > _pc:
+                    _ctype = 'BEAR_ENGULF'  # bearish engulfing
+        _candle_pattern = {'type': _ctype, 'body_pct': round(_body / _rng, 2) if _rng > 0 else 0}
+    except Exception:
+        _candle_pattern = {'type': 'NEUTRAL', 'body_pct': 0}
+
     # ── Earnings (stocks only) ────────────────────────────
     skip_fundamentals = is_crypto or is_commodity
     earn_date, earn_days = (None, None) if skip_fundamentals else get_earnings(asset)
@@ -571,7 +690,10 @@ def _fetch_market_data(ticker, is_crypto=False, is_commodity=False,
 
     # 2. Relative Strength vs Sector (US stocks only — no suffix)
     _is_us_stock = (not is_crypto and not is_commodity and not is_israel and not is_intl)
-    rs_info = get_sector_rs(clean_ticker(ticker), df) if _is_us_stock else None
+    rs_info  = get_sector_rs(clean_ticker(ticker), df) if _is_us_stock else None
+
+    # 2b. Relative Strength vs SPY — 13-week (Factor 28)
+    spy_rs   = get_spy_rs(df) if _is_us_stock else {}
 
     # 3a. Monthly S/R confluence (Factor 24)
     monthly_sr = get_monthly_sr(ticker, asset, price) if not is_crypto else {}
@@ -618,16 +740,25 @@ def _fetch_market_data(ticker, is_crypto=False, is_commodity=False,
     except Exception:
         _bk_quality = {}
 
+    # Factor 27 — ADX Long-term Structure
+    try:
+        _adx_weekly = _calc_adx(df, period=14)
+    except Exception:
+        _adx_weekly = {}
+
     return {
         'df': df, 'price': price, 'rsi_val': rsi_val, 'atr_val': atr_val,
         'macd_data': macd_data, 'boll_data': boll_data, 'trend': trend,
         'support': support, 'resistance': resistance,
         'vol_ok': vol_ok, '_vol_ratio': _vol_ratio, '_dir_vol_ratio': _dir_vol_ratio,
         '_candle_bodies': _norm_cb, '_breakout_quality': _bk_quality,
+        '_adx_weekly': _adx_weekly,
+        '_surge_vol': _surge_vol, '_candle_pattern': _candle_pattern,
         'earn_date': earn_date, 'earn_days': earn_days, 'earn_warn': earn_warn,
         'earn_approaching': earn_approaching, 'atr_pct': atr_pct,
         'high_volatility': high_volatility, 'm_analysis': m_analysis,
-        'rs_info': rs_info, 'short_pct': short_pct, 'inst_pct': inst_pct,
+        'rs_info': rs_info, 'spy_rs': spy_rs,
+        'short_pct': short_pct, 'inst_pct': inst_pct,
         'cached_info': _cached_info, 'monthly_sr': monthly_sr,
     }
 
@@ -652,6 +783,7 @@ def _detect_setup(ticker, portfolio_size, market, is_crypto, asset_type, max_dis
     earn_days, atr_pct          = market['earn_days'], market['atr_pct']
     high_volatility             = market['high_volatility']
     m_analysis, rs_info         = market['m_analysis'], market['rs_info']
+    spy_rs                      = market.get('spy_rs', {})
     macd_data, boll_data        = market['macd_data'], market['boll_data']
     short_pct, inst_pct         = market['short_pct'], market['inst_pct']
 
