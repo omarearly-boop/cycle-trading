@@ -339,7 +339,7 @@ def main():
     # ── Save CSV ─────────────────────────────────────────────
     if all_results:
         fpath = os.path.join(reports_d, f"cycles_scan_{ts}.csv")
-        out   = [{k:v for k,v in r.items() if k not in ('_score','_pfacts','_raw')} for r in all_results]
+        out   = [{k:v for k,v in r.items() if k not in ('_score','_pfacts')} for r in all_results]  # keep _raw: ct_calibration needs the real symbol (TSEM.TA etc.)
         pd.DataFrame(out).to_csv(fpath, index=False)
         generated_files.append(fpath)
         print(f"  CSV saved   : REPORTS\\cycles_scan_{ts}.csv")
@@ -512,6 +512,3 @@ if __name__ == "__main__":
         from ct_monthly_scan import scan_monthly
         max_dist = float(_args[_args.index('--dist') + 1]) if '--dist' in _args else 8.0
         scan_monthly(max_dist=max_dist)
-
-    else:
-        print('Commands: (none) → full scan | positions | check [--email] | add | close <id> [price] | momentum')

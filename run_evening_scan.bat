@@ -25,5 +25,8 @@ python cycles_trading_scanner.py          >> logs\evening_scan.log 2>&1
 python cycles_trading_scanner.py momentum >> logs\evening_scan.log 2>&1
 python ct_watch_checker.py                >> logs\evening_scan.log 2>&1
 
+:: Calibration tracker — ingest today's signals, resolve old ones, report
+python ct_calibration.py                  >> logs\evening_scan.log 2>&1
+
 echo [%date% %time%] ===== EVENING SCAN DONE  ===== >> logs\evening_scan.log 2>&1
 echo. >> logs\evening_scan.log 2>&1
