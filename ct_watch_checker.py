@@ -1154,25 +1154,37 @@ def run_check():
 
 
     # -- Phase 4: Trade Management (Partial Exit + Trail Stop) ----------------
+    # Manages ONLY real recorded positions (positions.json, registered with
+    # `python cycles_trading_scanner.py add ...`) — NOT watchlist tickers.
+    # The old behaviour assumed every GREEN-alerted watchlist ticker was an
+    # open trade and even overwrote the watchlist's stored stop (the FICO
+    # email incident): alerts fired for trades that were never entered.
     print()
-    print("  Phase 4: trade management checks...")
+    print("  Phase 4: trade management checks (recorded open positions)...")
     try:
         import yfinance as _yf
         from ct_indicators import swing_lows as _swing_lows, swing_highs as _swing_highs
+        from ct_positions import _pm_load as _load_positions, _pm_save as _save_positions
+        from ct_config import PM_STOP_BUFFER as _pm_buf
     except Exception as _e:
         print(f"    Skipping Phase 4 (import error: {_e})")
         _yf = None
 
     if _yf is not None:
-        active_entries = [e for e in data.get('tickers', [])
-                          if e.get('last_alerted')]
-        for _entry in active_entries:
-            _ticker     = _entry['ticker']
-            _direction  = _entry.get('direction', 'LONG')
-            _is_long    = 'LONG' in _direction
-            _entry_p    = _entry.get('entry_price') or 0
-            _stop_p     = _entry.get('trail_stop') or _entry.get('stop_price') or 0
-            _target_p   = _entry.get('target_price') or 0
+        _positions = _load_positions()
+        _open_pos  = [p for p in _positions if not p.get('closed')]
+        if not _open_pos:
+            print("    No open positions recorded — nothing to manage.")
+            print("    Register a real trade with:")
+            print("    python cycles_trading_scanner.py add TICKER DIR ENTRY STOP TP1 TP2 TP3 UNITS")
+        _pos_changed = False
+        for _pos in _open_pos:
+            _ticker    = _pos['ticker']
+            _direction = _pos.get('direction', 'LONG')
+            _is_long   = 'LONG' in _direction
+            _entry_p   = _pos.get('entry') or 0
+            _stop_p    = _pos.get('stop') or 0
+            _target_p  = _pos.get('tp1') or 0
 
             if _entry_p <= 0 or _stop_p <= 0 or _target_p <= 0:
                 continue
@@ -1188,7 +1200,7 @@ def run_check():
             except Exception:
                 continue
 
-            # --- Partial Exit check ---
+            # --- Partial Exit check (course step 8: near T1 on fading volume) ---
             if _is_long:
                 _dist_total = _target_p - _entry_p
                 _dist_done  = _cur_p - _entry_p
@@ -1196,53 +1208,49 @@ def run_check():
                 _dist_total = _entry_p - _target_p
                 _dist_done  = _entry_p - _cur_p
 
-            if _dist_total > 0:
-                _pct = (_dist_done / _dist_total) * 100
-            else:
-                _pct = 0
+            _pct = (_dist_done / _dist_total) * 100 if _dist_total > 0 else 0
+            _avg_vol = float(_vol_s.rolling(10).mean().iloc[-1]) if len(_vol_s) >= 10 else 0
+            _vol_low = _avg_vol > 0 and float(_vol_s.iloc[-1]) < _avg_vol
 
-            _avg_vol    = float(_vol_s.rolling(10).mean().iloc[-1]) if len(_vol_s) >= 10 else 0
-            _cur_vol    = float(_vol_s.iloc[-1])
-            _vol_low    = _avg_vol > 0 and _cur_vol < _avg_vol
-            _partial_key = _entry.get('partial_exit_alerted', '')
-
-            if _pct >= 90 and _vol_low and _partial_key != today:
-                print(f"    {_ticker}: {_pct:.0f}% toward target, low vol -> PARTIAL EXIT")
-                _sent = send_partial_exit_alert(email, _entry, _cur_p, _pct)
-                if _sent:
-                    _entry['partial_exit_alerted'] = today
+            if _pct >= 90 and _vol_low and _pos.get('partial_exit_alerted') != today:
+                _mail_entry = {'ticker': _ticker, 'direction': _direction,
+                               'entry_price': _entry_p, 'stop_price': _stop_p,
+                               'target_price': _target_p, 'rr': ''}
+                print(f"    {_ticker}: {_pct:.0f}% toward TP1, low vol -> PARTIAL EXIT")
+                if send_partial_exit_alert(email, _mail_entry, _cur_p, _pct):
+                    _pos['partial_exit_alerted'] = today
+                    _pos_changed = True
                     alerts_sent += 1
 
-            # --- Trail Stop check ---
-            _prev_close = _close_s.iloc[:-1]  # exclude current bar
+            # --- Trail Stop check (Rule 1: most recent swing + 1% buffer) ---
+            _prev_close = _close_s.iloc[:-1]  # confirmed bars only
             if _is_long:
-                _swings = _swing_lows(_prev_close, order=2)
-                if _swings:
-                    # Rule 1: most RECENT confirmed swing low, with the 1% buffer
-                    # (was max of last 3 — could place the stop above structure)
-                    from ct_config import PM_STOP_BUFFER as _buf
-                    _new_stop = round(_swings[-1] * (1 - _buf), 2)
-                    _trail_stored = _entry.get('trail_stop') or _stop_p
-                    if _new_stop > _trail_stored and _new_stop < _cur_p:
-                        print(f"    {_ticker}: new swing low {_new_stop:.2f} > stop {_trail_stored:.2f} -> TRAIL STOP")
-                        _sent = send_trail_stop_alert(email, _entry, _new_stop)
-                        if _sent:
-                            _entry['trail_stop'] = _new_stop
-                            _entry['stop_price']  = _new_stop
-                            alerts_sent += 1
+                _swings   = _swing_lows(_prev_close, order=2)
+                _new_stop = round(_swings[-1] * (1 - _pm_buf), 2) if _swings else None
+                _better   = (_new_stop is not None
+                             and _new_stop > _stop_p and _new_stop < _cur_p)
             else:
-                _swings = _swing_highs(_prev_close, order=2)
-                if _swings:
-                    from ct_config import PM_STOP_BUFFER as _buf
-                    _new_stop = round(_swings[-1] * (1 + _buf), 2)  # most recent swing high + buffer
-                    _trail_stored = _entry.get('trail_stop') or _stop_p
-                    if _new_stop < _trail_stored and _new_stop > _cur_p:
-                        print(f"    {_ticker}: new swing high {_new_stop:.2f} < stop {_trail_stored:.2f} -> TRAIL STOP")
-                        _sent = send_trail_stop_alert(email, _entry, _new_stop)
-                        if _sent:
-                            _entry['trail_stop'] = _new_stop
-                            _entry['stop_price']  = _new_stop
-                            alerts_sent += 1
+                _swings   = _swing_highs(_prev_close, order=2)
+                _new_stop = round(_swings[-1] * (1 + _pm_buf), 2) if _swings else None
+                _better   = (_new_stop is not None
+                             and _new_stop < _stop_p and _new_stop > _cur_p)
+
+            if _better:
+                _mail_entry = {'ticker': _ticker, 'direction': _direction,
+                               'entry_price': _entry_p, 'stop_price': _stop_p,
+                               'target_price': _target_p}
+                print(f"    {_ticker}: trail stop {_stop_p:.2f} -> {_new_stop:.2f}")
+                if send_trail_stop_alert(email, _mail_entry, _new_stop):
+                    _pos.setdefault('stop_history', []).append(
+                        {'date': today, 'from': _stop_p, 'to': _new_stop,
+                         'rule': 'HOURLY_TRAIL'})
+                    _pos['stop'] = _new_stop
+                    _pos_changed = True
+                    alerts_sent += 1
+
+        if _pos_changed:
+            _save_positions(_positions)
+            print("    positions.json updated (trailed stops recorded)")
 
     # Auto-prune: remove tickers out of zone for 21+ days
     NOT_IN_ZONE_DAYS = 21
