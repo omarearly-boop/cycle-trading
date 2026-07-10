@@ -303,6 +303,17 @@ def get_traffic_light(prob, r):
         red_flags.append('Monthly trend vs direction')
     if m_trend == 'LONG' and direction == 'SHORT':
         red_flags.append('Monthly trend vs direction')
+    # Course-rule red flags from the newer factors (previously invisible here,
+    # which let setups with UNRELIABLE/AMBIGUOUS levels reach GREEN)
+    if r.get('_level_rel') == 'UNRELIABLE' or r.get('LevelRel') == 'UNRELIABLE':
+        red_flags.append('Level broken both ways — unreliable (course: avoid)')
+    if r.get('_level_amb') == 'AMBIGUOUS':
+        red_flags.append('Ambiguous entry level — crowded zone (course: seek cleaner setup)')
+    if r.get('_fib_zone') == 'TOO_DEEP':
+        red_flags.append('Fib retracement >78.6% — possible trend change, not correction')
+    _div = r.get('_rsi_divergence')
+    if (direction == 'LONG' and _div == 'BEARISH') or (direction == 'SHORT' and _div == 'BULLISH'):
+        red_flags.append(f'{_div.title()} RSI divergence against trade direction')
 
     if r.get('SupportQ') == 'STRONG':
         green_flags.append('Strong support level')
@@ -489,6 +500,7 @@ def _finalize_setup(setup, direction, ticker, atr_val, m_analysis,
 
     prob, pfacts = calc_probability(setup)
     setup['Prob']    = prob
+    setup['ProbRaw'] = round(50 + sum(d for _, d, _ in pfacts))  # uncompressed score (transparency)
     setup['_pfacts'] = pfacts
 
     est_weeks, horizon, h_label, h_color, h_range = estimate_time_horizon(

@@ -60,8 +60,25 @@ def _render_tv_url(r):
         elif raw.endswith('.AX'): return f"https://www.tradingview.com/chart/?symbol=ASX:{t}&interval=W"
         elif raw.endswith('.SW'): return f"https://www.tradingview.com/chart/?symbol=SWX:{t}&interval=W"
         elif raw.endswith('.NS'): return f"https://www.tradingview.com/chart/?symbol=NSE:{t}&interval=W"
+        elif raw.endswith('.TA'): return f"https://www.tradingview.com/chart/?symbol=TASE:{t}&interval=W"
         return f"https://www.tradingview.com/chart/?symbol={t}&interval=W"
     return f"https://www.tradingview.com/chart/?symbol=NASDAQ:{t}&interval=W"
+
+
+def _currency_symbol(r):
+    """
+    Display currency by listing. Yahoo quotes non-US listings in their native
+    units — TASE in agorot (ILA, ₪×0.01) and LSE in pence (GBX) — so prices
+    keep the exact TradingView-matching values, just correctly labelled
+    instead of a misleading '$'.
+    """
+    raw = (r.get('_raw') or r.get('Ticker') or '')
+    for suf, sym in (('.TA', 'ILA '), ('.L', 'GBX '), ('.DE', '€'), ('.PA', '€'),
+                     ('.T', '¥'), ('.HK', 'HK$'), ('.TO', 'C$'), ('.AX', 'A$'),
+                     ('.SW', 'CHF '), ('.NS', '₹')):
+        if raw.endswith(suf):
+            return sym
+    return '$'
 
 def _render_fund_box(r):
     """Pure function -- result dict -> fundamental analysis HTML block (expanded)."""
@@ -453,6 +470,9 @@ Short Interest: <b>{short_int}%</b> — If price moves up, forced short covering
         pine_js   = pine_code.replace('\\', '\\\\').replace('`', '\\`').replace('${', '\\${')
         modal_id  = f"pine_{direction}_{card_idx}"
         card_idx += 1
+        cur = _currency_symbol(r)   # ₪/agorot for TASE, pence for LSE, etc.
+        cur_note = (' <span style="color:#8b949e;font-size:10px">(agorot — ₪ = value ÷ 100)</span>'
+                    if cur == 'ILA ' else '')
 
         html += f'''
 <div class="card {'long-card' if is_long else 'short-card'}" data-horizon="{horizon_v}" data-tl="{tl_color}">
@@ -493,7 +513,7 @@ Short Interest: <b>{short_int}%</b> — If price moves up, forced short covering
   <div class="ps-cell">
     <div class="ps-label">כמות מניות</div>
     <div class="ps-val">{units}</div>
-    <div class="ps-sub">@ ${entry}</div>
+    <div class="ps-sub">@ {cur}{entry}</div>
   </div>
   <div class="ps-cell">
     <div class="ps-label">מקסימום פוזיציות</div>
@@ -628,28 +648,28 @@ Short Interest: <b>{short_int}%</b> — If price moves up, forced short covering
 
   <div class="levels-grid">
 <div class="level-box">
-  <div class="level-label">Current Price</div>
-  <div class="level-value neutral">${price}</div>
+  <div class="level-label">Current Price{cur_note}</div>
+  <div class="level-value neutral">{cur}{price}</div>
 </div>
 <div class="level-box">
   <div class="level-label">Entry</div>
-  <div class="level-value blue">${entry}</div>
+  <div class="level-value blue">{cur}{entry}</div>
 </div>
 <div class="level-box">
   <div class="level-label">Stop Loss</div>
-  <div class="level-value red">${stop}</div>
+  <div class="level-value red">{cur}{stop}</div>
 </div>
 <div class="level-box">
   <div class="level-label">Target T1</div>
-  <div class="level-value green">${target}</div>
+  <div class="level-value green">{cur}{target}</div>
 </div>
 <div class="level-box">
   <div class="level-label">T2 (Fib 161.8%)</div>
-  <div class="level-value green">${t2}</div>
+  <div class="level-value green">{cur}{t2}</div>
 </div>
 <div class="level-box">
   <div class="level-label">T3 (Fib 261.8%)</div>
-  <div class="level-value green">${t3}</div>
+  <div class="level-value green">{cur}{t3}</div>
 </div>
 <div class="level-box">
   <div class="level-label">R:R Ratio</div>
@@ -671,20 +691,20 @@ Short Interest: <b>{short_int}%</b> — If price moves up, forced short covering
   <table class="scenario-table">
     <tr><th>Scenario</th><th>Price</th><th>P&L</th><th>% Portfolio</th></tr>
     <tr class="loss-row">
-      <td>Stop hit</td><td>${stop}</td>
-      <td>-${loss_d}</td><td class="red">-{pct_loss}%</td>
+      <td>Stop hit</td><td>{cur}{stop}</td>
+      <td>-{cur}{loss_d}</td><td class="red">-{pct_loss}%</td>
     </tr>
     <tr>
-      <td>Target T1</td><td>${target}</td>
-      <td>+${prof_t1}</td><td class="green">+{pct_t1}%</td>
+      <td>Target T1</td><td>{cur}{target}</td>
+      <td>+{cur}{prof_t1}</td><td class="green">+{pct_t1}%</td>
     </tr>
     <tr>
-      <td>Target T2</td><td>${t2}</td>
-      <td>+${prof_t2}</td><td class="green">+{pct_t2}%</td>
+      <td>Target T2</td><td>{cur}{t2}</td>
+      <td>+{cur}{prof_t2}</td><td class="green">+{pct_t2}%</td>
     </tr>
     <tr>
-      <td>Target T3</td><td>${t3}</td>
-      <td>+${prof_t3}</td><td class="green">+{pct_t3}%</td>
+      <td>Target T3</td><td>{cur}{t3}</td>
+      <td>+{cur}{prof_t3}</td><td class="green">+{pct_t3}%</td>
     </tr>
   </table>
 </div>

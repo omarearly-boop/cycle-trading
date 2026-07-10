@@ -380,7 +380,10 @@ def check_fibonacci_zone(df, direction: str, price: float):
                 return 'UNKNOWN', 0, 0, 0, {}
             swing_low  = _last_swing_low(before_hi)   # FIXED: last significant low
             move       = swing_high - swing_low
-            if move <= 0:
+            if move <= 0 or move / swing_high < 0.10:
+                # Anchor swing too shallow (<10% of price): a tiny pullback
+                # reads as a huge retracement % (e.g. ADI 80% "TOO_DEEP"
+                # while 3% off its high). No meaningful fib signal.
                 return 'UNKNOWN', 0, 0, 0, {}
             retracement = (swing_high - price) / move
         else:  # SHORT
@@ -391,8 +394,8 @@ def check_fibonacci_zone(df, direction: str, price: float):
                 return 'UNKNOWN', 0, 0, 0, {}
             swing_high = _last_swing_high(before_lo)  # FIXED: last significant high
             move       = swing_high - swing_low
-            if move <= 0:
-                return 'UNKNOWN', 0, 0, 0, {}
+            if move <= 0 or move / swing_high < 0.10:
+                return 'UNKNOWN', 0, 0, 0, {}   # anchor swing too shallow — no signal
             retracement = (price - swing_low) / move
 
         ret_pct = retracement * 100
@@ -1598,5 +1601,16 @@ def calc_probability(r):
         delta, label, expl = result
         score  += delta
         factors.append((label, delta, expl))
-    probability = max(15, min(92, round(score)))
+
+    # Soft compression (calibration fix): with 42 factors the additive sum
+    # routinely exceeded the old cap and pinned every decent setup at 92,
+    # destroying ranking at the top. First ±20 points count fully; points
+    # beyond that count at 1/3 weight. raw+15 -> 65, +20 -> 70 (GREEN bar),
+    # +50 -> 80, +80 -> 90. Cap 95 is now practically unreachable.
+    raw = score - 50.0
+    if raw > 20:
+        raw = 20 + (raw - 20) / 3.0
+    elif raw < -20:
+        raw = -20 + (raw + 20) / 3.0
+    probability = max(15, min(95, round(50 + raw)))
     return probability, factors
