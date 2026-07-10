@@ -314,6 +314,13 @@ def get_traffic_light(prob, r):
     _div = r.get('_rsi_divergence')
     if (direction == 'LONG' and _div == 'BEARISH') or (direction == 'SHORT' and _div == 'BULLISH'):
         red_flags.append(f'{_div.title()} RSI divergence against trade direction')
+    # Sweep risk (Factor 43): first touch of the level after a vertical
+    # low-wick impulse, with a shallow retracement — expect a stop-run first
+    _sw = (r.get('_sweep') or {}).get(direction) or {}
+    if (_sw.get('impulse') and _sw.get('first_touch')
+            and not _sw.get('swept_reclaimed')
+            and 0 <= (r.get('_fib_ret_pct', 0) or 0) < 40):
+        red_flags.append('Sweep risk — first touch after vertical impulse; wait for flush + reclaim')
 
     if r.get('SupportQ') == 'STRONG':
         green_flags.append('Strong support level')
@@ -782,6 +789,57 @@ def _fetch_market_data(ticker, is_crypto=False, is_commodity=False,
     _vwap_val = calc_vwap(df)
     _vwap = {'vwap': _vwap_val, 'above': price > _vwap_val} if _vwap_val else {}
 
+    # ── Factor 43: Liquidity-sweep risk (expert lesson, Jul 2026) ──
+    # A near-vertical impulse candle with almost no counter-wick means the
+    # FIRST touch of the breakout level usually gets swept (stop-run below
+    # support / above resistance) before the move continues.
+    try:
+        _sweep = {}
+        _lk  = df.tail(9)                       # ~8 closed bars + current
+        _so  = _lk['Open'].values.astype(float)
+        _sc  = _lk['Close'].values.astype(float)
+        _sh  = _lk['High'].values.astype(float)
+        _sl  = _lk['Low'].values.astype(float)
+        for _dirn, _lvl in (('LONG', support), ('SHORT', resistance)):
+            _is_l = _dirn == 'LONG'
+            _imp  = None
+            for _i in range(len(_sc) - 1):      # closed bars only
+                _body = (_sc[_i] - _so[_i]) if _is_l else (_so[_i] - _sc[_i])
+                _rng  = _sh[_i] - _sl[_i]
+                if _rng <= 0 or atr_val <= 0:
+                    continue
+                # counter-wick: lower wick for a rally candle, upper for a drop
+                _tail = (min(_so[_i], _sc[_i]) - _sl[_i]) if _is_l \
+                        else (_sh[_i] - max(_so[_i], _sc[_i]))
+                if _body >= 1.5 * atr_val and _tail / _rng < 0.15:
+                    _imp = _i
+            if _imp is None:
+                _sweep[_dirn] = {}
+                continue
+            # first touch: no intermediate closed bar already tagged the level zone
+            _touched = False
+            for _i in range(_imp + 1, len(_sc) - 1):
+                if _is_l and _sl[_i] <= _lvl * 1.02:
+                    _touched = True
+                if not _is_l and _sh[_i] >= _lvl * 0.98:
+                    _touched = True
+            # sweep already done? a recent bar wicked through the level but
+            # CLOSED back on the right side (flush + reclaim = N.M.S. holds)
+            _reclaimed = False
+            for _i in (len(_sc) - 2, len(_sc) - 1):
+                if _i <= _imp:
+                    continue
+                if _is_l and _sl[_i] < _lvl * 0.995 and _sc[_i] > _lvl:
+                    _reclaimed = True
+                if not _is_l and _sh[_i] > _lvl * 1.005 and _sc[_i] < _lvl:
+                    _reclaimed = True
+            _sweep[_dirn] = {'impulse': True,
+                             'bars_since_impulse': len(_sc) - 1 - _imp,
+                             'first_touch': not _touched,
+                             'swept_reclaimed': _reclaimed}
+    except Exception:
+        _sweep = {}
+
     # ── Earnings (stocks only) ────────────────────────────
     skip_fundamentals = is_crypto or is_commodity
     earn_date, earn_days = (None, None) if skip_fundamentals else get_earnings(asset)
@@ -920,6 +978,7 @@ def _fetch_market_data(ticker, is_crypto=False, is_commodity=False,
         '_surge_vol': _surge_vol, '_candle_pattern': _candle_pattern,
         '_price_gap': _price_gap, '_secondary_trend': _secondary_trend,
         '_chart_pattern': _chart_geo, '_gann': _gann, '_vwap': _vwap,
+        '_sweep': _sweep,
         'earn_date': earn_date, 'earn_days': earn_days, 'earn_warn': earn_warn,
         'earn_approaching': earn_approaching, 'atr_pct': atr_pct,
         'high_volatility': high_volatility, 'm_analysis': m_analysis,
@@ -1070,6 +1129,7 @@ def _detect_setup(ticker, portfolio_size, market, is_crypto, asset_type, max_dis
     _setup['_candle_pattern']     = market.get('_candle_pattern', {})
     _setup['_gann']               = market.get('_gann', {})
     _setup['_vwap']               = market.get('_vwap', {})
+    _setup['_sweep']              = market.get('_sweep', {})
     _setup['_adx_weekly']         = market.get('_adx_weekly', {})
     _setup['_spy_rs']             = market.get('spy_rs', {})   # fix: key is 'spy_rs' not '_spy_rs'
     _setup['_monthly_sr']         = market.get('monthly_sr', {})

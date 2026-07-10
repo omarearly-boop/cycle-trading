@@ -1587,6 +1587,42 @@ def _factor_entry_method(r):
             'Method 1 (Aggressive): entering before N.M.S. confirmation -- lower probability, use smaller size (lesson 20)')
 
 
+@factor
+def _factor_sweep_risk(r):
+    """
+    Factor 43 -- Liquidity-Sweep Risk (expert live-session lesson, Jul 2026).
+
+    After a near-vertical impulse candle with almost no counter-wick, the
+    FIRST touch of the breakout level usually gets swept: price prints lows
+    below the support (highs above the resistance for shorts), flushes
+    retail stops, and only then resumes the move. Entering on the first
+    touch with a shallow retracement is exactly the trade that gets flushed
+    -- and the scanner's default stop (3% beyond the level) sits inside the
+    sweep zone.
+
+      impulse + first touch + retracement < 40%  -> -10  (wait for flush + reclaim)
+      sweep already done + level reclaimed        -> +8  (retail flushed, N.M.S. holds)
+    """
+    is_long = 'LONG' in r['Dir']
+    sw = (r.get('_sweep') or {}).get('LONG' if is_long else 'SHORT') or {}
+    if not sw.get('impulse'):
+        return None
+    ret      = r.get('_fib_ret_pct', 0) or 0
+    lvl_word = 'support' if is_long else 'resistance'
+
+    if sw.get('swept_reclaimed'):
+        return (+8, 'Sweep Risk',
+                f'Liquidity sweep already occurred -- price wicked through the {lvl_word} '
+                f'and closed back on the right side. Retail flushed, level reclaimed (N.M.S. holds)')
+    if sw.get('first_touch') and 0 <= ret < 40:
+        return (-10, 'Sweep Risk',
+                f'Vertical low-wick impulse {sw.get("bars_since_impulse", "?")} bar(s) ago + FIRST touch '
+                f'of the {lvl_word} at only {ret:.0f}% retracement -- expect a stop-run through the level '
+                f'before continuation. The default stop (3% beyond) sits inside the sweep zone; '
+                f'wait for the sweep + a weekly close reclaiming the level')
+    return None
+
+
 def calc_probability(r):
     """
     Iterate FACTORS registry. Each factor returns (delta, label, explanation) or None to skip.
