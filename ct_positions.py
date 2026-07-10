@@ -77,6 +77,39 @@ def pm_add(ticker: str, direction: str, entry: float,
     print(f'  ✅ Position added: {pos["id"]}  {direction} {ticker.upper()} @ {entry}')
     return pos
 
+def pm_partial(pos_id: str, units_sold: int, price: float = None):
+    """
+    Record a partial profit-take: reduce the remaining units on a position.
+
+    Expert reminder (Discord, Jul 2026): after selling part of a position you
+    MUST also update the stop order quantity at the broker — a stop order for
+    the original size would close the long AND flip you into a short.
+    """
+    positions = _pm_load()
+    for p in positions:
+        if p['id'] == pos_id:
+            u    = int(p.get('units', 0))
+            sold = int(units_sold)
+            if sold <= 0 or sold >= u:
+                print(f'  ⚠ invalid units_sold={sold} (position holds {u}; '
+                      f'use `close` to exit fully)')
+                return
+            p['units'] = u - sold
+            p.setdefault('partials', []).append({
+                'date':       datetime.now().strftime('%Y-%m-%d'),
+                'units_sold': sold,
+                'price':      round(float(price), 4) if price else None,
+            })
+            _pm_save(positions)
+            print(f'  💰 Partial exit recorded: {pos_id} — sold {sold}'
+                  + (f' @ {float(price):.2f}' if price else '')
+                  + f', {p["units"]} unit(s) remaining')
+            print(f'  ⚠ UPDATE YOUR STOP ORDER at the broker to {p["units"]} unit(s) — '
+                  f'a stop for the old quantity would flip the position!')
+            return
+    print(f'  ⚠ Position not found: {pos_id}')
+
+
 def pm_close(pos_id: str, exit_price: float = None):
     """Mark a position as closed (stop hit or manual exit)."""
     positions = _pm_load()

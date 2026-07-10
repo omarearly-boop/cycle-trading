@@ -933,6 +933,13 @@ def send_partial_exit_alert(to_email: str, entry: dict, cur_price: float,
       Price has reached <b style="color:#f59e0b">{pct_toward_target:.0f}%</b> of the way to target
       on below-average volume. Consider taking a partial profit (1/3 to 1/2 of position).
     </p>
+    <p style="background:#422006;border:1px solid #f59e0b;border-radius:6px;padding:10px 14px;
+              color:#fde68a;font-size:12px;margin:0 0 12px 0">
+      ⚠ <b>After selling, UPDATE YOUR STOP ORDER QUANTITY at the broker</b> to the
+      remaining shares — a stop for the original size would close the position AND
+      flip you into a {'SHORT' if direction == 'LONG' else 'LONG'}. Then record it:<br>
+      <code style="color:#fbbf24">python cycles_trading_scanner.py partial &lt;position_id&gt; &lt;units_sold&gt; [price]</code>
+    </p>
     <table style="width:100%;border-collapse:collapse">
       <tr>
         <td style="padding:6px 0;color:#64748b;font-size:13px">Entry</td>
@@ -1012,6 +1019,10 @@ def send_trail_stop_alert(to_email: str, entry: dict, new_stop: float) -> bool:
     <p style="color:#94a3b8;margin:0 0 12px 0;font-size:14px">
       A new swing {'low' if direction=='LONG' else 'high'} has formed above your current stop.
       Move your stop to lock in more profit (improvement: <b style="color:#6366f1">+${change:.2f}</b>).
+    </p>
+    <p style="color:#64748b;font-size:11px;margin:0 0 12px 0">
+      Reminder: the stop order quantity must match the shares you <i>currently</i> hold
+      (after any partial exits) — not the original position size.
     </p>
     <table style="width:100%;border-collapse:collapse">
       <tr>

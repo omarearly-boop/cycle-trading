@@ -52,7 +52,7 @@ from ct_indicators import (
 )
 from ct_market_data import get_earnings, get_monthly_analysis, get_sector_rs
 from ct_positions import (
-    _pm_load, _pm_save, pm_add, pm_close,
+    _pm_load, _pm_save, pm_add, pm_close, pm_partial,
     pm_rule1_swing, pm_rule2_momentum, pm_check_hits,
     manage_positions, list_positions,
 )
@@ -492,6 +492,14 @@ if __name__ == "__main__":
             notes     = input('Notes      : ').strip()
             pm_add(ticker, direction, entry, stop_p, tp1, tp2, tp3, units, notes)
 
+    elif _args[0] == 'partial':
+        # python cycles_trading_scanner.py partial LMND_202607051437 5 [price]
+        if len(_args) >= 3:
+            pm_partial(_args[1], int(_args[2]),
+                       float(_args[3]) if len(_args) >= 4 else None)
+        else:
+            print('Usage: python cycles_trading_scanner.py partial <position_id> <units_sold> [price]')
+
     elif _args[0] == 'close':
         # python cycles_trading_scanner.py close LMND_202607051437 [exit_price]
         if len(_args) >= 2:
@@ -512,3 +520,6 @@ if __name__ == "__main__":
         from ct_monthly_scan import scan_monthly
         max_dist = float(_args[_args.index('--dist') + 1]) if '--dist' in _args else 8.0
         scan_monthly(max_dist=max_dist)
+
+    else:
+        print('Commands: (none) → full scan | positions | check [--email] | add | partial <id> <units> [price] | close <id> [price] | momentum')
