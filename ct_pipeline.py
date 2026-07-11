@@ -143,6 +143,19 @@ def _run(label: str, cmd: list) -> bool:
             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             text=True, encoding='utf-8', errors='replace'
         )
+        # Watchdog: the old TimeoutExpired handler was dead code (Popen has no
+        # timeout) — a hung scan blocked the pipeline forever. Kill after 45min.
+        import threading as _th
+        _killed = {'flag': False}
+        def _kill():
+            _killed['flag'] = True
+            try:
+                proc.kill()
+            except Exception:
+                pass
+        _watchdog = _th.Timer(2700, _kill)
+        _watchdog.daemon = True
+        _watchdog.start()
         last_lines = []
         for raw in proc.stdout:
             line = raw.rstrip()
@@ -159,16 +172,16 @@ def _run(label: str, cmd: list) -> bool:
                 pass
         stderr = proc.stderr.read()
         proc.wait()
+        _watchdog.cancel()
         elapsed = time.time() - t0
+        if _killed['flag']:
+            _log(f'    TIMEOUT — killed after 45min (scan hung)')
+            return False
         ok = proc.returncode == 0
         _log(f'    {"OK" if ok else f"FAILED (rc={proc.returncode})"} in {elapsed:.0f}s')
         if not ok and stderr:
             _log(f'    STDERR: {stderr[-300:]}')
         return ok
-    except subprocess.TimeoutExpired:
-        proc.kill()
-        _log(f'    TIMEOUT after 900s')
-        return False
     except Exception as e:
         _log(f'    EXCEPTION: {e}')
         return False

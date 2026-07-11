@@ -1079,6 +1079,61 @@ def send_trail_stop_alert(to_email: str, entry: dict, new_stop: float) -> bool:
 
 
 
+def send_reversal_alert(to_email: str, pos: dict, move_pct: float,
+                        cur_price: float) -> bool:
+    """REVERSAL DAY warning (Discord lesson: NOW short, +10% single day
+    against the position). A big adverse daily move = review the thesis."""
+    from_email = os.environ.get('ALERT_EMAIL_FROM', '')
+    password   = os.environ.get('ALERT_EMAIL_PASSWORD', '').replace(' ', '')
+    if not from_email or not password:
+        return False
+    ticker    = pos['ticker']
+    direction = pos.get('direction', 'LONG')
+    subject   = (f"[REVERSAL DAY] {ticker} {direction} -- "
+                 f"{move_pct:+.1f}% day against the position")
+    html_body = f"""
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8"></head>
+<body style="background:#0f172a;color:#e2e8f0;font-family:sans-serif;padding:24px;margin:0">
+<div style="max-width:600px;margin:0 auto">
+  <div style="background:#1e293b;border-radius:12px;padding:24px;border-left:4px solid #ef4444">
+    <div style="color:#ef4444;font-size:13px;font-weight:700;letter-spacing:2px;margin-bottom:8px">
+      REVERSAL DAY WARNING
+    </div>
+    <div style="font-size:28px;font-weight:800;color:#f1f5f9">{ticker}</div>
+    <div style="color:#94a3b8;font-size:14px;margin-top:4px">{direction}</div>
+  </div>
+  <div style="background:#1e293b;border-radius:12px;padding:20px;margin-top:12px">
+    <p style="color:#94a3b8;margin:0;font-size:14px">
+      The last session moved <b style="color:#ef4444">{move_pct:+.1f}%</b> against your
+      {direction} (current price ${cur_price:.2f}, entry ${pos.get('entry', 0):.2f},
+      stop ${pos.get('stop', 0):.2f}).<br><br>
+      A single-day move of this size can mark a reversal day. Review the thesis:
+      if the weekly structure that justified the trade is breaking, consider
+      exiting before the stop — don't ride a confirmed reversal to the stop
+      out of hope (course: manage actively, not passively).
+    </p>
+  </div>
+  <p style="color:#475569;font-size:11px;text-align:center;margin-top:16px">
+    Cycles Trading -- automated signal -- not financial advice
+  </p>
+</div>
+</body></html>"""
+    try:
+        msg = MIMEMultipart('alternative')
+        msg['Subject'] = subject
+        msg['From']    = from_email
+        msg['To']      = to_email
+        msg.attach(MIMEText(html_body, 'html', 'utf-8'))
+        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as srv:
+            srv.login(from_email, password)
+            srv.sendmail(from_email, to_email, msg.as_string())
+        return True
+    except Exception as e:
+        print(f"    Reversal-day email FAILED: {e}")
+        return False
+
+
 def run_check():
     data    = load_watchlist()
     tickers = data.get('tickers', [])
@@ -1229,6 +1284,23 @@ def run_check():
                 _cur_p   = float(_close_s.iloc[-1])
             except Exception:
                 continue
+
+            # --- Reversal-day check (Discord lesson: NOW short, +10% day) ---
+            try:
+                _dd = _yfh(_yf.Ticker(_ticker), period='5d', interval='1d')
+                if _dd is not None and len(_dd) >= 2:
+                    _dc   = _dd['Close']
+                    _dmv  = (float(_dc.iloc[-1]) - float(_dc.iloc[-2])) \
+                            / float(_dc.iloc[-2]) * 100
+                    _advr = -_dmv if _is_long else _dmv   # adverse % vs position
+                    if _advr >= 8.0 and _pos.get('reversal_alerted') != today:
+                        print(f"    {_ticker}: {_dmv:+.1f}% day AGAINST {_direction} -> REVERSAL DAY")
+                        if send_reversal_alert(email, _pos, _dmv, _cur_p):
+                            _pos['reversal_alerted'] = today
+                            _pos_changed = True
+                            alerts_sent += 1
+            except Exception:
+                pass
 
             # --- Partial Exit check (course step 8: near T1 on fading volume) ---
             if _is_long:
