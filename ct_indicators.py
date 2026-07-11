@@ -161,8 +161,15 @@ def get_levels(df, price, atr_val):
     lows  = swing_lows(df['Low'],  order=3)
     highs = swing_highs(df['High'], order=3)
 
-    supports    = [v for v in lows  if v < price * 0.98]
-    resistances = [v for v in highs if v > price * 1.02]
+    # Role reversal (the course's signature setup): a broken RESISTANCE acts
+    # as support and a broken SUPPORT acts as resistance — so swing HIGHS
+    # below price are valid supports and swing LOWS above price are valid
+    # resistances. Also allow the support to sit within ±0.5% of price:
+    # a perfect retest has price exactly ON the level; the old 2% dead-zone
+    # made the scanner blind to at-the-level retests (found via RL, whose
+    # 388 broken-resistance retest was invisible → 'Too far from lvl').
+    supports    = [v for v in lows + highs if v <= price * 1.005]
+    resistances = [v for v in highs + lows if v >= price * 1.02]
 
     # Support: nearest swing low, or SMA20, or 8% below price
     if supports:
