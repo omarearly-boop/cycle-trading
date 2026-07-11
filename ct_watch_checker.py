@@ -201,7 +201,8 @@ def analyze_ticker(entry: dict):
 # ---------------------------------------------------------------------------
 #  Email sender
 # ---------------------------------------------------------------------------
-def send_green_alert(to_email: str, entry: dict, setup: dict) -> bool:
+def send_green_alert(to_email: str, entry: dict, setup: dict,
+                     provisional: bool = False) -> bool:
     from_email = os.environ.get('ALERT_EMAIL_FROM', '')
     password   = os.environ.get('ALERT_EMAIL_PASSWORD', '').replace(' ', '')
 
@@ -229,7 +230,8 @@ def send_green_alert(to_email: str, entry: dict, setup: dict) -> bool:
     dir_color = '#22c55e' if direction == 'LONG' else '#ef4444'
     dir_emoji = 'LONG' if direction == 'LONG' else 'SHORT'
 
-    subject = f"[GREEN LIGHT] {ticker} {dir_emoji} -- Prob {prob}% -- Cycles Alert"
+    subject = (f"[GREEN LIGHT{' - PROVISIONAL' if provisional else ''}] "
+               f"{ticker} {dir_emoji} -- Prob {prob}% -- Cycles Alert")
 
     factors_html = ''
     for label, delta, explain in setup.get('_pfacts', []):
@@ -247,6 +249,15 @@ def send_green_alert(to_email: str, entry: dict, setup: dict) -> bool:
         f'<p style="background:#1e293b;border-radius:8px;padding:12px;'
         f'color:#94a3b8;font-size:13px"><b>Note:</b> {note}</p>'
     ) if note else ''
+
+    provisional_html = (
+        '<div style="background:#422006;border:1px solid #f59e0b;border-radius:8px;'
+        'padding:12px 16px;margin-bottom:16px;color:#fde68a;font-size:13px">'
+        '⚠ <b>PROVISIONAL — the weekly candle is still open.</b> Price is at the '
+        'level now, but candle/volume/N.M.S. confirmation only counts at Friday\'s '
+        'close. Consider a smaller starter or wait for the close (course discipline).'
+        '</div>'
+    ) if provisional else ' '.strip()
 
     html_body = f"""
 <!DOCTYPE html>
@@ -268,6 +279,8 @@ def send_green_alert(to_email: str, entry: dict, setup: dict) -> bool:
       <span style="background:#1e40af;color:#bfdbfe;padding:3px 12px;border-radius:99px;
                    font-size:13px;font-weight:700">Prob {prob}%</span>
     </div>
+
+    {provisional_html}
 
     <!-- Trade parameters -->
     <table style="width:100%;border-collapse:collapse;background:#1e293b;
@@ -1152,11 +1165,17 @@ def run_check():
             'setup':     setup,
         })
 
-        if last_alert == today or tl != 'GREEN':
+        # Mid-week the PartialBar red flag caps setups at YELLOW by design —
+        # but the checker's job is timely alerts. If the ONLY red flag is the
+        # open weekly candle, still alert, marked PROVISIONAL.
+        _rf = setup.get('_red_flags', [])
+        provisional = (tl == 'YELLOW' and len(_rf) == 1
+                       and 'Weekly candle still open' in _rf[0])
+        if last_alert == today or (tl != 'GREEN' and not provisional):
             continue
 
-        print(f"    Sending GREEN LIGHT alert to {email}...")
-        sent = send_green_alert(email, entry, setup)
+        print(f"    Sending {'PROVISIONAL ' if provisional else ''}GREEN LIGHT alert to {email}...")
+        sent = send_green_alert(email, entry, setup, provisional=provisional)
         if sent:
             entry['last_alerted'] = today
             entry['alert_count']  = entry.get('alert_count', 0) + 1
