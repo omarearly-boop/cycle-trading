@@ -65,6 +65,10 @@ YF_MAX_RETRIES   = 3     # retries with exponential backoff on YFRateLimitError
 
 # ── Liquidity / pre-filters (course lesson 30) ──────────────
 MIN_WEEKLY_VOL_US    = 5_000_000  # weekly bars ≈ 1M shares/day (course: Avg Vol > 1M/day)
+# Share-count thresholds discriminate against high-priced stocks (RL: ~900K
+# shares/day but ~$350M/day — rejected as 'illiquid'!). A stock passes if it
+# clears EITHER the share threshold OR this dollar-volume threshold.
+MIN_WEEKLY_DOLLAR_VOL_US = 125_000_000   # ≈ $25M/day
 MIN_WEEKLY_VOL_OTHER = 10_000     # crypto / commodity / TASE / intl
 PE_PREFILTER         = None       # set to 25 to enforce course P/E < 25 hard gate (None = off)
 

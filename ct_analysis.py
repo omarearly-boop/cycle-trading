@@ -25,7 +25,7 @@ from ct_config import (
     HARD_BLOCKS, RSI_LONG_MAX, RSI_SHORT_MIN, PM_STOP_BUFFER,
     MAX_DIST_STOCK, MAX_DIST_CRYPTO, MAX_DIST_COMMODITY, MAX_DIST_INTL,
     MIN_WEEKLY_VOL_US, MIN_WEEKLY_VOL_OTHER, PE_PREFILTER,
-    PARTIAL_BAR_RED_FLAG,
+    MIN_WEEKLY_DOLLAR_VOL_US, PARTIAL_BAR_RED_FLAG,
 )
 from ct_indicators import (
     rsi, atr, cci, get_trend, swing_lows, swing_highs, get_levels,
@@ -673,9 +673,16 @@ def _fetch_market_data(ticker, is_crypto=False, is_commodity=False,
 
     # Liquidity hard filter (skip OTC / penny / illiquid)
     avg_vol_20 = float(df['Volume'].rolling(20).mean().iloc[-1])
-    # Course lesson 30: Avg Volume > 1M shares/day → ~5M/week on weekly bars
-    MIN_AVG_VOL = MIN_WEEKLY_VOL_US if not (is_crypto or is_commodity or is_israel or is_intl) else MIN_WEEKLY_VOL_OTHER
-    if avg_vol_20 < MIN_AVG_VOL:
+    # Course lesson 30: Avg Volume > 1M shares/day → ~5M/week on weekly bars.
+    # High-priced stocks (RL: ~900K shares but ~$350M/day) pass via DOLLAR
+    # volume instead — share counts alone discriminate against them.
+    _is_us_liq = not (is_crypto or is_commodity or is_israel or is_intl)
+    if _is_us_liq:
+        _dollar_vol_20 = avg_vol_20 * price
+        if (avg_vol_20 < MIN_WEEKLY_VOL_US
+                and _dollar_vol_20 < MIN_WEEKLY_DOLLAR_VOL_US):
+            _diag('illiquid'); return None  # thin on shares AND dollars -- skip
+    elif avg_vol_20 < MIN_WEEKLY_VOL_OTHER:
         _diag('illiquid'); return None  # OTC / illiquid -- skip
 
     # Market Cap filter — course lesson 30: require $300M+ for US stocks
