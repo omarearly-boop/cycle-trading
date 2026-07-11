@@ -25,6 +25,7 @@ from ct_config import (
     HARD_BLOCKS, RSI_LONG_MAX, RSI_SHORT_MIN, PM_STOP_BUFFER,
     MAX_DIST_STOCK, MAX_DIST_CRYPTO, MAX_DIST_COMMODITY, MAX_DIST_INTL,
     MIN_WEEKLY_VOL_US, MIN_WEEKLY_VOL_OTHER, PE_PREFILTER,
+    PARTIAL_BAR_RED_FLAG,
 )
 from ct_indicators import (
     rsi, atr, cci, get_trend, swing_lows, swing_highs, get_levels,
@@ -324,6 +325,10 @@ def get_traffic_light(prob, r):
     if r.get('SSR_Risk'):
         red_flags.append('SSR likely active (≥10% daily drop) — shorts only on upticks; '
                          'sell-stop orders may be rejected by the broker')
+    # Mid-week scan = current weekly candle still open (mentor: "השבוע רק החל")
+    if PARTIAL_BAR_RED_FLAG and r.get('PartialBar'):
+        red_flags.append('Weekly candle still open (mid-week scan) — candle/volume/N.M.S. '
+                         'signals provisional until Friday close')
 
     if r.get('SupportQ') == 'STRONG':
         green_flags.append('Strong support level')
@@ -401,6 +406,8 @@ def _build_setup_dict(direction, ticker, price, rsi_val, support, resistance,
     every field lives here, not scattered across 70 lines twice.
     """
     earn_str = 'SOON!' if earn_warn else ('APPROACHING' if earn_approaching else (earn_date or '-'))
+    # Mon-Thu = the current weekly bar is still forming (Fri close completes it)
+    _partial_bar = datetime.now().weekday() <= 3
     dir_label = '🟢 LONG' if direction == 'LONG' else '🔴 SHORT'
     late_ref  = support if direction == 'LONG' else resistance
     late_pct  = round(abs(price - late_ref) / late_ref * 100, 1) if late_ref else 0
@@ -435,6 +442,7 @@ def _build_setup_dict(direction, ticker, price, rsi_val, support, resistance,
         'WasCapped':      was_capped,
         'CapReason':      cap_reason,
         'Vol':            'OK' if vol_ok else 'WARN',
+        'PartialBar':     _partial_bar,
         'Earn':           earn_str,
         'EarnDays':       earn_days,
         'Type':           asset_type,

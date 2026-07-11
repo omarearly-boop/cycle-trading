@@ -52,6 +52,12 @@ PM_SWING_LOOKBACK = 2     # bars each side to confirm a weekly swing pivot
 PM_MOMENTUM_WEEKS = 3     # consecutive up/down weeks to trigger momentum rule
 PM_STOP_BUFFER    = 0.01  # 1 % buffer below swing low / above swing high
 
+# ── Weekly-bar discipline (Discord lesson: "השבוע רק החל") ──
+# Mon-Thu scans read an INCOMPLETE weekly candle: candle patterns, volume
+# ratios and N.M.S. closes are provisional until Friday's close. When True,
+# mid-week scans add a red flag so GREEN is reserved for closed weekly bars.
+PARTIAL_BAR_RED_FLAG = True
+
 # ── Yahoo Finance rate-limit protection ─────────────────────
 SCAN_MAX_WORKERS = 2     # parallel fetch threads (was 6 — tripped Yahoo rate limits)
 YF_THROTTLE_SEC  = 0.6   # min global spacing between Yahoo requests (~100/min)
