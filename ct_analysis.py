@@ -321,6 +321,9 @@ def get_traffic_light(prob, r):
             and not _sw.get('swept_reclaimed')
             and 0 <= (r.get('_fib_ret_pct', 0) or 0) < 40):
         red_flags.append('Sweep risk — first touch after vertical impulse; wait for flush + reclaim')
+    if r.get('SSR_Risk'):
+        red_flags.append('SSR likely active (≥10% daily drop) — shorts only on upticks; '
+                         'sell-stop orders may be rejected by the broker')
 
     if r.get('SupportQ') == 'STRONG':
         green_flags.append('Strong support level')
@@ -490,6 +493,9 @@ def _finalize_setup(setup, direction, ticker, atr_val, m_analysis,
         setup['_daily_timing'] = {} if (is_israel or is_intl) else get_daily_timing(ticker)
     except Exception:
         setup['_daily_timing'] = {}
+    # SSR (SEC Rule 201) — relevant for US stock SHORTs only
+    setup['SSR_Risk'] = bool(_is_us and direction == 'SHORT'
+                             and setup['_daily_timing'].get('ssr'))
 
     # ── Factor 42 — entry method classification (lesson 20) ──
     # Method 1 AGGRESSIVE:  before N.M.S. confirmation — lower probability
@@ -1027,8 +1033,15 @@ def _detect_setup(ticker, portfolio_size, market, is_crypto, asset_type, max_dis
         _diag('dist'); return None
 
     # ── Entry / Stop / Target ────────────────────────────────────
+    # Stop-candle rule (course; last remaining taxonomy gap): the stop goes
+    # below BOTH the support and the entry candle's low (mirrored for SHORT).
     entry  = price
-    stop   = round(support * 0.97, 4) if is_long else round(resistance * 1.03, 4)
+    if is_long:
+        _cand_low = float(df['Low'].iloc[-1])
+        stop = round(min(support * 0.97, _cand_low * 0.99), 4)
+    else:
+        _cand_high = float(df['High'].iloc[-1])
+        stop = round(max(resistance * 1.03, _cand_high * 1.01), 4)
     target = resistance if is_long else support
 
     if is_long and target <= entry * 1.02:

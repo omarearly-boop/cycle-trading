@@ -447,6 +447,21 @@ def get_daily_timing(ticker: str) -> dict:
             if not pd.isna(r_v):
                 result = {'rsi': round(r_v, 1),
                           'cci': round(c_v, 1) if not pd.isna(c_v) else 0.0}
+                # SSR check (SEC Rule 201): a >=10% intraday drop vs the prior
+                # close triggers the short-sale restriction for the rest of
+                # that day AND the next day — shorts only on upticks, and
+                # sell-stop orders may be rejected (Discord lesson, Jul 2026).
+                try:
+                    _cl, _lo = ddf['Close'], ddf['Low']
+                    ssr = False
+                    for k in (-1, -2):          # today and yesterday
+                        if len(_cl) >= abs(k) + 1:
+                            prev = float(_cl.iloc[k - 1])
+                            if prev > 0 and (float(_lo.iloc[k]) - prev) / prev <= -0.10:
+                                ssr = True
+                    result['ssr'] = ssr
+                except Exception:
+                    result['ssr'] = False
     except Exception:
         result = {}
     _DAILY_TIMING_CACHE[ticker] = result
