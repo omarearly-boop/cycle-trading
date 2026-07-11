@@ -1076,9 +1076,16 @@ def _detect_setup(ticker, portfolio_size, market, is_crypto, asset_type, max_dis
         _diag('rr'); return None
 
     # ── Position Sizing (3 safeguards) ──────────────────────────
-    units, pos_val, risk_amt, pos_pct, was_capped, cap_reason = \
-        calc_position_size(portfolio_size, entry, stop,
-                           atr_pct=atr_pct, high_vol=high_volatility)
+    if is_israel or is_intl:
+        # Non-USD listings (TASE quotes in agorot, LSE in pence, ...): dividing
+        # a USD risk budget by native-currency price deltas produces nonsense
+        # units. Portfolio is USD/US-only — show levels, mark sizing N/A.
+        units = pos_val = risk_amt = pos_pct = 0
+        was_capped, cap_reason = False, 'N/A — non-USD listing (levels only)'
+    else:
+        units, pos_val, risk_amt, pos_pct, was_capped, cap_reason = \
+            calc_position_size(portfolio_size, entry, stop,
+                               atr_pct=atr_pct, high_vol=high_volatility)
 
     # ── Scoring ──────────────────────────────────────────────────
     score = rratio
