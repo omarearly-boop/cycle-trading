@@ -112,8 +112,29 @@ FACTOR_PATTERNS = [
      'liquidity', 'Factor 3 — Liquidity', True),
     (r'ממוצע נע|moving average',
      'moving_avg', 'Factor 8 — Monthly Trend (partial)', True),
+    # ── Concepts added Jul 2026 (Factors 32-43 + trade management) ──
+    (r'sweep|סוויפ|הנזל|ינזיל|לצוד סטופים|stop.?run|פריצת שווא כלפי מטה',
+     'liquidity_sweep', 'Factor 43 — Sweep Risk', True),
+    (r'\bCCI\b',
+     'cci', 'Factor 32 — CCI', True),
+    (r'דיברגנצ|divergence',
+     'divergence', 'Factor 33 — RSI Divergence', True),
+    (r'גאפ|פער מחיר|\bgap\b',
+     'price_gap', 'Factor 37 — Price Gaps', True),
+    (r'ספל|ידית|cup|handle|ראש וכתפיים|head.{0,5}shoulder|דגל|תבנית',
+     'chart_pattern', 'Factor 36 — Chart Patterns', True),
+    (r'גאן|gann',
+     'gann', 'Factor 39 — Gann Levels', True),
+    (r'vwap',
+     'vwap', 'Factor 41 — VWAP', True),
+    (r'כניסה אגרסיבית|שיטות כניסה|שלוש.{0,10}כניס|aggressive entry',
+     'entry_method', 'Factor 42 — Entry Method', True),
+    (r'מימוש חלקי|יציאה חלקית|partial|כמות.{0,15}סטופ|לעדכן.{0,15}סטופ',
+     'partial_exit', 'pm_partial + Rule 3 — Partial Exits', True),
+    (r'עקרון המומנטום|שיעור 33|momentum principle',
+     'momentum_trail', 'Rule 2 — Momentum Trailing', True),
     (r'יחס|ratio|1:2|1:3|TP|target',
-     'risk_reward', 'Factor 2 — Risk:Reward', False),
+     'risk_reward', 'Factor 2 — Risk:Reward + T1/T2/T3', True),
     (r'סטופ.*נמוך|סטופ.*נר|stop.*candle',
      'stop_candle', 'Factor 6 — Stop Logic', False),
     (r'מגמה|trend',
@@ -180,8 +201,18 @@ SCANNER_STATUS = {
     'earnings':           ('✅ קיים',  'OK',   '#22c55e', 'Factor 5 — get_earnings()'),
     'liquidity':          ('✅ קיים',  'OK',   '#22c55e', 'Factor 3 — Volume > 10M'),
     'moving_avg':         ('✅ קיים',  'OK',   '#22c55e', 'Factor 8 — monthly SMA'),
-    'risk_reward':        ('🔧 חסר',  'GAP',  '#f59e0b', 'אין TP חלקי / ניהול יציאה מדורג'),
+    'risk_reward':        ('✅ קיים',  'OK',   '#22c55e', 'T1/T2/T3 + Rule 3 TP-trail + pm_partial (יולי 2026)'),
     'stop_candle':        ('🔧 חסר',  'GAP',  '#f59e0b', 'סטופ = min(תמיכה, נמוך נר) — לא מיושם'),
+    'liquidity_sweep':    ('✅ קיים',  'OK',   '#22c55e', 'Factor 43 — sweep risk + reclaim bonus'),
+    'cci':                ('✅ קיים',  'OK',   '#22c55e', 'Factor 32 — CCI ±200'),
+    'divergence':         ('✅ קיים',  'OK',   '#22c55e', 'Factor 33 — swing-based RSI divergence'),
+    'price_gap':          ('✅ קיים',  'OK',   '#22c55e', 'Factor 37 — detect_price_gaps()'),
+    'chart_pattern':      ('✅ קיים',  'OK',   '#22c55e', 'Factor 36 — Cup&Handle / H&S geometric'),
+    'gann':               ('✅ קיים',  'OK',   '#22c55e', 'Factor 39 — gann_100/gann_50 confluence'),
+    'vwap':               ('✅ קיים',  'OK',   '#22c55e', 'Factor 41 — rolling 20W VWAP'),
+    'entry_method':       ('✅ קיים',  'OK',   '#22c55e', 'Factor 42 — AGGRESSIVE/SOLID/MORE_SOLID'),
+    'partial_exit':       ('✅ קיים',  'OK',   '#22c55e', 'pm_partial + stop-quantity warnings'),
+    'momentum_trail':     ('✅ קיים',  'OK',   '#22c55e', 'Rule 2 — pm_rule2_momentum()'),
     'trend':              ('✅ קיים',  'OK',   '#22c55e', 'get_trend() + monthly trend'),
     'support_stop':       ('✅ קיים',  'OK',   '#22c55e', 'Factor 6 — stop distance check'),
     'general':            ('ℹ️ כללי', 'INFO', '#64748b', 'שיעור כללי'),
@@ -194,18 +225,9 @@ SCANNER_FACTORS_COVERED = {c for c, (_, kind, _, _) in SCANNER_STATUS.items() if
 
 FIX_CODE = {
     'risk_reward': '''\
-# 🔧 תצוגה מקדימה — שינוי זה לא מתבצע אוטומטית. לעדכון הסורק:
-# ערוך את ct_analysis.py → _build_setup_dict() / _finalize_setup()
-
-def get_tp_levels(entry, resistance, atr_val):
-    t1 = resistance
-    t2 = resistance + atr_val * 1.5     # יעד מורחב
-    t3 = entry + (resistance - entry) * 2  # הרחבה 2:1
-    return round(t1,4), round(t2,4), round(t3,4)
-
-# ב-analyze(), לפני _build_setup_dict():
-# t1, t2, t3 = get_tp_levels(entry, resistance, atr_val)
-# הוסף ל-_setup: 'T2': t2, 'T3': t3''',
+# ✅ כבר מיושם (יולי 2026) — T1/T2/T3 בדוח, Rule 3 TP-trail בניהול פוזיציה,
+# ו-pm_partial לרישום מימוש חלקי:
+#   python cycles_trading_scanner.py partial <position_id> <units_sold> [price]''',
 
     'stop_candle': '''\
 # 🔧 תצוגה מקדימה — שינוי זה לא מתבצע אוטומטית. לעדכון הסורק:

@@ -79,6 +79,12 @@ if RAW_INPUT.exists():
     print(f'📂 {len(raw_lookup)} הודעות גולמיות נטענו (עם image URLs)')
 
 # ── Load & pair ───────────────────────────────────────────────────
+if not INPUT.exists():
+    import sys
+    print(f'❌ קובץ הודעות לא נמצא: {INPUT.name}')
+    print('   הפק אותו עם preprocess_discord.py מקובץ ייצוא של הערוץ,')
+    print('   או השתמש ב-discord_monitor.py process <json> לזרימה השוטפת.')
+    sys.exit(1)
 msgs = json.loads(INPUT.read_text(encoding='utf-8'))
 print(f'✅ {len(msgs)} הודעות נטענו')
 
