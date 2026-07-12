@@ -29,5 +29,8 @@ python ct_watch_checker.py                >> logs\evening_scan.log 2>&1
 :: Calibration tracker — ingest today's signals, resolve old ones, report
 python ct_calibration.py                  >> logs\evening_scan.log 2>&1
 
+:: Colmex demo order sheet — placeable setups from tonight's scan
+python ct_order_sheet.py                  >> logs\evening_scan.log 2>&1
+
 echo [%date% %time%] ===== EVENING SCAN DONE  ===== >> logs\evening_scan.log 2>&1
 echo. >> logs\evening_scan.log 2>&1
