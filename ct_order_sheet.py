@@ -73,6 +73,11 @@ def build_sheet():
 
     candidates = []
     for r in rows:
+        # Colmex demo trades US-listed stocks/ETFs only — the scan's Type
+        # column marks those 'STOCK' (crypto/commodity/intl are excluded;
+        # crypto is USD-sized so a Units check alone would let it through).
+        if (r.get('Type') or 'STOCK').upper() != 'STOCK':
+            continue
         tl = r.get('TrafficLight', '')
         if tl not in ('GREEN', 'YELLOW'):
             continue
