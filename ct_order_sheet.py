@@ -7,8 +7,9 @@ REPORTS/cycles_scan_*.csv, filters to setups actually placeable in the
 Colmex demo account, ranks them, respects the open-position cap, and
 writes REPORTS/order_sheet_*.csv + .html (also printed to stdout/log).
 
-Selection rules (course-consistent):
-  - TrafficLight GREEN or YELLOW only
+Selection rules (course-consistent, strict GREEN-only per Omar's choice):
+  - TrafficLight GREEN only (zero red flags). YELLOWs are counted but not
+    listed — check the main cycles report for the discretionary tier.
   - US-listed with a real position size (Units >= 1; non-USD rows size 0)
   - R:R >= 2 (scanner already enforces; double-checked)
   - no 'Earnings imminent (<14d)' red flag (course: avoid)
@@ -70,6 +71,9 @@ def build_sheet():
 
     open_pos = _open_tickers()
     slots = max(0, MAX_OPEN_POSITIONS - len(open_pos))
+    n_yellow = sum(1 for r in rows
+                   if r.get('TrafficLight') == 'YELLOW'
+                   and (r.get('Type') or 'STOCK').upper() == 'STOCK')
 
     candidates = []
     for r in rows:
@@ -79,7 +83,7 @@ def build_sheet():
         if (r.get('Type') or 'STOCK').upper() != 'STOCK':
             continue
         tl = r.get('TrafficLight', '')
-        if tl not in ('GREEN', 'YELLOW'):
+        if tl != 'GREEN':
             continue
         qty = int(_f(r, 'Units'))
         if qty < 1:
@@ -149,7 +153,9 @@ def build_sheet():
 <body style='font-family:Segoe UI,Arial,sans-serif;margin:24px'>
 <h2>Colmex Demo — Order Sheet <small>({ts})</small></h2>
 <p>Open positions: <b>{len(open_pos)}</b> ({', '.join(open_pos) or 'none'})
- &nbsp;|&nbsp; Free slots: <b>{slots}</b> of {MAX_OPEN_POSITIONS}</p>
+ &nbsp;|&nbsp; Free slots: <b>{slots}</b> of {MAX_OPEN_POSITIONS}
+ &nbsp;|&nbsp; GREEN-only policy — {n_yellow} YELLOW setup(s) excluded
+ (see the cycles report if you want the discretionary tier)</p>
 <p><b>How to place (per row):</b> LONG &rarr; Buy Stop-Limit at Entry with
 attached S/L (Stop) and T/P (TP1). SHORT &rarr; Sell Stop-Limit at Entry,
 same bracket. After the order FILLS, register it with the RegisterCmd from
@@ -173,7 +179,7 @@ Demo account only — not financial advice.</p></body></html>"""
               f"entry {c['Entry']:>9.2f}  stop {c['Stop']:>9.2f}  tp {c['TP1']:>9.2f}"
               f"  | {c['Note']}")
     if not sheet:
-        print('  (no placeable setups today)')
+        print(f'  (no GREEN setups today — {n_yellow} YELLOW excluded by policy)')
     print(f'Sheet: {base}.html')
     return base + '.html'
 
