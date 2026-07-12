@@ -44,6 +44,22 @@ schtasks /create ^
 if errorlevel 1 goto :err
 
 echo.
+echo === Wake-from-sleep so scans run even if the PC is asleep ===
+:: 1. Allow wake timers in the active power plan
+powercfg /SETACVALUEINDEX SCHEME_CURRENT SUB_SLEEP RTCWAKE 1
+powercfg /SETACTIVE SCHEME_CURRENT
+:: 2. Wake-to-run on the two scans only. NOT the watch checker — its trigger
+::    fires hourly around the clock (the in-bat guard skips off-hours), so
+::    wake-to-run there would wake the PC every hour all night.
+::    Note: wakes from Sleep/Hibernate only — a shut-down PC stays off.
+powershell -NoProfile -Command ^
+  "$s = New-ScheduledTaskSettingsSet -WakeToRun -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries;" ^
+  "Set-ScheduledTask -TaskName 'CyclesTrading_EveningScan'    -Settings $s | Out-Null;" ^
+  "Set-ScheduledTask -TaskName 'CyclesTrading_SundayPipeline' -Settings $s | Out-Null;" ^
+  "Write-Host '  Wake-to-run enabled on EveningScan + SundayPipeline'"
+if errorlevel 1 echo   WARNING: wake-to-run not applied (tasks still run when PC is awake)
+
+echo.
 echo SUCCESS! Three tasks registered:
 schtasks /query /tn "CyclesTrading_WatchChecker"   | findstr /i "CyclesTrading Ready Running"
 schtasks /query /tn "CyclesTrading_EveningScan"    | findstr /i "CyclesTrading Ready Running"
