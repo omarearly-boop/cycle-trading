@@ -178,6 +178,13 @@ def build_actual():
                              '_chart_pattern': {'type': 'CUP_HANDLE', 'rim': 100,
                                                 'depth_pct': 20}})[0]
 
+    # -- Factor 44: technical stock via institutional ownership (Golan) --
+    f44 = fac._factor_technical_stock
+    A['f44_high']    = f44({'InstOwn': 90.0})[0]
+    A['f44_low']     = f44({'InstOwn': 50.0})[0]
+    A['f44_mid']     = f44({'InstOwn': 75.0})
+    A['f44_unknown'] = f44({'InstOwn': 0})
+
     # -- traffic light rules --
     def tl(prob, extra):
         base = {'Dir': '🟢 LONG', 'Earn': '-', 'SupportQ': 'STRONG'}
@@ -206,6 +213,8 @@ def build_actual():
                                                           'swept_reclaimed': True}},
                                       '_fib_ret_pct': 25})
     A['tl_two_flags'] = tl(80, {'Earn': 'APPROACHING', '_level_amb': 'AMBIGUOUS'})
+    A['tl_daily_mover'] = tl(80, {'_daily_timing': {'max_daily_move': 12.0}})
+    A['tl_daily_calm']  = tl(80, {'_daily_timing': {'max_daily_move': 6.5}})
 
     # -- universe parsers --
     good_csv = ('iShares Fund\nHoldings as of Jul 2026\n\n'

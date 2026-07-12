@@ -28,6 +28,10 @@
   "f36_long_intact": -3,
   "f36_short_broken": 12,
   "f36_short_intact": 3,
+  "f44_high": 5,
+  "f44_low": -5,
+  "f44_mid": null,
+  "f44_unknown": null,
   "factor_names": [
     "_factor_adx_structure",
     "_factor_atr_volatility",
@@ -68,6 +72,7 @@
     "_factor_stop_distance",
     "_factor_support_quality",
     "_factor_sweep_risk",
+    "_factor_technical_stock",
     "_factor_trend_confirmation",
     "_factor_volume",
     "_factor_volume_surge",
@@ -107,7 +112,7 @@
     "signal": 8.344,
     "trend": "BULL"
   },
-  "n_factors": 43,
+  "n_factors": 44,
   "pattern_hs": {
     "type": null
   },
@@ -147,6 +152,14 @@
   "tl_clean_green": [
     "GREEN",
     0
+  ],
+  "tl_daily_calm": [
+    "GREEN",
+    0
+  ],
+  "tl_daily_mover": [
+    "YELLOW",
+    1
   ],
   "tl_earn_approach": [
     "YELLOW",

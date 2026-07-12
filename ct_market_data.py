@@ -462,6 +462,15 @@ def get_daily_timing(ticker: str) -> dict:
                     result['ssr'] = ssr
                 except Exception:
                     result['ssr'] = False
+                # Golan lesson (T/AT&T thread, Jun 2026): stocks that move
+                # >10% in a single day are usually <65% institutional and
+                # NOT 'technical' — do not enter. Expose the max abs daily
+                # change over the fetched ~6 months for the traffic light.
+                try:
+                    _chg = ddf['Close'].pct_change().abs()
+                    result['max_daily_move'] = round(float(_chg.max()) * 100, 1)
+                except Exception:
+                    pass
     except Exception:
         result = {}
     _DAILY_TIMING_CACHE[ticker] = result

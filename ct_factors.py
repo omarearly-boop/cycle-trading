@@ -1642,6 +1642,33 @@ def _factor_sweep_risk(r):
     return None
 
 
+@factor
+def _factor_technical_stock(r):
+    """
+    Factor 44 -- 'Technical stock' via institutional ownership (Golan,
+    T/AT&T Discord thread, Jun 2026). Very high institutional ownership
+    (>=85%) usually means the stock is 'technical' — respects levels.
+    Low ownership (<65%) usually means less technical behaviour (and the
+    wild >10%/day movers). InstOwn arrives as percent; 0/None = unknown.
+    """
+    inst = r.get('InstOwn')
+    try:
+        inst = float(inst)
+    except (TypeError, ValueError):
+        return None
+    if inst <= 0 or inst > 100:
+        return None
+    if inst >= 85:
+        return (+5, 'Technical Stock',
+                f'Institutional ownership {inst:.0f}% (>=85%) -- technical stock, '
+                f'levels usually respected (Golan)')
+    if inst < 65:
+        return (-5, 'Technical Stock',
+                f'Institutional ownership {inst:.0f}% (<65%) -- usually less '
+                f'technical, levels less reliable (Golan)')
+    return None
+
+
 def calc_probability(r):
     """
     Iterate FACTORS registry. Each factor returns (delta, label, explanation) or None to skip.

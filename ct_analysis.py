@@ -325,6 +325,12 @@ def get_traffic_light(prob, r):
     if r.get('SSR_Risk'):
         red_flags.append('SSR likely active (≥10% daily drop) — shorts only on upticks; '
                          'sell-stop orders may be rejected by the broker')
+    # Golan (T/AT&T, Jun 2026): >10%-per-day movers are not 'technical' —
+    # hard rule: do not enter. Usually goes with <65% institutional.
+    _mx_day = (r.get('_daily_timing') or {}).get('max_daily_move')
+    if _mx_day and _mx_day >= 10.0:
+        red_flags.append(f'Moved {_mx_day:.0f}% in a single day (last 6mo) — not a '
+                         f'technical stock (Golan: do not enter)')
     # Mid-week scan = current weekly candle still open (mentor: "השבוע רק החל")
     if PARTIAL_BAR_RED_FLAG and r.get('PartialBar'):
         red_flags.append('Weekly candle still open (mid-week scan) — candle/volume/N.M.S. '
