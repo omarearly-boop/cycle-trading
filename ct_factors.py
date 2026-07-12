@@ -1296,11 +1296,30 @@ def _factor_chart_pattern(r):
         return (-10, 'Chart Pattern', 'Cup & Handle (bullish) conflicts with SHORT setup')
 
     if gtype == 'HEAD_SHOULDERS':
+        # Discord lesson (CMC, Jul 2026): a reversal pattern becomes relevant
+        # ONLY after the neckline breaks down. While the neckline holds, a
+        # clear support + reaction from the level is a valid LONG per the
+        # course rules — the forming shape must not kill the setup.
+        neck = geo.get('neckline') or 0
+        try:
+            _price = float(r.get('Price') or 0)
+        except (TypeError, ValueError):
+            _price = 0.0
+        broken = bool(neck) and 0 < _price < float(neck)
         if not is_long:
-            return (+12, 'Chart Pattern',
-                    f'Head & Shoulders: neckline {geo.get("neckline")} '
-                    f'-- most reliable reversal pattern (lesson 19)')
-        return (-12, 'Chart Pattern', 'Head & Shoulders forming -- bearish reversal risk for LONG')
+            if broken:
+                return (+12, 'Chart Pattern',
+                        f'Head & Shoulders CONFIRMED: neckline {neck} broken '
+                        f'-- most reliable reversal pattern (lesson 19)')
+            return (+3, 'Chart Pattern',
+                    f'H&S forming but neckline {neck} intact -- pattern counts '
+                    f'only after breakdown (course); premature for SHORT')
+        if broken:
+            return (-12, 'Chart Pattern',
+                    f'H&S neckline {neck} BROKEN -- confirmed bearish reversal against LONG')
+        return (-3, 'Chart Pattern',
+                f'H&S/M-shape forming above intact neckline {neck} -- course: '
+                f'irrelevant until breakdown; support retest stays valid')
 
     bq = r.get('_breakout_quality', {})
     direction = 'LONG' if is_long else 'SHORT'
