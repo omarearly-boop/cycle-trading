@@ -1,0 +1,207 @@
+{
+  "atr_last": 3.6807,
+  "bollinger": {
+    "lower": 87.9534,
+    "middle": 105.9765,
+    "pct_b": 0.873,
+    "position": "MID",
+    "squeeze": false,
+    "upper": 123.9995
+  },
+  "cci_last": 117.9009,
+  "compression": {
+    "-10": 40,
+    "-20": 30,
+    "-35": 25,
+    "-60": 17,
+    "0": 50,
+    "10": 60,
+    "15": 65,
+    "20": 70,
+    "21": 70,
+    "35": 75,
+    "50": 80,
+    "80": 90
+  },
+  "f36_cup_long": 14,
+  "f36_long_broken": -12,
+  "f36_long_intact": -3,
+  "f36_short_broken": 12,
+  "f36_short_intact": 3,
+  "factor_names": [
+    "_factor_adx_structure",
+    "_factor_atr_volatility",
+    "_factor_bollinger",
+    "_factor_breakout_quality",
+    "_factor_candle_compression",
+    "_factor_candle_quality",
+    "_factor_cci",
+    "_factor_chart_pattern",
+    "_factor_daily_timing",
+    "_factor_directional_volume",
+    "_factor_dow_theory_phase",
+    "_factor_earnings",
+    "_factor_earnings_zone",
+    "_factor_entry_distance",
+    "_factor_entry_method",
+    "_factor_fibonacci",
+    "_factor_fundamental_quality",
+    "_factor_fundamentals",
+    "_factor_gann_levels",
+    "_factor_late_entry",
+    "_factor_level_ambiguity",
+    "_factor_level_reliability",
+    "_factor_macd",
+    "_factor_market_regime",
+    "_factor_monthly_sr_confluence",
+    "_factor_monthly_trend",
+    "_factor_price_gaps",
+    "_factor_retest_window",
+    "_factor_rr",
+    "_factor_rsi",
+    "_factor_rsi_divergence",
+    "_factor_secondary_trend",
+    "_factor_sector_rs",
+    "_factor_setup_quality",
+    "_factor_short_squeeze",
+    "_factor_spy_rs",
+    "_factor_stop_distance",
+    "_factor_support_quality",
+    "_factor_sweep_risk",
+    "_factor_trend_confirmation",
+    "_factor_volume",
+    "_factor_volume_surge",
+    "_factor_vwap"
+  ],
+  "gann": {
+    "gann_100": 126.3,
+    "gann_50": 60.47,
+    "major_high": 120.93,
+    "swing_low": 63.15
+  },
+  "gaps": {
+    "bars_ago": 0,
+    "direction": "UP",
+    "filled": false,
+    "gap_pct": 6.7,
+    "type": "COMMON",
+    "vol_ratio": 1.0
+  },
+  "ishares_csv": [
+    "AIT",
+    "MOG-A"
+  ],
+  "ishares_html": [],
+  "level_reliability": [
+    "TESTED",
+    "Level 75.99 violated once then recovered — moderate confidence (29 bars above, 22 below)"
+  ],
+  "level_resistance": 132.316,
+  "level_support": 75.9888,
+  "levels_sane": true,
+  "macd": {
+    "cross": null,
+    "divergence": null,
+    "histogram": 0.6363,
+    "macd": 8.9803,
+    "signal": 8.344,
+    "trend": "BULL"
+  },
+  "n_factors": 43,
+  "pattern_hs": {
+    "type": null
+  },
+  "pattern_trend": {
+    "type": null
+  },
+  "rsi_last3": [
+    91.5011,
+    91.5251,
+    92.0569
+  ],
+  "support_quality": [
+    8,
+    "STRONG"
+  ],
+  "swing_highs_tail": [
+    70.8588,
+    71.1703,
+    72.1633
+  ],
+  "swing_lows_tail": [
+    67.6526,
+    66.2591,
+    67.4056
+  ],
+  "time_horizon": [
+    10.0,
+    "MEDIUM",
+    "2-3 months",
+    "#d29922",
+    "2-3 months"
+  ],
+  "tl_ambiguous": [
+    "YELLOW",
+    1
+  ],
+  "tl_clean_green": [
+    "GREEN",
+    0
+  ],
+  "tl_earn_approach": [
+    "YELLOW",
+    1
+  ],
+  "tl_earn_soon": [
+    "YELLOW",
+    1
+  ],
+  "tl_fib_deep": [
+    "YELLOW",
+    1
+  ],
+  "tl_low_prob": [
+    "RED",
+    0
+  ],
+  "tl_monthly_conf": [
+    "YELLOW",
+    1
+  ],
+  "tl_partial_bar": [
+    "YELLOW",
+    1
+  ],
+  "tl_rsi_div": [
+    "YELLOW",
+    1
+  ],
+  "tl_ssr": [
+    "YELLOW",
+    1
+  ],
+  "tl_sweep": [
+    "YELLOW",
+    1
+  ],
+  "tl_sweep_reclaimed": [
+    "GREEN",
+    0
+  ],
+  "tl_two_flags": [
+    "RED",
+    2
+  ],
+  "tl_unreliable": [
+    "YELLOW",
+    1
+  ],
+  "trend": "LONG",
+  "vwap_last": 106.2686,
+  "wiki_count": 123,
+  "wiki_first3": [
+    "AHR",
+    "AIT",
+    "MOG-A"
+  ]
+}
