@@ -1669,6 +1669,38 @@ def _factor_technical_stock(r):
     return None
 
 
+@factor
+def _factor_level_tested(r):
+    """
+    Factor 45 -- Last weekly candle already tested the level (Golan, AMZN
+    Discord thread, Jun 2026): 'you can enter even 3% above the level,
+    because the last weekly candle already tested the lower support' —
+    the test-and-hold IS the confirmation; SL goes under that candle's
+    wick (the stop-candle rule already does this) and R:R must stay >=2
+    (MIN_RR already enforces). Rewards the confirmation itself, whatever
+    the candle's textbook shape (Factor 30 only credits named patterns).
+    """
+    cp = r.get('_candle_pattern') or {}
+    lo, hi, cl = cp.get('low'), cp.get('high'), cp.get('close')
+    if not all(isinstance(v, (int, float)) and v > 0 for v in (lo, hi, cl)):
+        return None
+    is_long = 'LONG' in r['Dir']
+    if is_long:
+        sup = r.get('Support') or 0
+        if sup > 0 and lo <= sup * 1.01 and cl > sup:
+            return (+6, 'Level Tested',
+                    f'Last weekly candle tested support {sup} (low {lo}) and '
+                    f'closed above -- test-and-hold confirmation; entry valid '
+                    f'even a few %% higher (Golan)')
+    else:
+        res = r.get('Resist') or 0
+        if res > 0 and hi >= res * 0.99 and cl < res:
+            return (+6, 'Level Tested',
+                    f'Last weekly candle tested resistance {res} (high {hi}) and '
+                    f'closed below -- test-and-hold confirmation (Golan)')
+    return None
+
+
 def calc_probability(r):
     """
     Iterate FACTORS registry. Each factor returns (delta, label, explanation) or None to skip.

@@ -185,6 +185,20 @@ def build_actual():
     A['f44_mid']     = f44({'InstOwn': 75.0})
     A['f44_unknown'] = f44({'InstOwn': 0})
 
+    # -- Factor 45: last candle tested the level (Golan AMZN lesson) --
+    f45 = fac._factor_level_tested
+    _cpb = {'low': 234.5, 'high': 247.0, 'close': 246.0}
+    A['f45_tested_hold'] = f45({'Dir': '🟢 LONG', 'Support': 235.0,
+                                '_candle_pattern': _cpb})[0]
+    A['f45_no_touch']    = f45({'Dir': '🟢 LONG', 'Support': 225.0,
+                                '_candle_pattern': _cpb})
+    A['f45_closed_below'] = f45({'Dir': '🟢 LONG', 'Support': 250.0,
+                                 '_candle_pattern': _cpb})
+    A['f45_short_tested'] = f45({'Dir': '🔴 SHORT', 'Resist': 246.5,
+                                 '_candle_pattern': _cpb})[0]
+    A['f45_missing_ohlc'] = f45({'Dir': '🟢 LONG', 'Support': 235.0,
+                                 '_candle_pattern': {'type': 'HAMMER'}})
+
     # -- traffic light rules --
     def tl(prob, extra):
         base = {'Dir': '🟢 LONG', 'Earn': '-', 'SupportQ': 'STRONG'}

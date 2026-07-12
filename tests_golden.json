@@ -32,6 +32,11 @@
   "f44_low": -5,
   "f44_mid": null,
   "f44_unknown": null,
+  "f45_closed_below": null,
+  "f45_missing_ohlc": null,
+  "f45_no_touch": null,
+  "f45_short_tested": 6,
+  "f45_tested_hold": 6,
   "factor_names": [
     "_factor_adx_structure",
     "_factor_atr_volatility",
@@ -55,6 +60,7 @@
     "_factor_late_entry",
     "_factor_level_ambiguity",
     "_factor_level_reliability",
+    "_factor_level_tested",
     "_factor_macd",
     "_factor_market_regime",
     "_factor_monthly_sr_confluence",
@@ -112,7 +118,7 @@
     "signal": 8.344,
     "trend": "BULL"
   },
-  "n_factors": 44,
+  "n_factors": 45,
   "pattern_hs": {
     "type": null
   },

@@ -787,7 +787,12 @@ def _fetch_market_data(ticker, is_crypto=False, is_commodity=False,
                 # Harami: current body inside prior body (lesson 9 inside bar)
                 elif (max(_o, _c) < max(_po, _pc) and min(_o, _c) > min(_po, _pc)):
                     _ctype = 'HARAMI_BULL' if _po > _pc else 'HARAMI_BEAR'
-        _candle_pattern = {'type': _ctype, 'body_pct': round(_body / _rng, 2) if _rng > 0 else 0}
+        _candle_pattern = {'type': _ctype,
+                           'body_pct': round(_body / _rng, 2) if _rng > 0 else 0,
+                           # last-candle OHLC for Factor 45 (Golan AMZN lesson:
+                           # 'the last weekly candle already tested the support')
+                           'low': round(_l, 4), 'high': round(_h, 4),
+                           'close': round(_c, 4)}
     except Exception:
         _candle_pattern = {'type': 'NEUTRAL', 'body_pct': 0}
 
