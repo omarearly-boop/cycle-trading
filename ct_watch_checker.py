@@ -1081,6 +1081,88 @@ def send_preearnings_alert(to_email: str, pos: dict, cur_price: float,
         return False
 
 
+def send_preearnings_exit_alert(to_email: str, pos: dict, cur_price: float,
+                                r_mult: float, earn_date: str, earn_days) -> bool:
+    """Pre-earnings EXIT (Discord lesson, EOG Apr 2026): entered before
+    earnings and still near the entry price — close the trade rather than
+    hold through the report. A gap-down 'skips' the stop and ejects at a
+    bigger loss than planned; near entry/stop the gap fear is highest.
+    """
+    from_email = os.environ.get('ALERT_EMAIL_FROM', '')
+    password   = os.environ.get('ALERT_EMAIL_PASSWORD', '').replace(' ', '')
+    if not from_email or not password:
+        return False
+
+    ticker    = pos['ticker']
+    direction = pos.get('direction', 'LONG')
+    entry_p   = pos.get('entry') or 0
+    stop_p    = pos.get('stop') or 0
+    units     = pos.get('units') or 0
+    pid       = pos.get('id', '')
+    dir_color = '#22c55e' if 'LONG' in direction else '#ef4444'
+
+    subject = (f"[PRE-EARNINGS EXIT] {ticker} {direction} {r_mult:+.1f}R "
+               f"-- close before earnings ({earn_days}d)")
+
+    html_body = f"""
+<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"></head>
+<body style="background:#0f172a;color:#e2e8f0;font-family:sans-serif;padding:24px;margin:0">
+<div style="max-width:600px;margin:0 auto">
+  <div style="background:#1e293b;border-radius:12px;padding:24px;border-left:4px solid #ef4444">
+    <div style="color:#ef4444;font-size:13px;font-weight:700;letter-spacing:2px;margin-bottom:8px">
+      PRE-EARNINGS EXIT
+    </div>
+    <div style="font-size:28px;font-weight:800;color:#f1f5f9">{ticker}</div>
+    <div style="color:{dir_color};font-size:14px;font-weight:700;margin-top:4px">
+      {direction} &nbsp; {r_mult:+.1f}R (near entry)</div>
+  </div>
+  <div style="background:#1e293b;border-radius:12px;padding:20px;margin-top:12px">
+    <p style="color:#94a3b8;margin:0 0 12px 0;font-size:14px">
+      Earnings <b style="color:#f1f5f9">{earn_date}</b> ({earn_days}d away) and the
+      position is still near the entry price ({r_mult:+.1f}R). Course guidance
+      (EOG lesson): <b style="color:#ef4444">close the full position ({units} units)
+      before the report</b> — an earnings gap can jump straight past the stop
+      and exit you at a much bigger loss than planned. Holding through
+      earnings is only considered when the trade is well in profit.
+    </p>
+    <p style="background:#422006;border:1px solid #f59e0b;border-radius:6px;padding:10px 14px;
+              color:#fde68a;font-size:12px;margin:0 0 12px 0">
+      After closing at the broker (and cancelling the bracket orders), record it:<br>
+      <code style="color:#fbbf24">python cycles_trading_scanner.py close {pid}</code>
+    </p>
+    <table style="width:100%;border-collapse:collapse">
+      <tr><td style="padding:6px 0;color:#64748b;font-size:13px">Entry</td>
+          <td style="padding:6px 0;color:#e2e8f0;font-size:13px;text-align:right">${entry_p:.2f}</td></tr>
+      <tr><td style="padding:6px 0;color:#64748b;font-size:13px">Current Price</td>
+          <td style="padding:6px 0;color:#ef4444;font-size:15px;font-weight:700;text-align:right">${cur_price:.2f}</td></tr>
+      <tr><td style="padding:6px 0;color:#64748b;font-size:13px">Stop (gap can skip it!)</td>
+          <td style="padding:6px 0;color:#ef4444;font-size:13px;text-align:right">${stop_p:.2f}</td></tr>
+    </table>
+  </div>
+  <p style="color:#475569;font-size:11px;text-align:center;margin-top:16px">
+    Cycles Trading -- automated signal -- not financial advice
+  </p>
+</div>
+</body>
+</html>"""
+
+    try:
+        msg = MIMEMultipart('alternative')
+        msg['Subject'] = subject
+        msg['From']    = from_email
+        msg['To']      = to_email
+        msg.attach(MIMEText(html_body, 'html', 'utf-8'))
+        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as srv:
+            srv.login(from_email, password)
+            srv.sendmail(from_email, to_email, msg.as_string())
+        return True
+    except Exception as e:
+        print(f"    Pre-earnings-exit email FAILED: {e}")
+        return False
+
+
 def send_trail_stop_alert(to_email: str, entry: dict, new_stop: float) -> bool:
     """Send TRAIL STOP UPDATE when a new swing low/high allows tightening the stop."""
     from_email = os.environ.get('ALERT_EMAIL_FROM', '')
@@ -1407,24 +1489,35 @@ def run_check():
                     _pos_changed = True
                     alerts_sent += 1
 
-            # --- Pre-earnings de-risk (Discord lesson: ALNY +4R, Jul 2026) ---
-            # At >=2R unrealized with earnings <=14d: DON'T move the stop —
-            # realize 50% and let the rest run. R measured vs ORIGINAL risk
-            # (first recorded stop, before any trailing). One-time alert.
+            # --- Pre-earnings management (ALNY + EOG Discord lessons) ---
+            # R measured vs ORIGINAL risk (first recorded stop, pre-trailing).
+            #   >=2R with earnings <=14d  -> take 50%, DON'T move stop (ALNY)
+            #   < 1R with earnings <=10d  -> CLOSE before earnings (EOG):
+            #     near entry/stop a gap-down 'skips' the stop and ejects at a
+            #     bigger loss than planned; fear shrinks as profit grows.
+            #   1R-2R                     -> no alert (judgment zone).
+            # One-time alert per position.
             try:
                 _sh = _pos.get('stop_history') or []
                 _orig_stop = _sh[0].get('from', _stop_p) if _sh else _stop_p
                 _risk_ps = (_entry_p - _orig_stop) if _is_long else (_orig_stop - _entry_p)
                 _r_mult  = (((_cur_p - _entry_p) if _is_long else (_entry_p - _cur_p))
                             / _risk_ps) if _risk_ps > 0 else 0.0
-                if _r_mult >= 2.0 and not _pos.get('preearn_alerted'):
+                if _risk_ps > 0 and not _pos.get('preearn_alerted')                         and (_r_mult >= 2.0 or _r_mult < 1.0):
                     from ct_market_data import get_earnings as _get_earn
                     _edate, _edays = _get_earn(_yf.Ticker(_ticker))
-                    if _edays is not None and 0 <= _edays <= 14:
+                    if _edays is not None and _r_mult >= 2.0 and 0 <= _edays <= 14:
                         _half = max(1, int((_pos.get('units') or 2) / 2))
                         print(f"    {_ticker}: +{_r_mult:.1f}R, earnings in {_edays}d -> PRE-EARNINGS DE-RISK")
                         if send_preearnings_alert(email, _pos, _cur_p, _r_mult,
                                                   _edate, _edays, _half):
+                            _pos['preearn_alerted'] = today
+                            _pos_changed = True
+                            alerts_sent += 1
+                    elif _edays is not None and _r_mult < 1.0 and 0 <= _edays <= 10:
+                        print(f"    {_ticker}: {_r_mult:+.1f}R near entry, earnings in {_edays}d -> PRE-EARNINGS EXIT")
+                        if send_preearnings_exit_alert(email, _pos, _cur_p, _r_mult,
+                                                       _edate, _edays):
                             _pos['preearn_alerted'] = today
                             _pos_changed = True
                             alerts_sent += 1
