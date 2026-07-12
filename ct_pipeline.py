@@ -144,7 +144,9 @@ def _run(label: str, cmd: list) -> bool:
             text=True, encoding='utf-8', errors='replace'
         )
         # Watchdog: the old TimeoutExpired handler was dead code (Popen has no
-        # timeout) — a hung scan blocked the pipeline forever. Kill after 45min.
+        # timeout) — a hung scan blocked the pipeline forever. Kill after 150min
+        # (universe now includes S&P 400 + small-caps ≈ 1,650 tickers; at the
+        # 0.6s Yahoo throttle a full scan runs ~90min).
         import threading as _th
         _killed = {'flag': False}
         def _kill():
@@ -153,7 +155,7 @@ def _run(label: str, cmd: list) -> bool:
                 proc.kill()
             except Exception:
                 pass
-        _watchdog = _th.Timer(2700, _kill)
+        _watchdog = _th.Timer(9000, _kill)
         _watchdog.daemon = True
         _watchdog.start()
         last_lines = []
@@ -175,7 +177,7 @@ def _run(label: str, cmd: list) -> bool:
         _watchdog.cancel()
         elapsed = time.time() - t0
         if _killed['flag']:
-            _log(f'    TIMEOUT — killed after 45min (scan hung)')
+            _log(f'    TIMEOUT — killed after 150min (scan hung)')
             return False
         ok = proc.returncode == 0
         _log(f'    {"OK" if ok else f"FAILED (rc={proc.returncode})"} in {elapsed:.0f}s')
