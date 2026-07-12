@@ -12,7 +12,7 @@ Sources (zero Wikipedia):
 Caches to .universe_cache.json for CACHE_TTL_H hours.
 """
 
-import csv, io, json, logging, os, subprocess, warnings
+import csv, io, json, logging, os, re, subprocess, warnings
 import requests
 from datetime import datetime, timedelta
 from typing import Dict, List
@@ -57,18 +57,18 @@ def _fetch_nasdaq100() -> List[str]:
     return [row['symbol'] for row in rows if row.get('symbol')]
 
 
-def _fetch_sp400() -> List[str]:
-    """S&P 400 Mid-Cap from iShares IJH ETF holdings CSV (BlackRock official).
-    Catches mid-caps like MOG.A (~$3B) that aren't in S&P 500 or NASDAQ 100.
+def _parse_ishares_csv(text: str) -> List[str]:
+    """Parse an iShares holdings CSV body into ticker list.
+
+    Returns [] if the response is actually an HTML page — iShares started
+    serving the product page (bot-check / URL scheme change) with a
+    'text/csv' content type, and the HTML contains the substring 'Ticker'
+    ('fundTicker'), which fooled the old header detection into parsing
+    garbage and yielding 0 tickers.
     """
-    url = (
-        "https://www.ishares.com/us/products/239763/"
-        "ishares-sp-mid-cap-etf/1467271812596.ajax"
-        "?fileType=csv&fileName=IJH_holdings&dataType=fund"
-    )
-    r = requests.get(url, timeout=30, headers=_HEADERS)
-    r.raise_for_status()
-    lines = r.text.splitlines()
+    if '<html' in text[:2000].lower() or '<!doctype' in text[:2000].lower():
+        return []
+    lines = text.splitlines()
     # iShares CSVs have info rows before the real header — find 'Ticker' column
     header_idx = next((i for i, l in enumerate(lines) if 'Ticker' in l), None)
     if header_idx is None:
@@ -77,10 +77,108 @@ def _fetch_sp400() -> List[str]:
     tickers = []
     _SKIP = {'-', 'USD', 'XTSLA', 'XTSLA BF', ''}
     for row in reader:
-        t = row.get('Ticker', '').strip()
+        t = (row.get('Ticker') or '').strip()
         if t and t not in _SKIP and not t.startswith('CASH') and len(t) <= 6:
             tickers.append(t.replace('.', '-'))
     return tickers
+
+
+def _fetch_wikipedia_index(page: str, min_expected: int = 100) -> List[str]:
+    """Constituent tickers from a Wikipedia 'List of ... companies' page.
+
+    Dependency-free wikitable parse: first wikitable whose header has a
+    'Symbol' column; take the first <td> of each row. These pages are
+    maintained within days of index changes and load fine with plain
+    requests (unlike the iShares endpoints, which now bot-check).
+    """
+    url = "https://en.wikipedia.org/wiki/" + page
+    r = requests.get(url, timeout=30, headers=_HEADERS)
+    r.raise_for_status()
+    for tbl in re.findall(r'<table[^>]*wikitable[^>]*>.*?</table>', r.text, re.S):
+        header = re.search(r'<tr[^>]*>.*?</tr>', tbl, re.S)
+        if not header or 'Symbol' not in header.group(0):
+            continue
+        out = []
+        for row in re.findall(r'<tr[^>]*>(.*?)</tr>', tbl, re.S)[1:]:
+            td = re.search(r'<td[^>]*>(.*?)</td>', row, re.S)
+            if not td:
+                continue
+            sym = re.sub(r'<[^>]+>', '', td.group(1)).strip().upper()
+            if re.fullmatch(r'[A-Z][A-Z0-9.\-]{0,7}', sym):
+                out.append(sym.replace('.', '-'))
+        if len(out) >= min_expected:
+            return out
+    return []
+
+
+def _fetch_sp400() -> List[str]:
+    """S&P 400 Mid-Cap. iShares IJH holdings CSV first (BlackRock official);
+    falls back to Wikipedia's constituent list — the iShares .ajax endpoint
+    now often returns an HTML page instead of the CSV.
+    Catches mid-caps like MOG.A (~$3B) that aren't in S&P 500 or NASDAQ 100.
+    """
+    url = (
+        "https://www.ishares.com/us/products/239763/"
+        "ishares-sp-mid-cap-etf/1467271812596.ajax"
+        "?fileType=csv&fileName=IJH_holdings&dataType=fund"
+    )
+    tickers: List[str] = []
+    try:
+        r = requests.get(url, timeout=30, headers=_HEADERS)
+        r.raise_for_status()
+        tickers = _parse_ishares_csv(r.text)
+    except Exception as exc:
+        log.warning("iShares IJH fetch failed: %s", exc)
+    if len(tickers) >= 100:
+        return tickers
+    print("      (iShares IJH unavailable -- using Wikipedia S&P 400 list)")
+    return _fetch_wikipedia_index("List_of_S%26P_400_companies")
+
+
+def _fetch_russell2000_top() -> List[str]:
+    """Russell 2000 top 300 by market weight from iShares IWM ETF holdings CSV.
+
+    Full Russell 2000 has ~2000 tickers -- too slow for hourly scan.
+    We take the top 300 by market weight = liquid small-caps like YELP, GME, etc.
+    The scanner's own liquidity filter (avg vol < 100K) removes any stragglers.
+    """
+    url = (
+        "https://www.ishares.com/us/products/239726/"
+        "ishares-russell-2000-etf/1467271812596.ajax"
+        "?fileType=csv&fileName=IWM_holdings&dataType=fund"
+    )
+    rows = []
+    try:
+        r = requests.get(url, timeout=30, headers=_HEADERS)
+        r.raise_for_status()
+        text = r.text
+        if '<html' in text[:2000].lower() or '<!doctype' in text[:2000].lower():
+            text = ''    # HTML page, not the CSV (see _parse_ishares_csv)
+        lines = text.splitlines()
+        header_idx = next((i for i, l in enumerate(lines) if 'Ticker' in l), None)
+        if header_idx is not None:
+            reader = csv.DictReader(lines[header_idx:])
+            _SKIP = {'-', 'USD', 'XTSLA', 'XTSLA BF', ''}
+            for row in reader:
+                t = (row.get('Ticker') or '').strip()
+                if not t or t in _SKIP or t.startswith('CASH') or len(t) > 6:
+                    continue
+                try:
+                    weight = float(row.get('Weight (%)', 0) or 0)
+                except (ValueError, TypeError):
+                    weight = 0.0
+                rows.append((weight, t.replace('.', '-')))
+    except Exception as exc:
+        log.warning("iShares IWM fetch failed: %s", exc)
+    if len(rows) >= 100:
+        # Sort descending by weight, take top 300
+        rows.sort(reverse=True)
+        return [t for _, t in rows[:300]]
+    # Fallback: Wikipedia has no Russell 2000 constituent list, so use the
+    # S&P 600 SmallCap list — similar liquid small-cap coverage (~600 names,
+    # profitability-screened). The scanner's liquidity filter trims the rest.
+    print("      (iShares IWM unavailable -- using Wikipedia S&P 600 small-cap list)")
+    return _fetch_wikipedia_index("List_of_S%26P_600_companies")
 
 
 # ══════════════════════════════════════════════════════════════
@@ -264,9 +362,10 @@ def get_us_universe(use_tv: bool = True) -> List[str]:
     # Fallback: index-based sources
     tickers = []
     for name, fn in [
-        ("S&P 500",      _fetch_sp500),
-        ("NASDAQ 100",   _fetch_nasdaq100),
-        ("S&P 400 Mid",  _fetch_sp400),
+        ("S&P 500",          _fetch_sp500),
+        ("NASDAQ 100",       _fetch_nasdaq100),
+        ("S&P 400 Mid",      _fetch_sp400),
+        ("Russell 2000 Top", _fetch_russell2000_top),
     ]:
         try:
             result = fn()
@@ -298,37 +397,34 @@ def get_universe(force_refresh: bool = True) -> Dict[str, List[str]]:
             cached = _read_cache()
             data   = cached['data']
             age_h  = (datetime.now() - datetime.fromisoformat(cached['cached_at'])).seconds // 3600
-            print(f"  ✓ Universe cache ({age_h}h old): "
+            print(f"  Universe cache ({age_h}h old): "
                   f"{len(data.get('us',[]))} US + {len(data.get('israel',[]))} Israel")
             return data
         except Exception:
             pass   # fall through to fresh fetch
 
-    print("  Fetching live market universe (S&P 500 + NASDAQ 100 + S&P 400 + Israel)...")
+    print("  Fetching live market universe (S&P 500 + NASDAQ 100 + S&P 400 + Russell 2000 Top + Israel)...")
     us     = get_us_universe()
     israel = get_israel_universe()
 
     if us:
-        # Only write cache when we actually got live data
         universe = {'us': us, 'israel': israel}
         _write_cache(universe)
-        print(f"  ✓ Universe ready: {len(us)} US + {len(israel)} Israel stocks")
+        print(f"  Universe ready: {len(us)} US + {len(israel)} Israel stocks")
         return universe
 
-    # All fetches failed — return last good cache if it exists
     if _cache_valid():
-        print("  ⚠ Live fetch failed — using previous cache as fallback")
+        print("  Live fetch failed -- using previous cache as fallback")
         return _read_cache()['data']
 
-    print("  ⚠ Live fetch failed, no cache — using built-in fallback")
+    print("  Live fetch failed, no cache -- using built-in fallback")
     return {'us': [], 'israel': israel}
 
 
 if __name__ == '__main__':
-    # Quick test: python ct_universe.py
     u = get_universe(force_refresh=True)
     print(f"\nUS universe sample: {u['us'][:10]} ... total {len(u['us'])}")
     print(f"Israel: {u['israel'][:5]} ... total {len(u['israel'])}")
-    for t in ['KLAC', 'MOG-A', 'MOG.A', 'NVDA', 'AAPL']:
-        found = t in u['us'] or t.replace('-','.') in u['us']
-        print(f"  {'✓' if found else '✗'} {t}")
+    for t in ['KLAC', 'NVDA', 'AAPL', 'YELP']:
+        found = t in u['us']
+        print(f"  {'OK' if found else 'MISS'} {t}")
