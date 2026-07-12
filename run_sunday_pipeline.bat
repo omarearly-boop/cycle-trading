@@ -13,7 +13,4 @@ set PYTHONUTF8=1
 set PYTHONIOENCODING=utf-8
 
 if not exist logs mkdir logs
-python ct_pipeline.py     >> logs\sunday_pipeline.log 2>&1
-
-:: Colmex demo order sheet — placeable setups from today's scan
-python ct_order_sheet.py  >> logs\sunday_pipeline.log 2>&1
+python ct_pipeline.py >> logs\sunday_pipeline.log 2>&1
