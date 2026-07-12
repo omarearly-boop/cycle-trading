@@ -39,7 +39,7 @@ echo.
 echo === 3/3 Sunday Pipeline (Sunday 08:00) ===
 schtasks /create ^
   /tn "CyclesTrading_SundayPipeline" ^
-  /tr "cmd /c \"cd /d %BAT_DIR% && python ct_pipeline.py\"" ^
+  /tr "cmd /c \"%BAT_DIR%run_sunday_pipeline.bat\"" ^
   /sc WEEKLY /d SUN /st 08:00 /f
 if errorlevel 1 goto :err
 

@@ -176,9 +176,13 @@ def main():
     #  OPTION 2 — Specific ticker or scan all
     # ══════════════════════════════════════════════════════════
     print()
-    _env_ti = os.environ.get("CT_TICKER_INPUT", "").strip().upper()
-    if _env_ti:
-        ticker_input = _env_ti
+    # CT_TICKER_INPUT set-but-empty means "scan ALL, don't prompt" — scheduled
+    # runs set it to empty and an input() prompt under Task Scheduler can hang
+    # forever (Friday's evening scan froze at this prompt). Only prompt when
+    # the variable is truly absent (interactive use).
+    _env_ti_raw = os.environ.get("CT_TICKER_INPUT")
+    if _env_ti_raw is not None:
+        ticker_input = _env_ti_raw.strip().upper()
         print(f"  [2] Ticker: {ticker_input or 'ALL'}  (env)")
     else:
         try:
