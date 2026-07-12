@@ -471,6 +471,27 @@ def get_daily_timing(ticker: str) -> dict:
                     result['max_daily_move'] = round(float(_chg.max()) * 100, 1)
                 except Exception:
                     pass
+                # 'Horseshoe' turn (Golan, PNR case study, Jun 2026): the
+                # last ~10 daily closes carve a U at the level — extreme
+                # 2-7 sessions ago, >=1% fall into it and >=1% rise out of
+                # it = buyers visibly stepping in (mirrored N for shorts).
+                try:
+                    _c10 = ddf['Close'].tail(10)
+                    if len(_c10) == 10:
+                        _lo_i = int(_c10.values.argmin())
+                        _hi_i = int(_c10.values.argmax())
+                        _lo_v = float(_c10.iloc[_lo_i])
+                        _hi_v = float(_c10.iloc[_hi_i])
+                        result['u_turn'] = bool(
+                            2 <= _lo_i <= 7 and _lo_v > 0
+                            and float(_c10.iloc[0])  >= _lo_v * 1.01
+                            and float(_c10.iloc[-1]) >= _lo_v * 1.01)
+                        result['n_turn'] = bool(
+                            2 <= _hi_i <= 7 and _hi_v > 0
+                            and float(_c10.iloc[0])  <= _hi_v * 0.99
+                            and float(_c10.iloc[-1]) <= _hi_v * 0.99)
+                except Exception:
+                    pass
     except Exception:
         result = {}
     _DAILY_TIMING_CACHE[ticker] = result

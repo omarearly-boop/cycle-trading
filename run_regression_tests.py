@@ -199,6 +199,28 @@ def build_actual():
     A['f45_missing_ohlc'] = f45({'Dir': '🟢 LONG', 'Support': 235.0,
                                  '_candle_pattern': {'type': 'HAMMER'}})
 
+    # -- Factor 46: daily horseshoe turn (Golan PNR lesson) --
+    f46 = fac._factor_daily_uturn
+    A['f46_long_u']   = f46({'Dir': '🟢 LONG',  '_daily_timing': {'u_turn': True,  'n_turn': False}})[0]
+    A['f46_long_n']   = f46({'Dir': '🟢 LONG',  '_daily_timing': {'u_turn': False, 'n_turn': True}})[0]
+    A['f46_short_n']  = f46({'Dir': '🔴 SHORT', '_daily_timing': {'u_turn': False, 'n_turn': True}})[0]
+    A['f46_no_turn']  = f46({'Dir': '🟢 LONG',  '_daily_timing': {'u_turn': False, 'n_turn': False}})
+    A['f46_no_data']  = f46({'Dir': '🟢 LONG',  '_daily_timing': {}})
+
+    # -- U/N-turn detection math (same logic as get_daily_timing) --
+    def _turns(vals):
+        c10 = pd.Series(vals, dtype=float)
+        lo_i, hi_i = int(c10.values.argmin()), int(c10.values.argmax())
+        lo_v, hi_v = float(c10.iloc[lo_i]), float(c10.iloc[hi_i])
+        u = bool(2 <= lo_i <= 7 and lo_v > 0 and float(c10.iloc[0]) >= lo_v * 1.01
+                 and float(c10.iloc[-1]) >= lo_v * 1.01)
+        n = bool(2 <= hi_i <= 7 and hi_v > 0 and float(c10.iloc[0]) <= hi_v * 0.99
+                 and float(c10.iloc[-1]) <= hi_v * 0.99)
+        return [u, n]
+    A['uturn_pnr_like'] = _turns([76, 74.5, 73, 71.5, 70, 70.5, 71.5, 72.5, 74, 75])
+    A['uturn_downtrend'] = _turns([80, 79, 78, 77, 76, 75, 74, 73, 72, 71])
+    A['uturn_ntop'] = _turns([70, 72, 74, 76, 77, 76.5, 75, 74, 72, 71])
+
     # -- traffic light rules --
     def tl(prob, extra):
         base = {'Dir': '🟢 LONG', 'Earn': '-', 'SupportQ': 'STRONG'}

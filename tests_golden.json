@@ -37,6 +37,11 @@
   "f45_no_touch": null,
   "f45_short_tested": 6,
   "f45_tested_hold": 6,
+  "f46_long_n": -3,
+  "f46_long_u": 5,
+  "f46_no_data": null,
+  "f46_no_turn": null,
+  "f46_short_n": 5,
   "factor_names": [
     "_factor_adx_structure",
     "_factor_atr_volatility",
@@ -47,6 +52,7 @@
     "_factor_cci",
     "_factor_chart_pattern",
     "_factor_daily_timing",
+    "_factor_daily_uturn",
     "_factor_directional_volume",
     "_factor_dow_theory_phase",
     "_factor_earnings",
@@ -118,7 +124,7 @@
     "signal": 8.344,
     "trend": "BULL"
   },
-  "n_factors": 45,
+  "n_factors": 46,
   "pattern_hs": {
     "type": null
   },
@@ -216,6 +222,18 @@
     1
   ],
   "trend": "LONG",
+  "uturn_downtrend": [
+    false,
+    false
+  ],
+  "uturn_ntop": [
+    false,
+    true
+  ],
+  "uturn_pnr_like": [
+    true,
+    false
+  ],
   "vwap_last": 106.2686,
   "wiki_count": 123,
   "wiki_first3": [

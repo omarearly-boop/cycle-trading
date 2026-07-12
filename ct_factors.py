@@ -1701,6 +1701,31 @@ def _factor_level_tested(r):
     return None
 
 
+@factor
+def _factor_daily_uturn(r):
+    """
+    Factor 46 -- Daily 'horseshoe' turn at the level (Golan, PNR case
+    study, Jun 2026): after the weekly test of the POI zone, the daily
+    closes carving a U upward is the visible 'buyers entering'
+    confirmation (mirrored N-turn for shorts). Aligned turn = small
+    boost; opposite turn = mild warning.
+    """
+    dt = r.get('_daily_timing') or {}
+    u, n = dt.get('u_turn'), dt.get('n_turn')
+    if u is None and n is None:
+        return None
+    is_long = 'LONG' in r['Dir']
+    if (is_long and u) or (not is_long and n):
+        shape = 'U-turn (horseshoe)' if is_long else 'N-turn'
+        return (+5, 'Daily Turn',
+                f'Daily {shape} at the level -- '
+                f'{"buyers" if is_long else "sellers"} visibly stepping in (Golan PNR)')
+    if (is_long and n) or (not is_long and u):
+        return (-3, 'Daily Turn',
+                'Daily closes turning AGAINST trade direction -- wait for the turn')
+    return None
+
+
 def calc_probability(r):
     """
     Iterate FACTORS registry. Each factor returns (delta, label, explanation) or None to skip.
