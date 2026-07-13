@@ -1064,12 +1064,32 @@ def _detect_setup(ticker, portfolio_size, market, is_crypto, asset_type, max_dis
     except Exception:
         _range_regime = False
 
+    # ── Dow-structure trend (HCA + SPOT Discord lessons) ─────────
+    # 'One broken support is not a trend change' — the primary trend
+    # stays intact until the SIGNIFICANT swing low breaks (SPOT: 475,
+    # per Sagi; same doctrine in the HCA thread). That significant low
+    # IS the fib anchor (start of the last uncorrected move, MDGL rule),
+    # so structure-intact = price still beyond the anchor, with the
+    # correction not past 78.6% (deeper = possible trend change, and
+    # TOO_DEEP is red-flagged anyway). This lets a with-structure retest
+    # pass even when the SMA proxy has already flipped.
+    fib_zone, fib_pct, fib_sl, fib_sh, fib_lvls = \
+        check_fibonacci_zone(df, direction, price)
+    if is_long:
+        _struct_ok = (fib_zone != 'UNKNOWN' and (fib_sl or 0) > 0
+                      and price > fib_sl and (fib_pct or 0) < 78.6)
+    else:
+        _struct_ok = (fib_zone != 'UNKNOWN' and (fib_sh or 0) > 0
+                      and price < fib_sh and (fib_pct or 0) < 78.6)
+
     # ── Trend + RSI gate ─────────────────────────────────────────
     if is_long:
-        if not ((market['trend'] == 'LONG' or _range_regime) and rsi_val <= RSI_LONG_MAX):
+        if not ((market['trend'] == 'LONG' or _range_regime or _struct_ok)
+                and rsi_val <= RSI_LONG_MAX):
             _diag('rsi_gate'); return None
     else:
-        if not ((market['trend'] == 'SHORT' or _range_regime) and rsi_val >= RSI_SHORT_MIN):
+        if not ((market['trend'] == 'SHORT' or _range_regime or _struct_ok)
+                and rsi_val >= RSI_SHORT_MIN):
             _diag('rsi_gate'); return None
 
     # ── Distance to key level ────────────────────────────────────
@@ -1082,11 +1102,9 @@ def _detect_setup(ticker, portfolio_size, market, is_crypto, asset_type, max_dis
     # Stop-candle rule (course; last remaining taxonomy gap): the stop goes
     # below BOTH the support and the entry candle's low (mirrored for SHORT).
     entry  = price
-    # Fibonacci zone — computed BEFORE stop placement (Yosef, SOFI lesson:
-    # tuck the stop under a nearby fib level when cheap); reused later for
-    # Factor 20 and the setup dict.
-    fib_zone, fib_pct, fib_sl, fib_sh, fib_lvls = \
-        check_fibonacci_zone(df, direction, price)
+    # Fibonacci zone already computed pre-gate (structure-trend check);
+    # fib_lvls reused here for the stop tuck (Yosef SOFI lesson) and later
+    # for Factor 20 and the setup dict.
     # Stop-candle rule + ATR-aware buffer + fib protection — pure functions
     # in ct_indicators (calc_stop_long/short), pinned by the suite.
     from ct_indicators import calc_stop_long, calc_stop_short
@@ -1195,6 +1213,8 @@ def _detect_setup(ticker, portfolio_size, market, is_crypto, asset_type, max_dis
         monthly_sr=market.get('monthly_sr', {}), gann=market.get('_gann', {}))
     # Range regime marker (דשדוש strategy — mid-range TP1)
     _setup['_range_regime']  = _range_regime
+    # Dow-structure trend intact (HCA/SPOT lessons) — for calibration
+    _setup['_struct_trend_ok'] = _struct_ok
     # Pass quantitative volume ratio to factors (Factor 3 enhancement)
     _setup['_vol_ratio']     = market.get('_vol_ratio', 1.0)
     _setup['_dir_vol_ratio'] = market.get('_dir_vol_ratio', 1.0)
