@@ -187,6 +187,49 @@ def get_levels(df, price, atr_val):
 
     return round(support, 4), round(resistance, 4)
 
+def last_confirmed_swing_low(series, order=2):
+    """Most recent swing low CONFIRMED by structure (Eli Ravid, RKLB
+    lesson, Jan 2026): 'per the method you do not raise the stop to a
+    swing low until the peak is broken' — a pivot low anchors the trail
+    only after a later close exceeds the peak that preceded it (the
+    higher HIGH validates the higher LOW). Returns float or None.
+    """
+    vals = [float(v) for v in series]
+    n = len(vals)
+    pivots = [i for i in range(order, n - order)
+              if all(vals[i] <= vals[i - j] for j in range(1, order + 1))
+              and all(vals[i] <= vals[i + j] for j in range(1, order + 1))]
+    for k in range(len(pivots) - 1, -1, -1):
+        i = pivots[k]
+        start = pivots[k - 1] if k > 0 else 0
+        peak = max(vals[start:i]) if i > start else None
+        if peak is None:
+            continue
+        if any(v > peak for v in vals[i + 1:]):
+            return vals[i]
+    return None
+
+
+def last_confirmed_swing_high(series, order=2):
+    """Mirror of last_confirmed_swing_low for SHORT trailing: a pivot
+    high anchors only after a later close breaks BELOW the trough that
+    preceded it."""
+    vals = [float(v) for v in series]
+    n = len(vals)
+    pivots = [i for i in range(order, n - order)
+              if all(vals[i] >= vals[i - j] for j in range(1, order + 1))
+              and all(vals[i] >= vals[i + j] for j in range(1, order + 1))]
+    for k in range(len(pivots) - 1, -1, -1):
+        i = pivots[k]
+        start = pivots[k - 1] if k > 0 else 0
+        trough = min(vals[start:i]) if i > start else None
+        if trough is None:
+            continue
+        if any(v < trough for v in vals[i + 1:]):
+            return vals[i]
+    return None
+
+
 def calc_stop_long(support: float, candle_low: float, atr_val: float,
                    fib_levels_below=None) -> float:
     """Stop for a LONG retest setup — stop-candle rule + ATR-aware buffer

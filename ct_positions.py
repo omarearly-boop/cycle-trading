@@ -144,10 +144,16 @@ def pm_rule1_swing(pos: dict, df: pd.DataFrame) -> dict:
 
     if direction == 'LONG':
         pivots = _pm_pivot_lows(df)
-        valid  = [p for (_, p) in pivots if p > current_stop]
+        # Structure confirmation (Eli, RKLB lesson): the pivot low counts
+        # only after a later close broke the peak that preceded it.
+        closes = [float(c) for c in df['Close']]
+        def _confirmed_low(idx):
+            peak = max(closes[:idx]) if idx > 0 else None
+            return peak is not None and any(c > peak for c in closes[idx + 1:])
+        valid  = [p for (i, p) in pivots if p > current_stop and _confirmed_low(i)]
         if not valid:
             return {'advance': False, 'new_stop': None,
-                    'reason': 'Rule 1: no confirmed swing low above current stop — wait'}
+                    'reason': 'Rule 1: no CONFIRMED swing low above stop (peak not broken) — wait'}
         swing_price = valid[-1]   # most recent
         new_stop    = round(swing_price * (1 - PM_STOP_BUFFER), 2)
         if new_stop <= current_stop:
@@ -158,10 +164,14 @@ def pm_rule1_swing(pos: dict, df: pd.DataFrame) -> dict:
 
     else:  # SHORT
         pivots = _pm_pivot_highs(df)
-        valid  = [p for (_, p) in pivots if p < current_stop]
+        closes = [float(c) for c in df['Close']]
+        def _confirmed_high(idx):
+            trough = min(closes[:idx]) if idx > 0 else None
+            return trough is not None and any(c < trough for c in closes[idx + 1:])
+        valid  = [p for (i, p) in pivots if p < current_stop and _confirmed_high(i)]
         if not valid:
             return {'advance': False, 'new_stop': None,
-                    'reason': 'Rule 1: no confirmed swing high below current stop — wait'}
+                    'reason': 'Rule 1: no CONFIRMED swing high below stop (trough not broken) — wait'}
         swing_price = valid[-1]
         new_stop    = round(swing_price * (1 + PM_STOP_BUFFER), 2)
         if new_stop >= current_stop:

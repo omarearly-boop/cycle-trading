@@ -1733,16 +1733,21 @@ def run_check():
             except Exception:
                 pass
 
-            # --- Trail Stop check (Rule 1: most recent swing + 1% buffer) ---
+            # --- Trail Stop check (Rule 1: most recent CONFIRMED swing) ---
+            # Eli (RKLB lesson, Jan 2026): a swing low anchors the trail
+            # only after the preceding peak is BROKEN — the higher high
+            # validates the higher low. Unconfirmed pivots don't trail.
             _prev_close = _close_s.iloc[:-1]  # confirmed bars only
+            from ct_indicators import (last_confirmed_swing_low as _conf_low,
+                                       last_confirmed_swing_high as _conf_high)
             if _is_long:
-                _swings   = _swing_lows(_prev_close, order=2)
-                _new_stop = round(_swings[-1] * (1 - _pm_buf), 2) if _swings else None
+                _sw = _conf_low(_prev_close, order=2)
+                _new_stop = round(_sw * (1 - _pm_buf), 2) if _sw else None
                 _better   = (_new_stop is not None
                              and _new_stop > _stop_p and _new_stop < _cur_p)
             else:
-                _swings   = _swing_highs(_prev_close, order=2)
-                _new_stop = round(_swings[-1] * (1 + _pm_buf), 2) if _swings else None
+                _sw = _conf_high(_prev_close, order=2)
+                _new_stop = round(_sw * (1 + _pm_buf), 2) if _sw else None
                 _better   = (_new_stop is not None
                              and _new_stop < _stop_p and _new_stop > _cur_p)
 

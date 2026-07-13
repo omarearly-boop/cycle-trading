@@ -23,6 +23,9 @@
     "50": 80,
     "80": 90
   },
+  "conf_high_short": 88.0,
+  "conf_low_broken": 66.0,
+  "conf_low_unbroken": null,
   "f36_broken_highvol": 12,
   "f36_broken_lowvol": 8,
   "f36_cup_long": 14,

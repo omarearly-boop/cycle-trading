@@ -154,6 +154,14 @@ def build_actual():
     A['bollinger'] = _r4(ind.calc_bollinger(df))
     A['time_horizon'] = _r4(ind.estimate_time_horizon(100, 130, 5.0))
 
+    # -- confirmed-swing trailing (Eli RKLB lesson) --
+    _rklb_pre  = [42, 48, 55, 65, 73, 70, 66, 68, 70]        # low formed, peak 73 NOT broken
+    _rklb_post = [42, 48, 55, 65, 73, 70, 66, 68, 70, 76]    # 76 breaks the peak -> confirmed
+    A['conf_low_unbroken'] = ind.last_confirmed_swing_low(_rklb_pre)
+    A['conf_low_broken']   = ind.last_confirmed_swing_low(_rklb_post)
+    A['conf_high_short']   = ind.last_confirmed_swing_high(
+        [100, 92, 85, 80, 84, 88, 86, 82, 76])               # bounce high 88, trough 80 broken by 76
+
     # -- stop placement (stop-candle rule + ATR-aware buffer, BG lesson) --
     A['stop_bg_case']   = ind.calc_stop_long(108.4, 106.0, 8.54)   # ATR buffer dominates
     A['stop_low_vol']   = ind.calc_stop_long(100.0, 99.0, 2.0)     # 3% dominates (old rule)
