@@ -1119,16 +1119,31 @@ def _detect_setup(ticker, portfolio_size, market, is_crypto, asset_type, max_dis
         stop = calc_stop_short(resistance, float(df['High'].iloc[-1]), atr_val,
                                fib_levels_above=_fibs)
     target = resistance if is_long else support
-    # Range regime: first target ~= 50% of the range; the far side of the
-    # range stays visible as Resist/Support in the report (T/AT&T lesson:
-    # first profit target around the middle of the consolidation). If the
-    # halved reward then fails MIN_RR, the setup is correctly rejected.
+    # Range regime TP1 (T/AT&T + SFM Discord lessons): the mid-line caps
+    # the first target ONLY if the stock's own history inside the range
+    # shows pauses/turns there (Gil's empirical test, SFM thread). Clean
+    # edge-to-edge traversals target the far edge — Roy: 'the target is up
+    # to the resistance... the 50% area CAN act as resistance'; David:
+    # ranges tend to make the full move. If the capped reward then fails
+    # MIN_RR, the setup is correctly rejected.
     if _range_regime and resistance > support > 0:
         _mid = round((support + resistance) / 2, 4)
-        if is_long and _mid > entry * 1.02:
-            target = _mid
-        elif (not is_long) and _mid < entry * 0.98:
-            target = _mid
+        try:
+            _c26r = [float(v) for v in df['Close'].tail(26)]
+            _band = (resistance - support) * 0.10
+            _mid_pivots = sum(
+                1 for i in range(1, len(_c26r) - 1)
+                if abs(_c26r[i] - _mid) <= _band
+                and ((_c26r[i] >= _c26r[i-1] and _c26r[i] >= _c26r[i+1])
+                     or (_c26r[i] <= _c26r[i-1] and _c26r[i] <= _c26r[i+1])))
+        except Exception:
+            _mid_pivots = 99   # data problem -> stay conservative (mid cap)
+        if _mid_pivots >= 1:
+            if is_long and _mid > entry * 1.02:
+                target = _mid
+            elif (not is_long) and _mid < entry * 0.98:
+                target = _mid
+        # else: no historical mid-pause -> full traverse, far edge stays
 
     if is_long and target <= entry * 1.02:
         target = round(entry + atr_val * 3, 4)
