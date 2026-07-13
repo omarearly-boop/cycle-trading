@@ -1467,6 +1467,12 @@ def run_check():
     try:
         import ct_market_data as _mdt
         _mdt.YF_THROTTLE_SEC = max(getattr(_mdt, 'YF_THROTTLE_SEC', 0.6), 1.2)
+        # Cap retry cost for the hourly run (2026-07-13, 19:30 run ran 2x
+        # long): each rate-limited ticker costs 10+20s in backoffs with 2
+        # retries; on a bad Yahoo hour that stretches the run by 10+ min.
+        # The checker runs hourly — a ticker missed this hour is retried
+        # next hour anyway, so one retry (<=10s) is the right trade.
+        _mdt.YF_MAX_RETRIES = min(getattr(_mdt, 'YF_MAX_RETRIES', 2), 1)
     except Exception:
         pass
     data    = load_watchlist()
