@@ -1604,6 +1604,50 @@ def run_check():
             except Exception:
                 continue
 
+            # --- Split auto-adjustment (HDB Discord lesson, Aug 2025) ---
+            # Raz: a split is purely technical and never part of the trade
+            # decision. But recorded entry/stop/TPs/units are PRE-split
+            # numbers — without adjustment every later check sees a fake
+            # crash (2:1 -> price 'halves') and fires false reversal/stop
+            # alerts, and R math breaks. Brokers adjust orders for splits
+            # automatically; the tracker now does the same, once, silently
+            # (deterministic arithmetic — unlike a dividend, nothing to
+            # judge). Checked once per day per position.
+            try:
+                if _pos.get('split_checked') != today:
+                    _pos['split_checked'] = today
+                    _pos_changed = True
+                    _sp = _yf.Ticker(_ticker).splits
+                    if _sp is not None and len(_sp):
+                        _sp_dt  = _sp.index[-1]
+                        _ratio  = float(_sp.iloc[-1])
+                        _sp_iso = str(_sp_dt.date())
+                        _sdays  = (datetime.date.today() - _sp_dt.date()).days
+                        if (0 <= _sdays <= 5 and _ratio > 0 and _ratio != 1.0
+                                and _pos.get('split_adjusted') != _sp_iso):
+                            for _k in ('entry', 'stop', 'tp1', 'tp2', 'tp3'):
+                                if _pos.get(_k):
+                                    _pos[_k] = round(float(_pos[_k]) / _ratio, 4)
+                            if _pos.get('units'):
+                                _pos['units'] = int(round(_pos['units'] * _ratio))
+                            for _h in (_pos.get('stop_history') or []):
+                                for _kk in ('from', 'to'):
+                                    if _h.get(_kk):
+                                        _h[_kk] = round(float(_h[_kk]) / _ratio, 4)
+                            _pos['split_adjusted'] = _sp_iso
+                            _pos['notes'] = (str(_pos.get('notes') or '') +
+                                             f' [split {_ratio:g}:1 auto-adjusted {_sp_iso}'
+                                             f' — verify broker order quantities]')
+                            # refresh this iteration's locals so all checks
+                            # below use post-split numbers
+                            _entry_p  = _pos.get('entry') or 0
+                            _stop_p   = _pos.get('stop') or 0
+                            _target_p = _pos.get('tp1') or 0
+                            print(f"    {_ticker}: split {_ratio:g}:1 ({_sp_iso}) "
+                                  f"-> positions.json auto-adjusted")
+            except Exception:
+                pass
+
             # --- Reversal-day check (Discord lesson: NOW short, +10% day) ---
             try:
                 _dd = _yfh(_yf.Ticker(_ticker), period='5d', interval='1d')
