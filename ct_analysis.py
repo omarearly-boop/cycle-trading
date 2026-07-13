@@ -1118,7 +1118,12 @@ def _detect_setup(ticker, portfolio_size, market, is_crypto, asset_type, max_dis
                  if isinstance(v, (int, float)) and v > resistance]
         stop = calc_stop_short(resistance, float(df['High'].iloc[-1]), atr_val,
                                fib_levels_above=_fibs)
-    target = resistance if is_long else support
+    # TP shading (Sagi, HOOD lesson May 2025): 'just as we don't buy
+    # exactly AT the support but slightly above, we don't sell AT the
+    # resistance but slightly below' — the target sits 1% inside the level
+    # so the exit fills ahead of the order wall stacked on the level
+    # (mirrored for SHORT). The raw level stays visible as Resist/Support.
+    target = resistance * 0.99 if is_long else support * 1.01
     # Range regime TP1 (T/AT&T + SFM Discord lessons): the mid-line caps
     # the first target ONLY if the stock's own history inside the range
     # shows pauses/turns there (Gil's empirical test, SFM thread). Clean
