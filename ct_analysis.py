@@ -1082,14 +1082,24 @@ def _detect_setup(ticker, portfolio_size, market, is_crypto, asset_type, max_dis
     # Stop-candle rule (course; last remaining taxonomy gap): the stop goes
     # below BOTH the support and the entry candle's low (mirrored for SHORT).
     entry  = price
-    # Stop-candle rule + ATR-aware buffer — extracted to pure functions in
-    # ct_indicators (calc_stop_long/short) so the regression suite pins
-    # them (Raz BG lesson: buffer = max(3%, 0.5x weekly ATR)).
+    # Fibonacci zone — computed BEFORE stop placement (Yosef, SOFI lesson:
+    # tuck the stop under a nearby fib level when cheap); reused later for
+    # Factor 20 and the setup dict.
+    fib_zone, fib_pct, fib_sl, fib_sh, fib_lvls = \
+        check_fibonacci_zone(df, direction, price)
+    # Stop-candle rule + ATR-aware buffer + fib protection — pure functions
+    # in ct_indicators (calc_stop_long/short), pinned by the suite.
     from ct_indicators import calc_stop_long, calc_stop_short
     if is_long:
-        stop = calc_stop_long(support, float(df['Low'].iloc[-1]), atr_val)
+        _fibs = [v for v in (fib_lvls or {}).values()
+                 if isinstance(v, (int, float)) and 0 < v < support]
+        stop = calc_stop_long(support, float(df['Low'].iloc[-1]), atr_val,
+                              fib_levels_below=_fibs)
     else:
-        stop = calc_stop_short(resistance, float(df['High'].iloc[-1]), atr_val)
+        _fibs = [v for v in (fib_lvls or {}).values()
+                 if isinstance(v, (int, float)) and v > resistance]
+        stop = calc_stop_short(resistance, float(df['High'].iloc[-1]), atr_val,
+                               fib_levels_above=_fibs)
     target = resistance if is_long else support
     # Range regime: first target ~= 50% of the range; the far side of the
     # range stays visible as Resist/Support in the report (T/AT&T lesson:
@@ -1167,9 +1177,8 @@ def _detect_setup(ticker, portfolio_size, market, is_crypto, asset_type, max_dis
     level_amb, level_amb_n, _ = check_level_ambiguity(df, key_level, atr_val)
     tr_conf, tr_conf_lbl, _   = check_swing_broken(df, direction=lvl_dir)
 
-    # Factor 20 — Fibonacci Retracement Zone
-    fib_zone, fib_pct, fib_sl, fib_sh, fib_lvls = \
-        check_fibonacci_zone(df, direction, price)
+    # Factor 20 — Fibonacci Retracement Zone: computed earlier (before the
+    # stop) — fib_zone/fib_pct/fib_sl/fib_sh/fib_lvls already in scope.
 
     _setup = _build_setup_dict(
         direction, ticker, price, rsi_val, support, resistance,

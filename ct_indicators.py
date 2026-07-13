@@ -187,23 +187,47 @@ def get_levels(df, price, atr_val):
 
     return round(support, 4), round(resistance, 4)
 
-def calc_stop_long(support: float, candle_low: float, atr_val: float) -> float:
-    """Stop for a LONG retest setup — stop-candle rule + ATR-aware buffer.
+def calc_stop_long(support: float, candle_low: float, atr_val: float,
+                   fib_levels_below=None) -> float:
+    """Stop for a LONG retest setup — stop-candle rule + ATR-aware buffer
+    + fib protection.
 
     Below BOTH the support and the entry candle's wick (stop-candle rule),
     with a buffer beyond the level of max(3%, 0.5x weekly ATR) — a stop
     'too short relative to the weekly volatility' sits inside one bar's
     noise (Raz, BG lesson Jul 2026), while a full-ATR stop is too far and
     hurts R:R.
+
+    Fib protection (Yosef, SOFI lesson Mar 2026): 'prefer to shelter under
+    as many fib levels as possible — but I will not double the stop for
+    it'. If a fib level sits just below the base stop, tuck the stop 1%
+    under it, capped at a 40% extension of the base stop distance.
     """
     _buf = max(support * 0.03, (atr_val or 0) * 0.5)
-    return round(min(support - _buf, candle_low * 0.99), 4)
+    stop = min(support - _buf, candle_low * 0.99)
+    if fib_levels_below:
+        _base = max(support - stop, 1e-9)
+        _cands = [f for f in fib_levels_below
+                  if isinstance(f, (int, float)) and 0 < f < stop
+                  and (stop - f * 0.99) <= _base * 0.4]
+        if _cands:
+            stop = max(_cands) * 0.99
+    return round(stop, 4)
 
 
-def calc_stop_short(resistance: float, candle_high: float, atr_val: float) -> float:
+def calc_stop_short(resistance: float, candle_high: float, atr_val: float,
+                    fib_levels_above=None) -> float:
     """Mirror of calc_stop_long for SHORT setups at resistance."""
     _buf = max(resistance * 0.03, (atr_val or 0) * 0.5)
-    return round(max(resistance + _buf, candle_high * 1.01), 4)
+    stop = max(resistance + _buf, candle_high * 1.01)
+    if fib_levels_above:
+        _base = max(stop - resistance, 1e-9)
+        _cands = [f for f in fib_levels_above
+                  if isinstance(f, (int, float)) and f > stop
+                  and (f * 1.01 - stop) <= _base * 0.4]
+        if _cands:
+            stop = min(_cands) * 1.01
+    return round(stop, 4)
 
 
 def vol_declining(df, n=3):

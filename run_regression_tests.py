@@ -161,6 +161,16 @@ def build_actual():
     A['stop_short_bg']  = ind.calc_stop_short(108.4, 111.0, 8.54)
     A['stop_no_atr']    = ind.calc_stop_long(100.0, 99.0, 0)       # ATR unknown -> 3%
 
+    # -- fib protection in the stop (Yosef SOFI lesson) --
+    A['stop_fib_tuck']    = ind.calc_stop_long(100.0, 99.0, 2.0,
+                                               fib_levels_below=[96.8])  # cheap tuck
+    A['stop_fib_too_far'] = ind.calc_stop_long(100.0, 99.0, 2.0,
+                                               fib_levels_below=[94.0])  # would 'double' -> skip
+    A['stop_fib_already_covered'] = ind.calc_stop_long(100.0, 99.0, 2.0,
+                                                       fib_levels_below=[98.0])  # above stop
+    A['stop_fib_short']   = ind.calc_stop_short(100.0, 101.0, 2.0,
+                                                fib_levels_above=[103.5])
+
     # -- factor registry integrity --
     A['n_factors'] = len(fac.FACTORS)
     A['factor_names'] = sorted(fn.__name__ for fn in fac.FACTORS)
