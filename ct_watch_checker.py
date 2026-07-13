@@ -1163,6 +1163,81 @@ def send_preearnings_exit_alert(to_email: str, pos: dict, cur_price: float,
         return False
 
 
+def send_dividend_alert(to_email: str, pos: dict, cur_price: float,
+                        amount: float, yield_pct: float, ex_date: str) -> bool:
+    """Dividend awareness (TMRP Discord lesson, Apr 2026): a meaningful
+    dividend shifts the adjusted chart and drops the market price on the
+    ex-date without being a real loss. Recorded levels are pre-dividend."""
+    from_email = os.environ.get('ALERT_EMAIL_FROM', '')
+    password   = os.environ.get('ALERT_EMAIL_PASSWORD', '').replace(' ', '')
+    if not from_email or not password:
+        return False
+
+    ticker    = pos['ticker']
+    direction = pos.get('direction', 'LONG')
+    stop_p    = pos.get('stop') or 0
+
+    subject = (f"[DIVIDEND] {ticker} paid {amount:.2f}/share ({yield_pct:.1f}%) "
+               f"ex {ex_date} -- check your stop order")
+
+    html_body = f"""
+<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"></head>
+<body style="background:#0f172a;color:#e2e8f0;font-family:sans-serif;padding:24px;margin:0">
+<div style="max-width:600px;margin:0 auto">
+  <div style="background:#1e293b;border-radius:12px;padding:24px;border-left:4px solid #38bdf8">
+    <div style="color:#38bdf8;font-size:13px;font-weight:700;letter-spacing:2px;margin-bottom:8px">
+      DIVIDEND ADJUSTMENT
+    </div>
+    <div style="font-size:28px;font-weight:800;color:#f1f5f9">{ticker}</div>
+    <div style="color:#94a3b8;font-size:14px;margin-top:4px">
+      {direction} position &nbsp;|&nbsp; dividend {amount:.2f}/share
+      ({yield_pct:.1f}% of price) &nbsp;|&nbsp; ex-date {ex_date}</div>
+  </div>
+  <div style="background:#1e293b;border-radius:12px;padding:20px;margin-top:12px">
+    <p style="color:#94a3b8;margin:0 0 12px 0;font-size:14px">
+      The price drop on the ex-date is the payout, <b style="color:#f1f5f9">not a real
+      loss</b> — you receive the cash. But three things shifted
+      (course lesson, TMRP Apr 2026):</p>
+    <p style="color:#94a3b8;margin:0 0 12px 0;font-size:14px">
+      1. <b style="color:#f1f5f9">Your broker stop order</b> (${stop_p:.2f}) may now sit
+      inside the post-dividend price range — brokers adjust orders for special
+      dividends but usually NOT for regular ones. Verify it at Colmex.<br>
+      2. <b style="color:#f1f5f9">Recorded entry/stop/TP</b> in the tracker are
+      pre-dividend numbers — P&amp;L shown in alerts is understated by the payout.<br>
+      3. <b style="color:#f1f5f9">Chart levels</b> on dividend-adjusted charts shifted
+      down across all history — re-read S/R before acting on them.
+    </p>
+    <table style="width:100%;border-collapse:collapse">
+      <tr><td style="padding:6px 0;color:#64748b;font-size:13px">Current Price</td>
+          <td style="padding:6px 0;color:#e2e8f0;font-size:13px;text-align:right">${cur_price:.2f}</td></tr>
+      <tr><td style="padding:6px 0;color:#64748b;font-size:13px">Recorded Stop</td>
+          <td style="padding:6px 0;color:#ef4444;font-size:13px;text-align:right">${stop_p:.2f}</td></tr>
+    </table>
+  </div>
+  <p style="color:#475569;font-size:11px;text-align:center;margin-top:16px">
+    Cycles Trading -- automated signal -- not financial advice
+  </p>
+</div>
+</body>
+</html>"""
+
+    try:
+        msg = MIMEMultipart('alternative')
+        msg['Subject'] = subject
+        msg['From']    = from_email
+        msg['To']      = to_email
+        msg.attach(MIMEText(html_body, 'html', 'utf-8'))
+        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as srv:
+            srv.login(from_email, password)
+            srv.sendmail(from_email, to_email, msg.as_string())
+        return True
+    except Exception as e:
+        print(f"    Dividend email FAILED: {e}")
+        return False
+
+
 def send_trail_stop_alert(to_email: str, entry: dict, new_stop: float) -> bool:
     """Send TRAIL STOP UPDATE when a new swing low/high allows tightening the stop."""
     from_email = os.environ.get('ALERT_EMAIL_FROM', '')
@@ -1488,6 +1563,34 @@ def run_check():
                     _pos['partial_exit_alerted'] = today
                     _pos_changed = True
                     alerts_sent += 1
+
+            # --- Dividend awareness (TMRP Discord lesson, Apr 2026) ---
+            # A meaningful dividend (>=2% of price; TMRP's special div was
+            # ~10%) shifts the adjusted chart AND drops the market price on
+            # the ex-date without being a real loss — recorded entry/stop/TP
+            # are pre-dividend numbers and the broker stop can fire on a
+            # 'drop' that is actually the payout. Checked once per day,
+            # alerted once per ex-date.
+            try:
+                if _pos.get('div_checked') != today:
+                    _pos['div_checked'] = today
+                    _pos_changed = True
+                    _dvs = _yf.Ticker(_ticker).dividends
+                    if _dvs is not None and len(_dvs):
+                        _ex_dt  = _dvs.index[-1]
+                        _amt    = float(_dvs.iloc[-1])
+                        _ex_iso = str(_ex_dt.date())
+                        _days_ago = (datetime.date.today() - _ex_dt.date()).days
+                        _yield = (_amt / _cur_p * 100) if _cur_p > 0 else 0
+                        if (0 <= _days_ago <= 3 and _yield >= 2.0
+                                and _pos.get('div_alerted') != _ex_iso):
+                            print(f"    {_ticker}: dividend {_amt:.2f} ({_yield:.1f}%) ex {_ex_iso} -> DIVIDEND ALERT")
+                            if send_dividend_alert(email, _pos, _cur_p, _amt,
+                                                   _yield, _ex_iso):
+                                _pos['div_alerted'] = _ex_iso
+                                alerts_sent += 1
+            except Exception:
+                pass
 
             # --- Pre-earnings management (ALNY + EOG Discord lessons) ---
             # R measured vs ORIGINAL risk (first recorded stop, pre-trailing).
