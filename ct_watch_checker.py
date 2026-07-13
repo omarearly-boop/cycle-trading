@@ -1238,6 +1238,85 @@ def send_dividend_alert(to_email: str, pos: dict, cur_price: float,
         return False
 
 
+def send_momentum_exit_alert(to_email: str, pos: dict, cur_price: float,
+                             r_mult: float, bar_date: str) -> bool:
+    """Momentum-exit signal (TKO Discord thread, Jan 2026; lesson 33):
+    first weekly candle closing beyond the prior candle's extreme = the
+    falling side of the momentum principle -> proactive exit consideration."""
+    from_email = os.environ.get('ALERT_EMAIL_FROM', '')
+    password   = os.environ.get('ALERT_EMAIL_PASSWORD', '').replace(' ', '')
+    if not from_email or not password:
+        return False
+
+    ticker    = pos['ticker']
+    direction = pos.get('direction', 'LONG')
+    stop_p    = pos.get('stop') or 0
+    units     = pos.get('units') or 0
+    pid       = pos.get('id', '')
+    is_long   = 'LONG' in direction
+
+    subject = (f"[MOMENTUM EXIT] {ticker} {direction} +{r_mult:.1f}R -- weekly close "
+               f"{'below prior low' if is_long else 'above prior high'}")
+
+    html_body = f"""
+<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"></head>
+<body style="background:#0f172a;color:#e2e8f0;font-family:sans-serif;padding:24px;margin:0">
+<div style="max-width:600px;margin:0 auto">
+  <div style="background:#1e293b;border-radius:12px;padding:24px;border-left:4px solid #fb7185">
+    <div style="color:#fb7185;font-size:13px;font-weight:700;letter-spacing:2px;margin-bottom:8px">
+      MOMENTUM EXIT SIGNAL
+    </div>
+    <div style="font-size:28px;font-weight:800;color:#f1f5f9">{ticker}</div>
+    <div style="color:#94a3b8;font-size:14px;margin-top:4px">
+      {direction} &nbsp; +{r_mult:.1f}R unrealized &nbsp;|&nbsp; signal candle: {bar_date}</div>
+  </div>
+  <div style="background:#1e293b;border-radius:12px;padding:20px;margin-top:12px">
+    <p style="color:#94a3b8;margin:0 0 12px 0;font-size:14px">
+      The last closed weekly candle <b style="color:#fb7185">closed
+      {'below the LOW of the previous candle' if is_long else 'above the HIGH of the previous candle'}</b>
+      — the first negative change in the candles. Per the momentum
+      principle's falling side (lesson 33; TKO thread): this is the
+      proactive exit signal for a momentum run — consider closing
+      ({units} units) or at minimum tightening to the signal candle's
+      {'low' if is_long else 'high'} rather than waiting for the stop
+      (${stop_p:.2f}).
+    </p>
+    <p style="background:#0c4a6e;border:1px solid #38bdf8;border-radius:6px;padding:10px 14px;
+              color:#bae6fd;font-size:12px;margin:0 0 12px 0">
+      If you exit, record it: <code style="color:#7dd3fc">python cycles_trading_scanner.py close {pid}</code><br>
+      If you only tighten the stop, UPDATE THE BROKER ORDER first.
+    </p>
+    <table style="width:100%;border-collapse:collapse">
+      <tr><td style="padding:6px 0;color:#64748b;font-size:13px">Current Price</td>
+          <td style="padding:6px 0;color:#e2e8f0;font-size:13px;text-align:right">${cur_price:.2f}</td></tr>
+      <tr><td style="padding:6px 0;color:#64748b;font-size:13px">Current Stop</td>
+          <td style="padding:6px 0;color:#ef4444;font-size:13px;text-align:right">${stop_p:.2f}</td></tr>
+    </table>
+  </div>
+  <p style="color:#475569;font-size:11px;text-align:center;margin-top:16px">
+    Cycles Trading -- automated signal -- not financial advice
+  </p>
+</div>
+</body>
+</html>"""
+
+    try:
+        msg = MIMEMultipart('alternative')
+        msg['Subject'] = subject
+        msg['From']    = from_email
+        msg['To']      = to_email
+        msg.attach(MIMEText(html_body, 'html', 'utf-8'))
+        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as srv:
+            srv.login(from_email, password)
+            srv.sendmail(from_email, to_email, msg.as_string())
+        return True
+    except Exception as e:
+        print(f"    Momentum-exit email FAILED: {e}")
+        return False
+
+
 def send_trail_stop_alert(to_email: str, entry: dict, new_stop: float) -> bool:
     """Send TRAIL STOP UPDATE when a new swing low/high allows tightening the stop."""
     from_email = os.environ.get('ALERT_EMAIL_FROM', '')
@@ -1563,6 +1642,33 @@ def run_check():
                     _pos['partial_exit_alerted'] = today
                     _pos_changed = True
                     alerts_sent += 1
+
+            # --- Momentum-exit signal (TKO lesson, Jan 2026 / lesson 33) ---
+            # The momentum principle's FALLING side: the first closed weekly
+            # candle that closes below the prior candle's LOW (LONG; mirror
+            # for SHORT) marks 'a negative change in the candles' ->
+            # proactive exit consideration (Ori/Meni, TKO thread). Gated to
+            # positions in profit >=1R vs original risk — the principle
+            # manages momentum runs, not losing chop (stop handles those).
+            try:
+                _sh0 = _pos.get('stop_history') or []
+                _os0 = _sh0[0].get('from', _stop_p) if _sh0 else _stop_p
+                _rps = (_entry_p - _os0) if _is_long else (_os0 - _entry_p)
+                _rm0 = (((_cur_p - _entry_p) if _is_long else (_entry_p - _cur_p))
+                        / _rps) if _rps > 0 else 0.0
+                if _rm0 >= 1.0 and len(_hist) >= 3:
+                    _lc  = float(_hist['Close'].iloc[-2])   # last CLOSED week
+                    _bar = str(_hist.index[-2].date())
+                    _neg = (_lc < float(_hist['Low'].iloc[-3])) if _is_long                            else (_lc > float(_hist['High'].iloc[-3]))
+                    if _neg and _pos.get('mom_exit_alerted') != _bar:
+                        print(f"    {_ticker}: weekly close beyond prior candle's "
+                              f"{'low' if _is_long else 'high'} at +{_rm0:.1f}R -> MOMENTUM EXIT")
+                        if send_momentum_exit_alert(email, _pos, _cur_p, _rm0, _bar):
+                            _pos['mom_exit_alerted'] = _bar
+                            _pos_changed = True
+                            alerts_sent += 1
+            except Exception:
+                pass
 
             # --- Dividend awareness (TMRP Discord lesson, Apr 2026) ---
             # A meaningful dividend (>=2% of price; TMRP's special div was
