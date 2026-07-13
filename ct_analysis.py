@@ -1080,12 +1080,20 @@ def _detect_setup(ticker, portfolio_size, market, is_crypto, asset_type, max_dis
     # Stop-candle rule (course; last remaining taxonomy gap): the stop goes
     # below BOTH the support and the entry candle's low (mirrored for SHORT).
     entry  = price
+    # ATR-aware stop buffer (Raz, BG lesson Jul 2026): a stop 'too short
+    # relative to the weekly volatility' sits inside one bar's noise and
+    # gets shaken out — the buffer below/above the level is the LARGER of
+    # 3% or half the weekly ATR. (He also warned against a full-ATR stop:
+    # 'too far from the level, hurts R:R' — 0.5x stays in his sweet spot.
+    # Placement tools per the course: ATR, wicks beyond the level, fib.)
     if is_long:
         _cand_low = float(df['Low'].iloc[-1])
-        stop = round(min(support * 0.97, _cand_low * 0.99), 4)
+        _buf = max(support * 0.03, (atr_val or 0) * 0.5)
+        stop = round(min(support - _buf, _cand_low * 0.99), 4)
     else:
         _cand_high = float(df['High'].iloc[-1])
-        stop = round(max(resistance * 1.03, _cand_high * 1.01), 4)
+        _buf = max(resistance * 0.03, (atr_val or 0) * 0.5)
+        stop = round(max(resistance + _buf, _cand_high * 1.01), 4)
     target = resistance if is_long else support
     # Range regime: first target ~= 50% of the range; the far side of the
     # range stays visible as Resist/Support in the report (T/AT&T lesson:
