@@ -99,6 +99,16 @@
     "_factor_volume_surge",
     "_factor_vwap"
   ],
+  "fib_anchor_deep_dip": [
+    "SHALLOW",
+    18.0,
+    30.0
+  ],
+  "fib_anchor_mdgl": [
+    "NO_RETRACEMENT",
+    12.0,
+    30.0
+  ],
   "gann": {
     "gann_100": 126.3,
     "gann_50": 60.47,

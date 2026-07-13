@@ -351,24 +351,52 @@ def check_fibonacci_zone(df, direction: str, price: float):
     zone: 'GOLDEN_ZONE' | 'SHALLOW' | 'DEEP' | 'TOO_DEEP' | 'NO_RETRACEMENT' | 'UNKNOWN'
     """
     def _last_swing_low(df_slice, window=2):
-        """Most recent local minimum in df_slice (fallback: global min)."""
-        lows = df_slice['Low'].values
+        """Fib anchor low — start of the last UNCORRECTED move (Shlomo K.,
+        MDGL Discord lesson, Jan 2026): a swing low is a valid anchor only
+        if the dip that formed it was itself a real correction (>=38.2% of
+        the preceding leg). Shallow dips don't reset the anchor — step down
+        to the next older low and repeat. Fallback: global min.
+        """
+        lows  = df_slice['Low'].values
+        highs = df_slice['High'].values
         n = len(lows)
-        for i in range(n - 1 - window, window, -1):
-            if (all(lows[i] <= lows[i - j] for j in range(1, window + 1)) and
-                    all(lows[i] <= lows[i + j] for j in range(1, window + 1))):
-                return float(lows[i])
-        return float(df_slice['Low'].min())  # fallback
+        idxs = [i for i in range(window, n - window)
+                if all(lows[i] <= lows[i - j] for j in range(1, window + 1))
+                and all(lows[i] <= lows[i + j] for j in range(1, window + 1))]
+        if not idxs:
+            return float(df_slice['Low'].min())
+        idxs.sort(reverse=True)              # most recent first
+        cand = idxs[0]
+        for older in idxs[1:]:
+            peak = float(highs[older:cand + 1].max())   # peak before the dip into cand
+            leg  = peak - float(lows[older])
+            dip  = peak - float(lows[cand])
+            if leg > 0 and dip / leg >= 0.382:
+                break                        # real correction formed cand -> valid anchor
+            cand = older                     # shallow dip -> step down the move
+        return float(lows[cand])
 
     def _last_swing_high(df_slice, window=2):
-        """Most recent local maximum in df_slice (fallback: global max)."""
+        """Mirror of _last_swing_low for SHORT setups (anchor high = start
+        of the last uncorrected down-move)."""
+        lows  = df_slice['Low'].values
         highs = df_slice['High'].values
         n = len(highs)
-        for i in range(n - 1 - window, window, -1):
-            if (all(highs[i] >= highs[i - j] for j in range(1, window + 1)) and
-                    all(highs[i] >= highs[i + j] for j in range(1, window + 1))):
-                return float(highs[i])
-        return float(df_slice['High'].max())  # fallback
+        idxs = [i for i in range(window, n - window)
+                if all(highs[i] >= highs[i - j] for j in range(1, window + 1))
+                and all(highs[i] >= highs[i + j] for j in range(1, window + 1))]
+        if not idxs:
+            return float(df_slice['High'].max())
+        idxs.sort(reverse=True)
+        cand = idxs[0]
+        for older in idxs[1:]:
+            trough = float(lows[older:cand + 1].min())  # trough before the bounce into cand
+            leg    = float(highs[older]) - trough
+            bounce = float(highs[cand]) - trough
+            if leg > 0 and bounce / leg >= 0.382:
+                break
+            cand = older
+        return float(highs[cand])
 
     try:
         look = df.tail(min(52, len(df)))

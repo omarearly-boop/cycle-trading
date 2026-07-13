@@ -171,6 +171,31 @@ def build_actual():
     A['stop_fib_short']   = ind.calc_stop_short(100.0, 101.0, 2.0,
                                                 fib_levels_above=[103.5])
 
+    # -- fib anchor selection (Shlomo K., MDGL lesson) --
+    # MDGL-like: real correction to 12 (blue), run-up with only a SHALLOW
+    # dip to 24 (red, <38.2% of the leg), top at 30 -> anchor must step
+    # down past the red low to the blue low.
+    _mdgl_low  = [14,13,12,12.5,14, 16,18,20,22,25.8, 24,24.5,26,28,29, 29.5]
+    _mdgl_high = [16,15,13.5,14,16, 18,20,22,24,26,   25,26,28,30,29.5, 29.8]
+    _mdgl = pd.DataFrame({'Low': _mdgl_low, 'High': _mdgl_high,
+                          'Close': [(a+b)/2 for a, b in zip(_mdgl_low, _mdgl_high)],
+                          'Open':  [(a+b)/2 for a, b in zip(_mdgl_low, _mdgl_high)],
+                          'Volume': [1e6]*len(_mdgl_low)},
+                         index=pd.date_range('2025-01-03', periods=len(_mdgl_low), freq='W-FRI'))
+    _fz = fac.check_fibonacci_zone(_mdgl, 'LONG', 27.0)
+    A['fib_anchor_mdgl'] = _r4([_fz[0], _fz[2], _fz[3]])   # zone, swing_low, swing_high
+    # control: the dip to 24 made DEEP (down to 18 = >38.2% of the leg) ->
+    # recent low becomes a valid anchor
+    _deep_low  = [14,13,12,12.5,14, 16,18,20,22,25.8, 18,19,26,28,29, 29.5]
+    _deep_high = [16,15,13.5,14,16, 18,20,22,24,26,   20,21,28,30,29.5, 29.8]
+    _mdgl2 = pd.DataFrame({'Low': _deep_low, 'High': _deep_high,
+                           'Close': [(a+b)/2 for a, b in zip(_deep_low, _deep_high)],
+                           'Open':  [(a+b)/2 for a, b in zip(_deep_low, _deep_high)],
+                           'Volume': [1e6]*len(_deep_low)},
+                          index=pd.date_range('2025-01-03', periods=len(_deep_low), freq='W-FRI'))
+    _fz2 = fac.check_fibonacci_zone(_mdgl2, 'LONG', 27.0)
+    A['fib_anchor_deep_dip'] = _r4([_fz2[0], _fz2[2], _fz2[3]])
+
     # -- factor registry integrity --
     A['n_factors'] = len(fac.FACTORS)
     A['factor_names'] = sorted(fn.__name__ for fn in fac.FACTORS)
