@@ -1306,17 +1306,28 @@ def _factor_chart_pattern(r):
         except (TypeError, ValueError):
             _price = 0.0
         broken = bool(neck) and 0 < _price < float(neck)
+        # HCA lesson (Jun 2026): the break must come 'with appropriate
+        # volume' — a low-volume neckline break earns reduced credit.
+        try:
+            _bvol = float(r.get('_vol_ratio') or 1.0)
+        except (TypeError, ValueError):
+            _bvol = 1.0
+        _vol_ok  = _bvol >= 1.2
+        _mag     = 12 if _vol_ok else 8
+        _vol_txt = (f'on {_bvol:.1f}x avg volume' if _vol_ok
+                    else f'but volume unconvincing ({_bvol:.1f}x avg)')
         if not is_long:
             if broken:
-                return (+12, 'Chart Pattern',
+                return (+_mag, 'Chart Pattern',
                         f'Head & Shoulders CONFIRMED: neckline {neck} broken '
-                        f'-- most reliable reversal pattern (lesson 19)')
+                        f'{_vol_txt} -- most reliable reversal pattern (lesson 19)')
             return (+3, 'Chart Pattern',
                     f'H&S forming but neckline {neck} intact -- pattern counts '
                     f'only after breakdown (course); premature for SHORT')
         if broken:
-            return (-12, 'Chart Pattern',
-                    f'H&S neckline {neck} BROKEN -- confirmed bearish reversal against LONG')
+            return (-_mag, 'Chart Pattern',
+                    f'H&S neckline {neck} BROKEN {_vol_txt} '
+                    f'-- confirmed bearish reversal against LONG')
         return (-3, 'Chart Pattern',
                 f'H&S/M-shape forming above intact neckline {neck} -- course: '
                 f'irrelevant until breakdown; support retest stays valid')

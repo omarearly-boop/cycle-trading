@@ -174,6 +174,13 @@ def build_actual():
     A['f36_long_broken']  = f36({'Dir': '🟢 LONG',  'Price': 85.0, **geo})[0]
     A['f36_short_intact'] = f36({'Dir': '🔴 SHORT', 'Price': 95.0, **geo})[0]
     A['f36_short_broken'] = f36({'Dir': '🔴 SHORT', 'Price': 85.0, **geo})[0]
+    # HCA refinement: broken neckline credit scales with break volume
+    A['f36_broken_lowvol']  = f36({'Dir': '🔴 SHORT', 'Price': 85.0,
+                                   '_vol_ratio': 0.8, **geo})[0]
+    A['f36_broken_highvol'] = f36({'Dir': '🔴 SHORT', 'Price': 85.0,
+                                   '_vol_ratio': 1.6, **geo})[0]
+    A['f36_long_broken_lowvol'] = f36({'Dir': '🟢 LONG', 'Price': 85.0,
+                                       '_vol_ratio': 0.8, **geo})[0]
     A['f36_cup_long'] = f36({'Dir': '🟢 LONG',
                              '_chart_pattern': {'type': 'CUP_HANDLE', 'rim': 100,
                                                 'depth_pct': 20}})[0]
