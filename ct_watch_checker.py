@@ -457,6 +457,10 @@ def generate_watch_html(results: list, today: str) -> str:
     rows_html = ''
     for idx, r in enumerate(sorted(results, key=lambda x: x.get('prob', 0), reverse=True)):
         tl   = r.get('tl')
+        if tl == 'NO_LEVEL':
+            continue   # 'Not in zone' rows hidden (user request 2026-07-13);
+                       # the summary pill still shows their count, and the
+                       # 21-day auto-prune tracking is unaffected.
         bg   = tl_bg.get(tl, '#f8f9fa')
         icon = tl_icon.get(tl, '⚪')
         lbl  = tl_label.get(tl, 'NO DATA')
