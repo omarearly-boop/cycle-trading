@@ -304,6 +304,14 @@ def build_actual():
     A['f47_short_adverse'] = f47({'Dir': '🔴 SHORT', 'MonthlyRSIDiv': 'BULLISH',
                                   'MonthlyDirVol': 0.6})[0]
 
+    # -- dual-listing arbitrage guard (David SBSW lesson) --
+    A['f40_arb_gated'] = fac._factor_daily_timing(
+        {'Dir': '🟢 LONG', '_daily_timing': {'arb_gaps': True, 'rsi': 25.0, 'cci': -250}})[0]
+    A['f40_normal']    = fac._factor_daily_timing(
+        {'Dir': '🟢 LONG', '_daily_timing': {'arb_gaps': False, 'rsi': 25.0, 'cci': -250}})[0]
+    A['f46_arb_gated'] = fac._factor_daily_uturn(
+        {'Dir': '🟢 LONG', '_daily_timing': {'arb_gaps': True, 'u_turn': True, 'n_turn': False}})
+
     # -- traffic light rules --
     def tl(prob, extra):
         base = {'Dir': '🟢 LONG', 'Earn': '-', 'SupportQ': 'STRONG'}

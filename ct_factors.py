@@ -1562,6 +1562,10 @@ def _factor_daily_timing(r):
       SHORT: mirrored.
     """
     dt = r.get('_daily_timing') or {}
+    if dt.get('arb_gaps'):
+        return (0, 'Daily Timing',
+                'Dual-listing arbitrage gaps — daily candles mechanically '
+                'distorted; timing from the weekly only (SBSW lesson)')
     d_rsi = dt.get('rsi')
     if d_rsi is None:
         return None
@@ -1750,6 +1754,8 @@ def _factor_daily_uturn(r):
     boost; opposite turn = mild warning.
     """
     dt = r.get('_daily_timing') or {}
+    if dt.get('arb_gaps'):
+        return None   # dual-listing gaps distort the daily shape (SBSW lesson)
     u, n = dt.get('u_turn'), dt.get('n_turn')
     if u is None and n is None:
         return None

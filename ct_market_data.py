@@ -498,6 +498,25 @@ def get_daily_timing(ticker: str) -> dict:
                     result['max_daily_move'] = round(float(_chg.max()) * 100, 1)
                 except Exception:
                     pass
+                # Dual-listing arbitrage profile (David, SBSW lesson,
+                # Nov 2025): ADRs trading on two exchanges gap at the open
+                # almost daily (the other session moved) — daily candles
+                # 'don't look good' mechanically and daily-timeframe signals
+                # mislead; read the weekly. Detect: open gaps >1% on >=25%
+                # of the last ~120 sessions. When detected, the >10%/day
+                # rule switches to INTRADAY range — a mechanical gap is not
+                # 'wild mover' behaviour (Golan's rule targets the latter).
+                try:
+                    _op0 = ddf['Open']
+                    _pc0 = ddf['Close'].shift(1)
+                    _gfrac = float((((_op0 - _pc0).abs() / _pc0) > 0.01)
+                                   .tail(120).mean())
+                    result['arb_gaps'] = bool(_gfrac >= 0.25)
+                    if result['arb_gaps']:
+                        _ir = ((ddf['High'] - ddf['Low']) / _pc0).abs()
+                        result['max_daily_move'] = round(float(_ir.max()) * 100, 1)
+                except Exception:
+                    pass
                 # 'Horseshoe' turn (Golan, PNR case study, Jun 2026): the
                 # last ~10 daily closes carve a U at the level — extreme
                 # 2-7 sessions ago, >=1% fall into it and >=1% rise out of
