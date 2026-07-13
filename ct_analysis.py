@@ -1046,12 +1046,28 @@ def _detect_setup(ticker, portfolio_size, market, is_crypto, asset_type, max_dis
     macd_data, boll_data        = market['macd_data'], market['boll_data']
     short_pct, inst_pct         = market['short_pct'], market['inst_pct']
 
+    # ── Range regime (דשדוש) detection — T/AT&T Discord lesson (Jul 2026):
+    # a sideways range with a defined floor/ceiling is tradeable (long at
+    # the floor / short at the ceiling) even without a directional trend —
+    # previously the trend gate rejected every sideways stock outright.
+    # Conditions: no weekly trend, range width 8-40%, and the last ~26
+    # weekly closes contained inside the band (±5%).
+    _range_regime = False
+    try:
+        if market['trend'] is None and support > 0 and resistance > support:
+            _rw  = (resistance - support) / support
+            _c26 = df['Close'].tail(26)
+            _inside = bool(((_c26 >= support * 0.95) & (_c26 <= resistance * 1.05)).all())
+            _range_regime = bool(0.08 <= _rw <= 0.40 and _inside and len(_c26) >= 20)
+    except Exception:
+        _range_regime = False
+
     # ── Trend + RSI gate ─────────────────────────────────────────
     if is_long:
-        if not (market['trend'] == 'LONG' and rsi_val <= RSI_LONG_MAX):
+        if not ((market['trend'] == 'LONG' or _range_regime) and rsi_val <= RSI_LONG_MAX):
             _diag('rsi_gate'); return None
     else:
-        if not (market['trend'] == 'SHORT' and rsi_val >= RSI_SHORT_MIN):
+        if not ((market['trend'] == 'SHORT' or _range_regime) and rsi_val >= RSI_SHORT_MIN):
             _diag('rsi_gate'); return None
 
     # ── Distance to key level ────────────────────────────────────
@@ -1071,6 +1087,16 @@ def _detect_setup(ticker, portfolio_size, market, is_crypto, asset_type, max_dis
         _cand_high = float(df['High'].iloc[-1])
         stop = round(max(resistance * 1.03, _cand_high * 1.01), 4)
     target = resistance if is_long else support
+    # Range regime: first target ~= 50% of the range; the far side of the
+    # range stays visible as Resist/Support in the report (T/AT&T lesson:
+    # first profit target around the middle of the consolidation). If the
+    # halved reward then fails MIN_RR, the setup is correctly rejected.
+    if _range_regime and resistance > support > 0:
+        _mid = round((support + resistance) / 2, 4)
+        if is_long and _mid > entry * 1.02:
+            target = _mid
+        elif (not is_long) and _mid < entry * 0.98:
+            target = _mid
 
     if is_long and target <= entry * 1.02:
         target = round(entry + atr_val * 3, 4)
@@ -1154,6 +1180,8 @@ def _detect_setup(ticker, portfolio_size, market, is_crypto, asset_type, max_dis
         fib_zone=fib_zone, fib_ret_pct=fib_pct,
         fib_swing_low=fib_sl, fib_swing_high=fib_sh, fib_levels=fib_lvls,
         monthly_sr=market.get('monthly_sr', {}), gann=market.get('_gann', {}))
+    # Range regime marker (דשדוש strategy — mid-range TP1)
+    _setup['_range_regime']  = _range_regime
     # Pass quantitative volume ratio to factors (Factor 3 enhancement)
     _setup['_vol_ratio']     = market.get('_vol_ratio', 1.0)
     _setup['_dir_vol_ratio'] = market.get('_dir_vol_ratio', 1.0)
