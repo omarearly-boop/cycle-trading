@@ -1458,6 +1458,17 @@ def send_reversal_alert(to_email: str, pos: dict, move_pct: float,
 
 
 def run_check():
+    # Slower Yahoo spacing for the checker's bulk loop (2026-07-13): at the
+    # global 0.6s the SAME ~15 requests hit Yahoo's per-minute ceiling every
+    # run (identical order + identical timing -> identical failures; two
+    # consecutive reports had the exact same 22 FETCH_ERROR tickers).
+    # 1.2s x ~184 tickers ~= 3.7 min per hourly run — comfortably inside the
+    # cap, negligible for an hourly job.
+    try:
+        import ct_market_data as _mdt
+        _mdt.YF_THROTTLE_SEC = max(getattr(_mdt, 'YF_THROTTLE_SEC', 0.6), 1.2)
+    except Exception:
+        pass
     data    = load_watchlist()
     tickers = data.get('tickers', [])
     email   = data.get('email', os.environ.get('ALERT_EMAIL_TO', ''))

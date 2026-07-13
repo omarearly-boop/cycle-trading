@@ -175,6 +175,14 @@ def auto_add_to_watchlist(setup: dict) -> bool:
     if tl == 'RED':
         return False
 
+    # US-listed stocks/ETFs only (user trades US-only; Type mirrors the
+    # Colmex filter). Also fixes a real bug: intl/TASE setups carry a
+    # display ticker WITHOUT the exchange suffix ('FIBI', '0388', '7203'),
+    # so their watchlist entries could never be fetched again — 7 such
+    # entries produced identical FETCH_ERROR rows in every hourly report.
+    if (setup.get('Type') or 'STOCK').upper() != 'STOCK':
+        return False
+
     ticker    = setup.get('Ticker', '').upper().strip()
     direction = 'LONG' if 'LONG' in setup.get('Dir', '') else 'SHORT'
     prob      = setup.get('Prob', 0)
