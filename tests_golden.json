@@ -139,6 +139,11 @@
     91.5251,
     92.0569
   ],
+  "stop_bg_case": 104.13,
+  "stop_deep_wick": 93.06,
+  "stop_low_vol": 97.0,
+  "stop_no_atr": 97.0,
+  "stop_short_bg": 112.67,
   "support_quality": [
     8,
     "STRONG"

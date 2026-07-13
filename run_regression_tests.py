@@ -154,6 +154,13 @@ def build_actual():
     A['bollinger'] = _r4(ind.calc_bollinger(df))
     A['time_horizon'] = _r4(ind.estimate_time_horizon(100, 130, 5.0))
 
+    # -- stop placement (stop-candle rule + ATR-aware buffer, BG lesson) --
+    A['stop_bg_case']   = ind.calc_stop_long(108.4, 106.0, 8.54)   # ATR buffer dominates
+    A['stop_low_vol']   = ind.calc_stop_long(100.0, 99.0, 2.0)     # 3% dominates (old rule)
+    A['stop_deep_wick'] = ind.calc_stop_long(100.0, 94.0, 2.0)     # wick deeper than buffer
+    A['stop_short_bg']  = ind.calc_stop_short(108.4, 111.0, 8.54)
+    A['stop_no_atr']    = ind.calc_stop_long(100.0, 99.0, 0)       # ATR unknown -> 3%
+
     # -- factor registry integrity --
     A['n_factors'] = len(fac.FACTORS)
     A['factor_names'] = sorted(fn.__name__ for fn in fac.FACTORS)

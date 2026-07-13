@@ -187,6 +187,25 @@ def get_levels(df, price, atr_val):
 
     return round(support, 4), round(resistance, 4)
 
+def calc_stop_long(support: float, candle_low: float, atr_val: float) -> float:
+    """Stop for a LONG retest setup — stop-candle rule + ATR-aware buffer.
+
+    Below BOTH the support and the entry candle's wick (stop-candle rule),
+    with a buffer beyond the level of max(3%, 0.5x weekly ATR) — a stop
+    'too short relative to the weekly volatility' sits inside one bar's
+    noise (Raz, BG lesson Jul 2026), while a full-ATR stop is too far and
+    hurts R:R.
+    """
+    _buf = max(support * 0.03, (atr_val or 0) * 0.5)
+    return round(min(support - _buf, candle_low * 0.99), 4)
+
+
+def calc_stop_short(resistance: float, candle_high: float, atr_val: float) -> float:
+    """Mirror of calc_stop_long for SHORT setups at resistance."""
+    _buf = max(resistance * 0.03, (atr_val or 0) * 0.5)
+    return round(max(resistance + _buf, candle_high * 1.01), 4)
+
+
 def vol_declining(df, n=3):
     avg    = float(df['Volume'].rolling(20).mean().iloc[-1])
     recent = float(df['Volume'].iloc[-n:].mean())
