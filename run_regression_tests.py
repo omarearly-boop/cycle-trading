@@ -154,6 +154,19 @@ def build_actual():
     A['bollinger'] = _r4(ind.calc_bollinger(df))
     A['time_horizon'] = _r4(ind.estimate_time_horizon(100, 130, 5.0))
 
+    # -- level rehabilitation (Sagi TDY lesson) --
+    def _rel(closes, level=100.0):
+        _d = pd.DataFrame({'Close': closes})
+        return ind.check_level_reliability(_d, level, lookback=52)[0]
+    # broken both ways early, then 20 bars above INCLUDING a held retest -> TESTED
+    A['rel_rehab'] = _rel([105]*4 + [95]*3 + [106]*10 + [101, 100.5] + [107]*12)
+    # broken both ways, stayed far above but NEVER retested -> still UNRELIABLE
+    A['rel_no_touch'] = _rel([105]*4 + [95]*3 + [110]*20)
+    # recent re-cross -> UNRELIABLE
+    A['rel_recent_cross'] = _rel([105]*10 + [95]*5 + [106]*5 + [94]*3 + [105]*4)
+    # never broken -> CLEAN
+    A['rel_clean'] = _rel([106 + i*0.1 for i in range(30)])
+
     # -- confirmed-swing trailing (Eli RKLB lesson) --
     _rklb_pre  = [42, 48, 55, 65, 73, 70, 66, 68, 70]        # low formed, peak 73 NOT broken
     _rklb_post = [42, 48, 55, 65, 73, 70, 66, 68, 70, 76]    # 76 breaks the peak -> confirmed

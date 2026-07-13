@@ -153,6 +153,10 @@
   "pattern_trend": {
     "type": null
   },
+  "rel_clean": "CLEAN",
+  "rel_no_touch": "UNRELIABLE",
+  "rel_recent_cross": "UNRELIABLE",
+  "rel_rehab": "TESTED",
   "rsi_last3": [
     91.5011,
     91.5251,

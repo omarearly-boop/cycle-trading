@@ -328,22 +328,45 @@ def check_level_reliability(df, level, lookback: int = 52, tolerance: float = 0.
         broke_down = False   # was above, then closed below
         broke_up   = False   # was below, then closed above
         full_cycle = False
+        cur_side       = None
+        last_cross_idx = -1   # index of the LAST above<->below flip
 
-        for c in closes:
+        for i, c in enumerate(closes):
             if c > above_thresh:
                 if broke_down:
                     full_cycle = True   # ABOVE→BELOW→ABOVE
                 if saw_below:
                     broke_up = True
                 saw_above = True
+                if cur_side == 'below':
+                    last_cross_idx = i
+                cur_side = 'above'
             elif c < below_thresh:
                 if broke_up:
                     full_cycle = True   # BELOW→ABOVE→BELOW
                 if saw_above:
                     broke_down = True
                 saw_below = True
+                if cur_side == 'above':
+                    last_cross_idx = i
+                cur_side = 'below'
 
         if full_cycle:
+            # Rehabilitation (Sagi Oscar, TDY lesson Dec 2025): a level
+            # broken both ways regains standing once the market has since
+            # PROVEN respect — no re-cross for >=16 bars AND at least one
+            # touch of the band that held (TDY 490: broken in March, then
+            # clean May-June support that launched the rally — 'the level
+            # exists in the market's awareness'). Upgraded only to TESTED,
+            # never CLEAN: the history still counts.
+            _since = closes[last_cross_idx + 1:] if last_cross_idx >= 0 else []
+            if len(_since) >= 16:
+                _touched = any(below_thresh <= c <= above_thresh for c in _since)
+                if _touched:
+                    return ('TESTED',
+                            f'Level {level:.2f} was broken both ways but respected '
+                            f'since ({len(_since)} bars incl. a held retest) — '
+                            f'rehabilitated (TDY lesson)')
             return ('UNRELIABLE',
                     f'Level {level:.2f} broken both directions — '
                     f'market did not respect it as a barrier (N.M.S.)')
