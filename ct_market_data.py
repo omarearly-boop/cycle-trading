@@ -304,7 +304,34 @@ def get_monthly_analysis(ticker, asset=None):
         elif last_pct >=  3: candle_q = 'BULL'
         else:                candle_q = 'NEUTRAL'
 
-        return {'trend': m_trend, 'candle_pct': last_pct, 'candle_q': candle_q}
+        # Monthly momentum health (Sagi, ABBV lesson Jun 2026): RSI
+        # divergence + volume character on the MONTHLY chart — 'volume
+        # weakens on rallies and strengthens on declines' = buyers fading.
+        m_rsi_div = 'NONE'
+        m_dirvol  = 1.0
+        try:
+            from ct_indicators import rsi as _rsi_fn
+            _r = _rsi_fn(close).values
+            _p = close.values
+            _n = len(_p)
+            _sl = [i for i in range(3, _n - 1) if _p[i] == min(_p[i-3:i+2])][-3:]
+            _sh = [i for i in range(3, _n - 1) if _p[i] == max(_p[i-3:i+2])][-3:]
+            if (len(_sl) >= 2 and _p[_sl[-1]] < _p[_sl[-2]]
+                    and _r[_sl[-1]] > _r[_sl[-2]]):
+                m_rsi_div = 'BULLISH'
+            elif (len(_sh) >= 2 and _p[_sh[-1]] > _p[_sh[-2]]
+                    and _r[_sh[-1]] < _r[_sh[-2]]):
+                m_rsi_div = 'BEARISH'
+            _vol = mdf['Volume']
+            _chg = close.diff()
+            _dn = float(_vol[_chg < 0].tail(6).mean() or 0)
+            _up = float(_vol[_chg > 0].tail(6).mean() or 0)
+            if _up > 0 and _dn > 0:
+                m_dirvol = round(_dn / _up, 2)
+        except Exception:
+            pass
+        return {'trend': m_trend, 'candle_pct': last_pct, 'candle_q': candle_q,
+                'rsi_div': m_rsi_div, 'dir_vol_ratio': m_dirvol}
     except Exception:
         return None
 

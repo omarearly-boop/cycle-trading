@@ -235,6 +235,19 @@ def build_actual():
     A['uturn_downtrend'] = _turns([80, 79, 78, 77, 76, 75, 74, 73, 72, 71])
     A['uturn_ntop'] = _turns([70, 72, 74, 76, 77, 76.5, 75, 74, 72, 71])
 
+    # -- Factor 47: monthly momentum health (Sagi ABBV lesson) --
+    f47 = fac._factor_monthly_momentum_health
+    A['f47_abbv_case'] = f47({'Dir': '🟢 LONG', 'MonthlyRSIDiv': 'BEARISH',
+                              'MonthlyDirVol': 1.5})[0]      # div + adverse vol
+    A['f47_div_only']  = f47({'Dir': '🟢 LONG', 'MonthlyRSIDiv': 'BEARISH',
+                              'MonthlyDirVol': 1.0})[0]
+    A['f47_healthy']   = f47({'Dir': '🟢 LONG', 'MonthlyRSIDiv': 'NONE',
+                              'MonthlyDirVol': 0.6})[0]
+    A['f47_neutral']   = f47({'Dir': '🟢 LONG', 'MonthlyRSIDiv': 'NONE',
+                              'MonthlyDirVol': 1.0})
+    A['f47_short_adverse'] = f47({'Dir': '🔴 SHORT', 'MonthlyRSIDiv': 'BULLISH',
+                                  'MonthlyDirVol': 0.6})[0]
+
     # -- traffic light rules --
     def tl(prob, extra):
         base = {'Dir': '🟢 LONG', 'Earn': '-', 'SupportQ': 'STRONG'}

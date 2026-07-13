@@ -1737,6 +1737,41 @@ def _factor_daily_uturn(r):
     return None
 
 
+@factor
+def _factor_monthly_momentum_health(r):
+    """
+    Factor 47 -- Monthly momentum health (Sagi, ABBV thread, Jun 2026).
+    Top-down corroboration: on the MONTHLY chart, an RSI divergence
+    against the trade direction and/or volume that favors the opposing
+    side ('weakens on rallies, strengthens on declines') = the move is
+    losing force. The weekly versions are Factors 34 (RSI divergence)
+    and 22 (directional volume); this is their monthly counterpart.
+    """
+    is_long = 'LONG' in r['Dir']
+    pts, notes = 0, []
+    div = r.get('MonthlyRSIDiv') or 'NONE'
+    if (is_long and div == 'BEARISH') or ((not is_long) and div == 'BULLISH'):
+        pts -= 6
+        notes.append(f'monthly RSI divergence ({div.lower()}) against direction')
+    try:
+        dv = float(r.get('MonthlyDirVol') or 1.0)
+    except (TypeError, ValueError):
+        dv = 1.0
+    if dv > 0:
+        # dv = down-month volume / up-month volume
+        if is_long and dv >= 1.4:
+            pts -= 5; notes.append(f'monthly volume favors declines ({dv:.1f}x)')
+        elif is_long and dv <= 0.7:
+            pts += 4; notes.append(f'monthly volume favors rallies ({1/dv:.1f}x)')
+        elif (not is_long) and dv <= 0.7:
+            pts -= 5; notes.append(f'monthly volume favors rallies -- against SHORT ({1/dv:.1f}x)')
+        elif (not is_long) and dv >= 1.4:
+            pts += 4; notes.append(f'monthly volume favors declines ({dv:.1f}x)')
+    if pts == 0:
+        return None
+    return (pts, 'Monthly Health', '; '.join(notes) + ' (ABBV lesson)')
+
+
 def calc_probability(r):
     """
     Iterate FACTORS registry. Each factor returns (delta, label, explanation) or None to skip.

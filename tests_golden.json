@@ -45,6 +45,11 @@
   "f46_no_data": null,
   "f46_no_turn": null,
   "f46_short_n": 5,
+  "f47_abbv_case": -11,
+  "f47_div_only": -6,
+  "f47_healthy": 4,
+  "f47_neutral": null,
+  "f47_short_adverse": -11,
   "factor_names": [
     "_factor_adx_structure",
     "_factor_atr_volatility",
@@ -72,6 +77,7 @@
     "_factor_level_tested",
     "_factor_macd",
     "_factor_market_regime",
+    "_factor_monthly_momentum_health",
     "_factor_monthly_sr_confluence",
     "_factor_monthly_trend",
     "_factor_price_gaps",
@@ -127,7 +133,7 @@
     "signal": 8.344,
     "trend": "BULL"
   },
-  "n_factors": 46,
+  "n_factors": 47,
   "pattern_hs": {
     "type": null
   },
