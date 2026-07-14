@@ -1467,15 +1467,22 @@ def run_check():
     try:
         import ct_market_data as _mdt
         _mdt.YF_THROTTLE_SEC = max(getattr(_mdt, 'YF_THROTTLE_SEC', 0.6), 1.2)
-        # Cap retry cost for the hourly run (2026-07-13, 19:30 run ran 2x
-        # long): each rate-limited ticker costs 10+20s in backoffs with 2
-        # retries; on a bad Yahoo hour that stretches the run by 10+ min.
-        # The checker runs hourly — a ticker missed this hour is retried
-        # next hour anyway, so one retry (<=10s) is the right trade.
-        _mdt.YF_MAX_RETRIES = min(getattr(_mdt, 'YF_MAX_RETRIES', 2), 1)
+        # 2026-07-14: retries restored to 2 — the 1-retry cap bounded run
+        # time but tripled the failure rate once the watchlist grew to
+        # ~290 tickers (79 FETCH_ERROR rows in the 11:51 report). Runs of
+        # ~25-35 min are fine for an hourly job; missing 79 names is not.
     except Exception:
         pass
     data    = load_watchlist()
+    # Shuffle processing order each run (2026-07-14): fixed order + fixed
+    # request spacing meant the SAME tickers hit Yahoo's rate-window
+    # boundary every run — 16 identical FETCH_ERROR names four days
+    # straight. Random order rotates any throttling so every name gets
+    # fresh data most hours. Report order is unaffected (rendered sorted
+    # by prob); auto-prune tracking is per-entry.
+    import random as _rnd
+    if isinstance(data.get('tickers'), list):
+        _rnd.shuffle(data['tickers'])
     tickers = data.get('tickers', [])
     email   = data.get('email', os.environ.get('ALERT_EMAIL_TO', ''))
     today   = datetime.date.today().isoformat()
