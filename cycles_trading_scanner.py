@@ -221,11 +221,12 @@ def main():
             scan_stocks = [ticker_input]; scan_israel = []; scan_intl = []; scan_crypto = []; scan_commodity = []
         print(f"  Scanning: {ticker_input}")
     else:
+        from ct_config import SCAN_INTL, SCAN_CRYPTO, SCAN_COMMODITY
         scan_stocks    = STOCK_WATCHLIST
         scan_israel    = ISRAEL_WATCHLIST
-        scan_intl      = INTL_WATCHLIST
-        scan_crypto    = CRYPTO_WATCHLIST
-        scan_commodity = COMMODITY_WATCHLIST
+        scan_intl      = INTL_WATCHLIST      if SCAN_INTL      else []
+        scan_crypto    = CRYPTO_WATCHLIST    if SCAN_CRYPTO    else []
+        scan_commodity = COMMODITY_WATCHLIST if SCAN_COMMODITY else []
         total_all = len(scan_stocks)+len(scan_israel)+len(scan_intl)+len(scan_crypto)+len(scan_commodity)
         print(f"  Scanning ALL {total_all} assets:")
         print(f"    US Stocks: {len(scan_stocks)}  |  Israeli: {len(scan_israel)}  |  International: {len(scan_intl)}")

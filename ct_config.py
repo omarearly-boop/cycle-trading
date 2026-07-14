@@ -72,6 +72,14 @@ MIN_WEEKLY_DOLLAR_VOL_US = 125_000_000   # ≈ $25M/day
 MIN_WEEKLY_VOL_OTHER = 10_000     # crypto / commodity / TASE / intl
 PE_PREFILTER         = None       # set to 25 to enforce course P/E < 25 hard gate (None = off)
 
+# ── Scan groups (user decision 2026-07-14: US-only trading in Colmex) ──
+# Intl / crypto / commodities are untradeable under the US-only policy and
+# cost ~160 tickers of Yahoo time per scan. TASE stays visible (levels
+# only). Flip back to True anytime to re-include a group.
+SCAN_INTL      = False
+SCAN_CRYPTO    = False
+SCAN_COMMODITY = False
+
 # Max distance from key level to enter
 MAX_DIST_STOCK     = 0.12   # 12% for stocks
 MAX_DIST_CRYPTO    = 0.20   # 20% for crypto (more volatile)
