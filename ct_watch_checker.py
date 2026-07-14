@@ -49,14 +49,37 @@ _load_env()
 # ---------------------------------------------------------------------------
 def load_watchlist():
     if WATCH_FILE.exists():
+        raw = WATCH_FILE.read_text(encoding='utf-8')
         try:
-            return json.loads(WATCH_FILE.read_text(encoding='utf-8'))
-        except Exception:
-            pass
+            data = json.loads(raw)
+        except Exception as e:
+            # Same guard as ct_watch_manager.load (2026-07-14 wipe incident):
+            # an existing-but-unparseable file must never become an empty
+            # list that save_watchlist() then persists.
+            raise RuntimeError(
+                f'watch_alerts.json exists ({len(raw)} chars) but failed to '
+                f'parse: {e}. REFUSING to run with an empty watchlist — '
+                f'restore from watch_alerts.json.bak') from e
+        if not isinstance(data.get('tickers'), list):
+            raise RuntimeError('watch_alerts.json parsed without a tickers list — refusing')
+        return data
     return {'email': '', 'tickers': []}
 
 
 def save_watchlist(data):
+    # Backup + shrink guard (2026-07-14) — mirrors ct_watch_manager.save
+    try:
+        if WATCH_FILE.exists():
+            _cur = json.loads(WATCH_FILE.read_text(encoding='utf-8'))
+            _n_cur, _n_new = len(_cur.get('tickers', [])), len(data.get('tickers', []))
+            if _n_cur >= 20 and _n_new < _n_cur * 0.3:
+                raise RuntimeError(
+                    f'REFUSING save: would shrink watchlist {_n_cur} -> {_n_new}')
+            WATCH_FILE.with_suffix('.json.bak').write_bytes(WATCH_FILE.read_bytes())
+    except RuntimeError:
+        raise
+    except Exception:
+        pass
     tmp = WATCH_FILE.with_suffix('.tmp')
     tmp.write_text(
         json.dumps(data, ensure_ascii=False, indent=2),
