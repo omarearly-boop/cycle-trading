@@ -77,7 +77,18 @@ def yf_history(asset, **kwargs):
     """
     asset.history() with global throttling and exponential-backoff retry
     on Yahoo rate limits. Returns the DataFrame or None after retries.
+
+    Price basis is forced to the COURSE standard here, centrally:
+    dividend-UNadjusted, split-adjusted — i.e. TradingView with the ADJ
+    button OFF (Eli Ravid, BEP thread, Jul 2026: an ADJ-on chart is
+    'not accurate' — levels live at the prices people actually traded).
+    Yahoo's raw Close is exactly that basis; auto_adjust=True would
+    replace it with the dividend-adjusted series, silently shifting
+    historical levels on high-dividend names (REITs, utilities, MLPs)
+    away from the community's charts and the market's memory. Any
+    caller-passed auto_adjust is overridden — one basis everywhere.
     """
+    kwargs['auto_adjust'] = False
     for attempt in range(YF_MAX_RETRIES):
         _yf_throttle()
         try:
