@@ -673,8 +673,16 @@ def _fetch_market_data(ticker, is_crypto=False, is_commodity=False,
     boll_data = calc_bollinger(df)
 
     trend = get_trend(df)
-    if trend is None:
-        _diag('no_trend'); return None
+    # NO early exit on trend is None (fixed 2026-07-14). The old
+    # `return None` here had two bad effects:
+    # 1. It made the range-regime gate (T/AT&T lesson) and the Dow-
+    #    structure gate in _detect_setup UNREACHABLE — a sideways stock
+    #    died here before the logic built for sideways stocks ever ran.
+    # 2. The watch checker labels a None market as 'Fetch error', so every
+    #    sideways blue-chip (KMB, VZ, PGR, AON...) showed a permanent
+    #    fake fetch failure — the 'persistent core' of error rows for
+    #    four days. Trend gating now happens once, in _detect_setup,
+    #    which knows all three legitimate regimes.
 
     support, resistance = get_levels(df, price, atr_val)
     vol_ok = vol_declining(df)
