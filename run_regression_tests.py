@@ -175,6 +175,18 @@ def build_actual():
     A['conf_high_short']   = ind.last_confirmed_swing_high(
         [100, 92, 85, 80, 84, 88, 86, 82, 76])               # bounce high 88, trough 80 broken by 76
 
+    # -- Rule 1 trailing end-to-end (baseline-agent bug find 2026-07-14) --
+    import ct_positions as pos_mod
+    _rk = [42, 48, 55, 65, 73, 70, 66, 68, 70, 76]
+    _mk = lambda closes: pd.DataFrame({'Close': closes + [closes[-1]]})  # +1 open bar
+    A['rule1_unbroken'] = pos_mod.pm_rule1_swing(
+        {'stop': 40.0, 'direction': 'LONG'}, _mk(_rk[:-1]))['advance']   # peak 73 intact -> wait
+    _r1 = pos_mod.pm_rule1_swing({'stop': 40.0, 'direction': 'LONG'}, _mk(_rk))
+    A['rule1_broken'] = [_r1['advance'], _r1['new_stop']]                # 76 breaks -> trail to 66*(1-buf)
+    A['rule1_open_bar_cannot_confirm'] = pos_mod.pm_rule1_swing(
+        {'stop': 40.0, 'direction': 'LONG'},
+        pd.DataFrame({'Close': _rk[:-1] + [76]}))['advance']             # 76 only on OPEN bar -> wait
+
     # -- stop placement (stop-candle rule + ATR-aware buffer, BG lesson) --
     A['stop_bg_case']   = ind.calc_stop_long(108.4, 106.0, 8.54)   # ATR buffer dominates
     A['stop_low_vol']   = ind.calc_stop_long(100.0, 99.0, 2.0)     # 3% dominates (old rule)

@@ -165,6 +165,12 @@
     91.5251,
     92.0569
   ],
+  "rule1_broken": [
+    true,
+    65.34
+  ],
+  "rule1_open_bar_cannot_confirm": false,
+  "rule1_unbroken": false,
   "stop_bg_case": 104.13,
   "stop_deep_wick": 93.06,
   "stop_fib_already_covered": 97.0,
