@@ -388,4 +388,23 @@ def main():
     any_ok = False
     for task in tasks:
         label, _ = TASK_META.get(task, (task, ''))
-        rep     
+        rep      = reports.get(task)
+        if rep:
+            _log(f'  OK  {label}: {rep.name}')
+            any_ok = True
+        else:
+            _log(f'  --  {label}: no report generated')
+
+    # Email: always on Sunday, or when forced
+    should_email = (WEEKDAY == 6 and any_ok) or force_email or force == 'all'
+    if should_email:
+        _log('Sending email summary...')
+        send_email(tasks, reports, dry_run=False)
+    else:
+        _log('Email skipped (weekday run -- GREEN alerts via watch checker only).')
+
+    _log('=' * 60)
+
+
+if __name__ == '__main__':
+    main()
