@@ -56,6 +56,10 @@
   "f47_healthy": 4,
   "f47_neutral": null,
   "f47_short_adverse": -11,
+  "f48_aligned": 4,
+  "f48_bear_vs_long": -6,
+  "f48_none": null,
+  "f48_short_adverse": -6,
   "factor_names": [
     "_factor_adx_structure",
     "_factor_atr_volatility",
@@ -64,6 +68,7 @@
     "_factor_candle_compression",
     "_factor_candle_quality",
     "_factor_cci",
+    "_factor_cci_divergence",
     "_factor_chart_pattern",
     "_factor_daily_timing",
     "_factor_daily_uturn",
@@ -149,7 +154,7 @@
     "signal": 8.344,
     "trend": "BULL"
   },
-  "n_factors": 47,
+  "n_factors": 48,
   "pattern_hs": {
     "type": null
   },

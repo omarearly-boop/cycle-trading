@@ -324,6 +324,13 @@ def build_actual():
     A['f46_arb_gated'] = fac._factor_daily_uturn(
         {'Dir': '🟢 LONG', '_daily_timing': {'arb_gaps': True, 'u_turn': True, 'n_turn': False}})
 
+    # -- Factor 48: CCI divergence (Golan PLXS lesson) --
+    f48 = fac._factor_cci_divergence
+    A['f48_bear_vs_long'] = f48({'Dir': '🟢 LONG',  '_cci_divergence': 'BEARISH'})[0]
+    A['f48_aligned']      = f48({'Dir': '🟢 LONG',  '_cci_divergence': 'BULLISH'})[0]
+    A['f48_short_adverse'] = f48({'Dir': '🔴 SHORT', '_cci_divergence': 'BULLISH'})[0]
+    A['f48_none']         = f48({'Dir': '🟢 LONG',  '_cci_divergence': 'NONE'})
+
     # -- traffic light rules --
     def tl(prob, extra):
         base = {'Dir': '🟢 LONG', 'Earn': '-', 'SupportQ': 'STRONG'}

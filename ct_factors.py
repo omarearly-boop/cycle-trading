@@ -1806,6 +1806,28 @@ def _factor_monthly_momentum_health(r):
     return (pts, 'Monthly Health', '; '.join(notes) + ' (ABBV lesson)')
 
 
+@factor
+def _factor_cci_divergence(r):
+    """
+    Factor 48 -- Weekly CCI divergence (Golan, PLXS thread, Jul 2026):
+    'there is a negative CCI divergence and most likely the correction
+    is not finished yet.' Same swing-pair method as the RSI divergence;
+    kept factor-level (RSI stays the red-flag channel so one phenomenon
+    is not double-flagged). Against direction = correction unfinished;
+    aligned = supportive evidence.
+    """
+    div = r.get('_cci_divergence') or 'NONE'
+    if div == 'NONE':
+        return None
+    is_long = 'LONG' in r['Dir']
+    if (is_long and div == 'BEARISH') or ((not is_long) and div == 'BULLISH'):
+        return (-6, 'CCI Divergence',
+                f'{div.title()} CCI divergence against direction -- correction '
+                f'likely unfinished (Golan, PLXS)')
+    return (+4, 'CCI Divergence',
+            f'{div.title()} CCI divergence supporting direction')
+
+
 def calc_probability(r):
     """
     Iterate FACTORS registry. Each factor returns (delta, label, explanation) or None to skip.

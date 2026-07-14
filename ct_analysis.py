@@ -981,6 +981,26 @@ def _fetch_market_data(ticker, is_crypto=False, is_commodity=False,
     except Exception:
         _rsi_divergence = 'NONE'
 
+    # CCI divergence — same swing-pair method (Golan, PLXS lesson Jul 2026:
+    # 'negative CCI divergence -> the correction likely is not finished').
+    # Factor-level evidence; RSI divergence remains the red-flag channel.
+    try:
+        from ct_indicators import cci as _cci_fn
+        _cp2 = df['Close'].values
+        _cs2 = _cci_fn(df['High'], df['Low'], df['Close']).values
+        _n2 = len(_cp2)
+        _sl2 = [i for i in range(3, _n2 - 1) if _cp2[i] == min(_cp2[i-3:i+2])][-3:]
+        _sh2 = [i for i in range(3, _n2 - 1) if _cp2[i] == max(_cp2[i-3:i+2])][-3:]
+        _cci_divergence = 'NONE'
+        if (len(_sl2) >= 2 and _cp2[_sl2[-1]] < _cp2[_sl2[-2]]
+                and _cs2[_sl2[-1]] > _cs2[_sl2[-2]]):
+            _cci_divergence = 'BULLISH'
+        elif (len(_sh2) >= 2 and _cp2[_sh2[-1]] > _cp2[_sh2[-2]]
+                and _cs2[_sh2[-1]] < _cs2[_sh2[-2]]):
+            _cci_divergence = 'BEARISH'
+    except Exception:
+        _cci_divergence = 'NONE'
+
     # Bars since breakout — reuse _bk_quality window, store count per direction
     # (used by 5-candle retest window filter in _detect_setup)
     _bars_since_breakout: dict = {}
@@ -1010,6 +1030,7 @@ def _fetch_market_data(ticker, is_crypto=False, is_commodity=False,
         '_adx_weekly': _adx_weekly,
         '_cci_val': _cci_val,
         '_rsi_divergence': _rsi_divergence,
+        '_cci_divergence': _cci_divergence,
         '_bars_since_breakout': _bars_since_breakout,
         '_surge_vol': _surge_vol, '_candle_pattern': _candle_pattern,
         '_price_gap': _price_gap, '_secondary_trend': _secondary_trend,
