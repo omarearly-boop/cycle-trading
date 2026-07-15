@@ -182,20 +182,26 @@ print(f"  CAUGHT: {len(caught)}  |  MISSED: {len(missed)}")
 def diagnose_missed(ticker, close_px):
     """Return a short reason why the scanner would have skipped this ticker."""
     try:
-        df = yf.download(ticker, period='3mo', interval='1d',
+        # 1y window: the 52-week check needs it (3mo made rolling(252) all-NaN
+        # so 'Near 52w high' could never fire)
+        df = yf.download(ticker, period='1y', interval='1d',
                          auto_adjust=False, progress=False)
         if df is None or len(df) < 20:
             return 'Not enough history'
-        closes = df['Close'].squeeze()
+        closes = df['Close'].squeeze().dropna()   # Yahoo re-fetches can be gappy
+        if len(closes) < 20:
+            return 'Not enough clean history'
         # RSI
         delta = closes.diff()
         gain  = delta.clip(lower=0).rolling(14).mean()
         loss  = (-delta.clip(upper=0)).rolling(14).mean()
         rs    = gain / loss
         rsi   = float((100 - 100 / (1 + rs)).iloc[-1])
-        # 52-week low/high proximity
-        hi52 = float(closes.rolling(252).max().iloc[-1])
-        lo52 = float(closes.rolling(252).min().iloc[-1])
+        if rsi != rsi:   # NaN guard: don't misclassify as 'No S/R cluster'
+            return 'Data gap — RSI unavailable (Yahoo throttling; rerun later)'
+        # 52-week (or as much history as exists) high/low proximity
+        hi52 = float(closes.tail(252).max())
+        lo52 = float(closes.tail(252).min())
         dist_hi = (hi52 - close_px) / hi52 * 100
         dist_lo = (close_px - lo52) / lo52 * 100
         reasons = []
