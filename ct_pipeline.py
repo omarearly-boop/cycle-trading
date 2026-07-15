@@ -23,6 +23,10 @@ Usage:
 """
 
 import os, sys, subprocess, datetime, time, smtplib
+
+# Child scanners must never fall into the interactive ticker prompt
+# (cmd cannot pass an empty env var; 'ALL' is the explicit sentinel).
+os.environ.setdefault('CT_TICKER_INPUT', 'ALL')
 from pathlib import Path
 from email.mime.multipart import MIMEMultipart
 from email.mime.text      import MIMEText

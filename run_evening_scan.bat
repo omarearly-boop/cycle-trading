@@ -6,7 +6,7 @@ cd /d "%~dp0"
 :: Sunday's full pipeline (weekly review, monthly S/R) runs via ct_pipeline.py.
 
 set CT_PORTFOLIO_SIZE=25000
-set CT_TICKER_INPUT=
+set CT_TICKER_INPUT=ALL
 set PYTHONUNBUFFERED=1
 set PYTHONUTF8=1
 set PYTHONIOENCODING=utf-8

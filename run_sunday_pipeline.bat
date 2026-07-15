@@ -7,7 +7,7 @@ cd /d "%~dp0"
 :: escaping and the task silently never ran.
 
 set CT_PORTFOLIO_SIZE=25000
-set CT_TICKER_INPUT=
+set CT_TICKER_INPUT=ALL
 set PYTHONUNBUFFERED=1
 set PYTHONUTF8=1
 set PYTHONIOENCODING=utf-8

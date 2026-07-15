@@ -195,6 +195,13 @@ def main():
         except (EOFError, KeyboardInterrupt):
             ticker_input = ''
 
+    # 'ALL' sentinel == scan everything. Needed because cmd batch files CANNOT
+    # set an empty env var: `set CT_TICKER_INPUT=` DELETES the variable, so the
+    # scheduled runs fell back into the input() prompt and hung (Jul 10 + Jul 14
+    # evening scans). Bats now set CT_TICKER_INPUT=ALL explicitly.
+    if ticker_input == 'ALL':
+        ticker_input = ''
+
     # Interval is always Weekly — Cycles Trading standard
     INTERVAL, PERIOD, IV_LABEL = '1wk', '2y', 'Weekly (1wk)'
     print()
