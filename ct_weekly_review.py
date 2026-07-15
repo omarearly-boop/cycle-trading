@@ -183,7 +183,7 @@ def diagnose_missed(ticker, close_px):
     """Return a short reason why the scanner would have skipped this ticker."""
     try:
         df = yf.download(ticker, period='3mo', interval='1d',
-                         auto_adjust=True, progress=False)
+                         auto_adjust=False, progress=False)
         if df is None or len(df) < 20:
             return 'Not enough history'
         closes = df['Close'].squeeze()
