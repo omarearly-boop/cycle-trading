@@ -573,6 +573,9 @@ def generate_watch_html(results: list, today: str) -> str:
   .flt-btn {{border:2px solid transparent;border-radius:20px;padding:5px 16px;font-size:13px;font-weight:700;cursor:pointer;background:rgba(255,255,255,.15);color:#fff;transition:background .15s,border-color .15s}}
   .flt-btn:hover{{background:rgba(255,255,255,.25)}}
   .flt-btn.active{{background:rgba(255,255,255,.35);border-color:#fff}}
+  .flt-q {{border:2px solid transparent;border-radius:20px;padding:5px 14px;font-size:13px;background:rgba(255,255,255,.15);color:#fff;outline:none;width:170px}}
+  .flt-q::placeholder{{color:rgba(255,255,255,.55)}}
+  .flt-q:focus{{border-color:#fff;background:rgba(255,255,255,.25)}}
   /* fund-box classes (dark theme, sits on #1a1f2e background) */
   .fund-box {{border-radius:8px;padding:12px 16px;margin:0}}
   .fund-header {{display:flex;justify-content:space-between;align-items:center;
@@ -599,19 +602,28 @@ function toggleFund(id) {{
   el.style.display = (el.style.display === 'none') ? 'table-row' : 'none';
 }}
 var _activeFilter = 'ALL';
-function filterStatus(status, btn) {{
-  _activeFilter = status;
-  document.querySelectorAll('.flt-btn').forEach(function(b){{ b.classList.remove('active'); }});
-  btn.classList.add('active');
+var _q = '';
+function applyFilters() {{
   document.querySelectorAll('tbody tr[data-status]').forEach(function(row){{
     var s = row.getAttribute('data-status');
-    var show = (status === 'ALL' || s === status);
-    row.style.display = show ? '' : 'none';
+    var okStatus = (_activeFilter === 'ALL' || s === _activeFilter);
+    var okText = (!_q || row.textContent.toUpperCase().indexOf(_q) >= 0);
+    row.style.display = (okStatus && okText) ? '' : 'none';
     var next = row.nextElementSibling;
     if(next && !next.hasAttribute('data-status')){{
       next.style.display = 'none';
     }}
   }});
+}}
+function filterStatus(status, btn) {{
+  _activeFilter = status;
+  document.querySelectorAll('.flt-btn').forEach(function(b){{ b.classList.remove('active'); }});
+  btn.classList.add('active');
+  applyFilters();
+}}
+function searchRows(v) {{
+  _q = (v || '').trim().toUpperCase();
+  applyFilters();
 }}
 </script>
 </head>
@@ -627,6 +639,7 @@ function filterStatus(status, btn) {{
     <span class="pill">📋 Total: {len(results)}</span>
   </div>
   <div class="filter-bar">
+    <input class="flt-q" placeholder="🔍 search ticker / note..." oninput="searchRows(this.value)">
     <button class="flt-btn active" onclick="filterStatus('ALL',this)">❖ All</button>
     <button class="flt-btn" onclick="filterStatus('GREEN',this)">🟢 GO</button>
     <button class="flt-btn" onclick="filterStatus('YELLOW',this)">🟡 Wait</button>
