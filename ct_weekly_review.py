@@ -39,7 +39,27 @@ today = datetime.date.today()
 last_fri = today - datetime.timedelta(days=(today.weekday() - 4) % 7 or 7)
 last_mon = last_fri - datetime.timedelta(days=4)
 period_label = f"{last_mon.strftime('%b %d')} – {last_fri.strftime('%b %d, %Y')}"
-print(f"\n  Week: {period_label}")
+print(f"\n  Week: {period_label}  (last completed trading week)")
+
+def _pick_scan_csv(csv_paths, week_start):
+    """Last scan produced BEFORE the reviewed week began (no look-ahead).
+
+    CAUGHT/MISSED must be judged against what the scanner knew in advance.
+    Filenames: cycles_scan_YYYYMMDD_HHMM.csv. Falls back to the newest
+    file (with a warning) when no pre-week scan exists yet.
+    """
+    import re as _re
+    dated = []
+    for c in sorted(csv_paths):
+        m = _re.search(r'cycles_scan_(\d{8})_(\d{4})', Path(c).stem)
+        if m:
+            d = datetime.datetime.strptime(m.group(1), '%Y%m%d').date()
+            dated.append((d, c))
+    pre = [c for d, c in dated if d < week_start]
+    if pre:
+        return pre[-1], True
+    return (dated[-1][1], False) if dated else (None, False)
+
 
 # ─── Load universe ────────────────────────────────────────────────────────────
 cache_file = BASE_DIR / '.universe_cache.json'
@@ -58,8 +78,11 @@ print(f"  Universe: {len(us_tickers)} tickers")
 # ─── Load latest scan CSV (our setups) ───────────────────────────────────────
 csvs = sorted(glob.glob(str(REPORTS_DIR / 'cycles_scan_*.csv')))
 scan_setups = {}   # ticker -> row dict
-if csvs:
-    latest_csv = csvs[-1]
+latest_csv, _pre_week = _pick_scan_csv(csvs, last_mon) if csvs else (None, False)
+if latest_csv:
+    if not _pre_week:
+        print('  WARNING: no scan file predates the reviewed week — '
+              'using newest scan (look-ahead!); stats unreliable.')
     scan_date  = Path(latest_csv).stem.replace('cycles_scan_', '')
     with open(latest_csv, newline='', encoding='utf-8') as f:
         for row in csv.DictReader(f):
@@ -93,7 +116,7 @@ for i in range(0, len(us_tickers), BATCH):
     try:
         df = yf.download(
             batch, start=start_str, end=end_str,
-            auto_adjust=True, progress=False, threads=True
+            auto_adjust=False, progress=False, threads=True
         )
         closes = df.get('Close')
         if closes is None:
