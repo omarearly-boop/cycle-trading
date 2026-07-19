@@ -7,7 +7,7 @@ cd /d "%~dp0"
 :: limit and is unnecessary for a weekly-timeframe methodology.
 
 set CT_PORTFOLIO_SIZE=25000
-set CT_TICKER_INPUT=
+set CT_TICKER_INPUT=ALL
 set PYTHONUNBUFFERED=1
 set PYTHONUTF8=1
 set PYTHONIOENCODING=utf-8
@@ -27,7 +27,10 @@ echo [%date% %time%] ===== HOURLY WATCH CHECK START ===== >> logs\hourly_scan.lo
 python -c "import time; from pathlib import Path; base=Path('.'); now=time.time(); rep=base/'REPORTS'; [f.unlink() for f in rep.iterdir() if f.suffix in ('.html','.csv','.pine') and now-f.stat().st_mtime>172800] if rep.exists() else None; lf=base/'logs'/'hourly_scan.log'; lines=lf.read_text(encoding='utf-8',errors='replace').splitlines() if lf.exists() and lf.stat().st_size>5*1024*1024 else None; lf.write_text(chr(10).join(lines[-2000:])+chr(10),encoding='utf-8') if lines else None" >> logs\hourly_scan.log 2>&1
 
 :: Watch checker — sends GO email when a watchlist ticker hits its level
+for /f %%t in ('python -c "import time;print(int(time.time()))"') do set CT_T0=%%t
 python ct_watch_checker.py >> logs\hourly_scan.log 2>&1
+set CT_RC=%ERRORLEVEL%
+python ct_record_run.py daily "Watch Checker" %CT_T0% %CT_RC% >> logs\hourly_scan.log 2>&1
 
 echo [%date% %time%] ===== HOURLY WATCH CHECK DONE  ===== >> logs\hourly_scan.log 2>&1
 echo. >> logs\hourly_scan.log 2>&1

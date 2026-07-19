@@ -21,13 +21,16 @@ if errorlevel 1 (
 )
 
 echo [%date% %time%] ===== EVENING SCAN START ===== >> logs\evening_scan.log 2>&1
+set CT_ERR=0
+for /f %%t in ('python -c "import time;print(int(time.time()))"') do set CT_T0=%%t
 
-python cycles_trading_scanner.py          >> logs\evening_scan.log 2>&1
-python cycles_trading_scanner.py momentum >> logs\evening_scan.log 2>&1
-python ct_watch_checker.py                >> logs\evening_scan.log 2>&1
+python cycles_trading_scanner.py          >> logs\evening_scan.log 2>&1 || set CT_ERR=1
+python cycles_trading_scanner.py momentum >> logs\evening_scan.log 2>&1 || set CT_ERR=1
+python ct_watch_checker.py                >> logs\evening_scan.log 2>&1 || set CT_ERR=1
 
 :: Calibration tracker — ingest today's signals, resolve old ones, report
-python ct_calibration.py                  >> logs\evening_scan.log 2>&1
+python ct_calibration.py                  >> logs\evening_scan.log 2>&1 || set CT_ERR=1
 
+python ct_record_run.py evening "Evening Scan" %CT_T0% %CT_ERR% >> logs\evening_scan.log 2>&1
 echo [%date% %time%] ===== EVENING SCAN DONE  ===== >> logs\evening_scan.log 2>&1
 echo. >> logs\evening_scan.log 2>&1

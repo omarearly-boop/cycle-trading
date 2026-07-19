@@ -13,4 +13,6 @@ set PYTHONUTF8=1
 set PYTHONIOENCODING=utf-8
 
 if not exist logs mkdir logs
+for /f %%t in ('python -c "import time;print(int(time.time()))"') do set CT_T0=%%t
 python ct_pipeline.py >> logs\sunday_pipeline.log 2>&1
+python ct_record_run.py pipeline "Sunday Pipeline" %CT_T0% %ERRORLEVEL% >> logs\sunday_pipeline.log 2>&1
