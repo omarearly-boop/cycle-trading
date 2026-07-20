@@ -1828,6 +1828,35 @@ def _factor_cci_divergence(r):
             f'{div.title()} CCI divergence supporting direction')
 
 
+@factor
+def _factor_history_depth(r):
+    """
+    Factor 49 -- Chart seasoning / listing age (Eli Ravid, HAFN thread,
+    Jul 2026): 'because the chart does not have much history I like this
+    setup less and would prefer to look for a trade elsewhere.'
+    S/R levels earn trust from years of institutional memory; recent
+    listings carry levels with thin evidence behind them. Age comes from
+    Yahoo's firstTradeDateEpochUtc (whichever venue Yahoo counts from);
+    None (missing metadata / skip_fundamentals runs) skips the factor.
+    """
+    yrs = r.get('_listing_years')
+    if yrs is None:
+        return None
+    if yrs < 2.0:
+        return (-8, 'History Depth',
+                f'Listed only {yrs:.1f}y -- young chart, levels lack '
+                f'institutional memory (Eli, HAFN)')
+    if yrs < 3.5:
+        return (-4, 'History Depth',
+                f'Listed {yrs:.1f}y -- moderately young chart, levels still '
+                f'earning trust (Eli, HAFN)')
+    if yrs >= 8.0:
+        return (+2, 'History Depth',
+                f'Listed {yrs:.1f}y -- seasoned chart, levels carry years of '
+                f'institutional memory')
+    return None
+
+
 def calc_probability(r):
     """
     Iterate FACTORS registry. Each factor returns (delta, label, explanation) or None to skip.

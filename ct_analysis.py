@@ -1288,6 +1288,16 @@ def _detect_setup(ticker, portfolio_size, market, is_crypto, asset_type, max_dis
     _setup['_gann']               = market.get('_gann', {})
     _setup['_vwap']               = market.get('_vwap', {})
     _setup['_sweep']              = market.get('_sweep', {})
+    # Factor 49 -- chart seasoning / listing age (Eli, HAFN Jul 2026)
+    try:
+        import time as _t49
+        _fte = (market.get('cached_info') or {}).get('firstTradeDateEpochUtc')
+        if _fte and _fte > 1e11:          # milliseconds variant
+            _fte = _fte / 1000.0
+        _setup['_listing_years'] = (round((_t49.time() - float(_fte)) / 31557600.0, 1)
+                                    if _fte else None)
+    except Exception:
+        _setup['_listing_years'] = None
     _setup['_adx_weekly']         = market.get('_adx_weekly', {})
     _setup['_spy_rs']             = market.get('spy_rs', {})   # fix: key is 'spy_rs' not '_spy_rs'
     _setup['_monthly_sr']         = market.get('monthly_sr', {})

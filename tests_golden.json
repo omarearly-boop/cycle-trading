@@ -60,6 +60,11 @@
   "f48_bear_vs_long": -6,
   "f48_none": null,
   "f48_short_adverse": -6,
+  "f49_neutral": null,
+  "f49_seasoned": 2,
+  "f49_unknown": null,
+  "f49_very_young": -8,
+  "f49_young_hafn": -4,
   "factor_names": [
     "_factor_adx_structure",
     "_factor_atr_volatility",
@@ -82,6 +87,7 @@
     "_factor_fundamental_quality",
     "_factor_fundamentals",
     "_factor_gann_levels",
+    "_factor_history_depth",
     "_factor_late_entry",
     "_factor_level_ambiguity",
     "_factor_level_reliability",
@@ -154,7 +160,7 @@
     "signal": 8.344,
     "trend": "BULL"
   },
-  "n_factors": 48,
+  "n_factors": 49,
   "pattern_hs": {
     "type": null
   },

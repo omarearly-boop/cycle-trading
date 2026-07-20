@@ -331,6 +331,13 @@ def build_actual():
     A['f48_short_adverse'] = f48({'Dir': '🔴 SHORT', '_cci_divergence': 'BULLISH'})[0]
     A['f48_none']         = f48({'Dir': '🟢 LONG',  '_cci_divergence': 'NONE'})
 
+    f49 = fac._factor_history_depth
+    A['f49_very_young'] = f49({'_listing_years': 1.5})[0]
+    A['f49_young_hafn'] = f49({'_listing_years': 2.3})[0]
+    A['f49_neutral']    = f49({'_listing_years': 5.0})
+    A['f49_seasoned']   = f49({'_listing_years': 12.0})[0]
+    A['f49_unknown']    = f49({'_listing_years': None})
+
     # -- traffic light rules --
     def tl(prob, extra):
         base = {'Dir': '🟢 LONG', 'Earn': '-', 'SupportQ': 'STRONG'}
