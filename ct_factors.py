@@ -351,52 +351,24 @@ def check_fibonacci_zone(df, direction: str, price: float):
     zone: 'GOLDEN_ZONE' | 'SHALLOW' | 'DEEP' | 'TOO_DEEP' | 'NO_RETRACEMENT' | 'UNKNOWN'
     """
     def _last_swing_low(df_slice, window=2):
-        """Fib anchor low — start of the last UNCORRECTED move (Shlomo K.,
-        MDGL Discord lesson, Jan 2026): a swing low is a valid anchor only
-        if the dip that formed it was itself a real correction (>=38.2% of
-        the preceding leg). Shallow dips don't reset the anchor — step down
-        to the next older low and repeat. Fallback: global min.
-        """
-        lows  = df_slice['Low'].values
-        highs = df_slice['High'].values
+        """Most recent local minimum in df_slice (fallback: global min)."""
+        lows = df_slice['Low'].values
         n = len(lows)
-        idxs = [i for i in range(window, n - window)
-                if all(lows[i] <= lows[i - j] for j in range(1, window + 1))
-                and all(lows[i] <= lows[i + j] for j in range(1, window + 1))]
-        if not idxs:
-            return float(df_slice['Low'].min())
-        idxs.sort(reverse=True)              # most recent first
-        cand = idxs[0]
-        for older in idxs[1:]:
-            peak = float(highs[older:cand + 1].max())   # peak before the dip into cand
-            leg  = peak - float(lows[older])
-            dip  = peak - float(lows[cand])
-            if leg > 0 and dip / leg >= 0.382:
-                break                        # real correction formed cand -> valid anchor
-            cand = older                     # shallow dip -> step down the move
-        return float(lows[cand])
+        for i in range(n - 1 - window, window, -1):
+            if (all(lows[i] <= lows[i - j] for j in range(1, window + 1)) and
+                    all(lows[i] <= lows[i + j] for j in range(1, window + 1))):
+                return float(lows[i])
+        return float(df_slice['Low'].min())  # fallback
 
     def _last_swing_high(df_slice, window=2):
-        """Mirror of _last_swing_low for SHORT setups (anchor high = start
-        of the last uncorrected down-move)."""
-        lows  = df_slice['Low'].values
+        """Most recent local maximum in df_slice (fallback: global max)."""
         highs = df_slice['High'].values
         n = len(highs)
-        idxs = [i for i in range(window, n - window)
-                if all(highs[i] >= highs[i - j] for j in range(1, window + 1))
-                and all(highs[i] >= highs[i + j] for j in range(1, window + 1))]
-        if not idxs:
-            return float(df_slice['High'].max())
-        idxs.sort(reverse=True)
-        cand = idxs[0]
-        for older in idxs[1:]:
-            trough = float(lows[older:cand + 1].min())  # trough before the bounce into cand
-            leg    = float(highs[older]) - trough
-            bounce = float(highs[cand]) - trough
-            if leg > 0 and bounce / leg >= 0.382:
-                break
-            cand = older
-        return float(highs[cand])
+        for i in range(n - 1 - window, window, -1):
+            if (all(highs[i] >= highs[i - j] for j in range(1, window + 1)) and
+                    all(highs[i] >= highs[i + j] for j in range(1, window + 1))):
+                return float(highs[i])
+        return float(df_slice['High'].max())  # fallback
 
     try:
         look = df.tail(min(52, len(df)))
@@ -1324,41 +1296,11 @@ def _factor_chart_pattern(r):
         return (-10, 'Chart Pattern', 'Cup & Handle (bullish) conflicts with SHORT setup')
 
     if gtype == 'HEAD_SHOULDERS':
-        # Discord lesson (CMC, Jul 2026): a reversal pattern becomes relevant
-        # ONLY after the neckline breaks down. While the neckline holds, a
-        # clear support + reaction from the level is a valid LONG per the
-        # course rules — the forming shape must not kill the setup.
-        neck = geo.get('neckline') or 0
-        try:
-            _price = float(r.get('Price') or 0)
-        except (TypeError, ValueError):
-            _price = 0.0
-        broken = bool(neck) and 0 < _price < float(neck)
-        # HCA lesson (Jun 2026): the break must come 'with appropriate
-        # volume' — a low-volume neckline break earns reduced credit.
-        try:
-            _bvol = float(r.get('_vol_ratio') or 1.0)
-        except (TypeError, ValueError):
-            _bvol = 1.0
-        _vol_ok  = _bvol >= 1.2
-        _mag     = 12 if _vol_ok else 8
-        _vol_txt = (f'on {_bvol:.1f}x avg volume' if _vol_ok
-                    else f'but volume unconvincing ({_bvol:.1f}x avg)')
         if not is_long:
-            if broken:
-                return (+_mag, 'Chart Pattern',
-                        f'Head & Shoulders CONFIRMED: neckline {neck} broken '
-                        f'{_vol_txt} -- most reliable reversal pattern (lesson 19)')
-            return (+3, 'Chart Pattern',
-                    f'H&S forming but neckline {neck} intact -- pattern counts '
-                    f'only after breakdown (course); premature for SHORT')
-        if broken:
-            return (-_mag, 'Chart Pattern',
-                    f'H&S neckline {neck} BROKEN {_vol_txt} '
-                    f'-- confirmed bearish reversal against LONG')
-        return (-3, 'Chart Pattern',
-                f'H&S/M-shape forming above intact neckline {neck} -- course: '
-                f'irrelevant until breakdown; support retest stays valid')
+            return (+12, 'Chart Pattern',
+                    f'Head & Shoulders: neckline {geo.get("neckline")} '
+                    f'-- most reliable reversal pattern (lesson 19)')
+        return (-12, 'Chart Pattern', 'Head & Shoulders forming -- bearish reversal risk for LONG')
 
     bq = r.get('_breakout_quality', {})
     direction = 'LONG' if is_long else 'SHORT'
@@ -1562,10 +1504,6 @@ def _factor_daily_timing(r):
       SHORT: mirrored.
     """
     dt = r.get('_daily_timing') or {}
-    if dt.get('arb_gaps'):
-        return (0, 'Daily Timing',
-                'Dual-listing arbitrage gaps — daily candles mechanically '
-                'distorted; timing from the weekly only (SBSW lesson)')
     d_rsi = dt.get('rsi')
     if d_rsi is None:
         return None
@@ -1682,178 +1620,6 @@ def _factor_sweep_risk(r):
                 f'of the {lvl_word} at only {ret:.0f}% retracement -- expect a stop-run through the level '
                 f'before continuation. The default stop (3% beyond) sits inside the sweep zone; '
                 f'wait for the sweep + a weekly close reclaiming the level')
-    return None
-
-
-@factor
-def _factor_technical_stock(r):
-    """
-    Factor 44 -- 'Technical stock' via institutional ownership (Golan,
-    T/AT&T Discord thread, Jun 2026). Very high institutional ownership
-    (>=85%) usually means the stock is 'technical' — respects levels.
-    Low ownership (<65%) usually means less technical behaviour (and the
-    wild >10%/day movers). InstOwn arrives as percent; 0/None = unknown.
-    """
-    inst = r.get('InstOwn')
-    try:
-        inst = float(inst)
-    except (TypeError, ValueError):
-        return None
-    if inst <= 0 or inst > 100:
-        return None
-    if inst >= 85:
-        return (+5, 'Technical Stock',
-                f'Institutional ownership {inst:.0f}% (>=85%) -- technical stock, '
-                f'levels usually respected (Golan)')
-    if inst < 65:
-        return (-5, 'Technical Stock',
-                f'Institutional ownership {inst:.0f}% (<65%) -- usually less '
-                f'technical, levels less reliable (Golan)')
-    return None
-
-
-@factor
-def _factor_level_tested(r):
-    """
-    Factor 45 -- Last weekly candle already tested the level (Golan, AMZN
-    Discord thread, Jun 2026): 'you can enter even 3% above the level,
-    because the last weekly candle already tested the lower support' —
-    the test-and-hold IS the confirmation; SL goes under that candle's
-    wick (the stop-candle rule already does this) and R:R must stay >=2
-    (MIN_RR already enforces). Rewards the confirmation itself, whatever
-    the candle's textbook shape (Factor 30 only credits named patterns).
-    """
-    cp = r.get('_candle_pattern') or {}
-    lo, hi, cl = cp.get('low'), cp.get('high'), cp.get('close')
-    if not all(isinstance(v, (int, float)) and v > 0 for v in (lo, hi, cl)):
-        return None
-    is_long = 'LONG' in r['Dir']
-    if is_long:
-        sup = r.get('Support') or 0
-        if sup > 0 and lo <= sup * 1.01 and cl > sup:
-            return (+6, 'Level Tested',
-                    f'Last weekly candle tested support {sup} (low {lo}) and '
-                    f'closed above -- test-and-hold confirmation; entry valid '
-                    f'even a few %% higher (Golan)')
-    else:
-        res = r.get('Resist') or 0
-        if res > 0 and hi >= res * 0.99 and cl < res:
-            return (+6, 'Level Tested',
-                    f'Last weekly candle tested resistance {res} (high {hi}) and '
-                    f'closed below -- test-and-hold confirmation (Golan)')
-    return None
-
-
-@factor
-def _factor_daily_uturn(r):
-    """
-    Factor 46 -- Daily 'horseshoe' turn at the level (Golan, PNR case
-    study, Jun 2026): after the weekly test of the POI zone, the daily
-    closes carving a U upward is the visible 'buyers entering'
-    confirmation (mirrored N-turn for shorts). Aligned turn = small
-    boost; opposite turn = mild warning.
-    """
-    dt = r.get('_daily_timing') or {}
-    if dt.get('arb_gaps'):
-        return None   # dual-listing gaps distort the daily shape (SBSW lesson)
-    u, n = dt.get('u_turn'), dt.get('n_turn')
-    if u is None and n is None:
-        return None
-    is_long = 'LONG' in r['Dir']
-    if (is_long and u) or (not is_long and n):
-        shape = 'U-turn (horseshoe)' if is_long else 'N-turn'
-        return (+5, 'Daily Turn',
-                f'Daily {shape} at the level -- '
-                f'{"buyers" if is_long else "sellers"} visibly stepping in (Golan PNR)')
-    if (is_long and n) or (not is_long and u):
-        return (-3, 'Daily Turn',
-                'Daily closes turning AGAINST trade direction -- wait for the turn')
-    return None
-
-
-@factor
-def _factor_monthly_momentum_health(r):
-    """
-    Factor 47 -- Monthly momentum health (Sagi, ABBV thread, Jun 2026).
-    Top-down corroboration: on the MONTHLY chart, an RSI divergence
-    against the trade direction and/or volume that favors the opposing
-    side ('weakens on rallies, strengthens on declines') = the move is
-    losing force. The weekly versions are Factors 34 (RSI divergence)
-    and 22 (directional volume); this is their monthly counterpart.
-    """
-    is_long = 'LONG' in r['Dir']
-    pts, notes = 0, []
-    div = r.get('MonthlyRSIDiv') or 'NONE'
-    if (is_long and div == 'BEARISH') or ((not is_long) and div == 'BULLISH'):
-        pts -= 6
-        notes.append(f'monthly RSI divergence ({div.lower()}) against direction')
-    try:
-        dv = float(r.get('MonthlyDirVol') or 1.0)
-    except (TypeError, ValueError):
-        dv = 1.0
-    if dv > 0:
-        # dv = down-month volume / up-month volume
-        if is_long and dv >= 1.4:
-            pts -= 5; notes.append(f'monthly volume favors declines ({dv:.1f}x)')
-        elif is_long and dv <= 0.7:
-            pts += 4; notes.append(f'monthly volume favors rallies ({1/dv:.1f}x)')
-        elif (not is_long) and dv <= 0.7:
-            pts -= 5; notes.append(f'monthly volume favors rallies -- against SHORT ({1/dv:.1f}x)')
-        elif (not is_long) and dv >= 1.4:
-            pts += 4; notes.append(f'monthly volume favors declines ({dv:.1f}x)')
-    if pts == 0:
-        return None
-    return (pts, 'Monthly Health', '; '.join(notes) + ' (ABBV lesson)')
-
-
-@factor
-def _factor_cci_divergence(r):
-    """
-    Factor 48 -- Weekly CCI divergence (Golan, PLXS thread, Jul 2026):
-    'there is a negative CCI divergence and most likely the correction
-    is not finished yet.' Same swing-pair method as the RSI divergence;
-    kept factor-level (RSI stays the red-flag channel so one phenomenon
-    is not double-flagged). Against direction = correction unfinished;
-    aligned = supportive evidence.
-    """
-    div = r.get('_cci_divergence') or 'NONE'
-    if div == 'NONE':
-        return None
-    is_long = 'LONG' in r['Dir']
-    if (is_long and div == 'BEARISH') or ((not is_long) and div == 'BULLISH'):
-        return (-6, 'CCI Divergence',
-                f'{div.title()} CCI divergence against direction -- correction '
-                f'likely unfinished (Golan, PLXS)')
-    return (+4, 'CCI Divergence',
-            f'{div.title()} CCI divergence supporting direction')
-
-
-@factor
-def _factor_history_depth(r):
-    """
-    Factor 49 -- Chart seasoning / listing age (Eli Ravid, HAFN thread,
-    Jul 2026): 'because the chart does not have much history I like this
-    setup less and would prefer to look for a trade elsewhere.'
-    S/R levels earn trust from years of institutional memory; recent
-    listings carry levels with thin evidence behind them. Age comes from
-    Yahoo's firstTradeDateEpochUtc (whichever venue Yahoo counts from);
-    None (missing metadata / skip_fundamentals runs) skips the factor.
-    """
-    yrs = r.get('_listing_years')
-    if yrs is None:
-        return None
-    if yrs < 2.0:
-        return (-8, 'History Depth',
-                f'Listed only {yrs:.1f}y -- young chart, levels lack '
-                f'institutional memory (Eli, HAFN)')
-    if yrs < 3.5:
-        return (-4, 'History Depth',
-                f'Listed {yrs:.1f}y -- moderately young chart, levels still '
-                f'earning trust (Eli, HAFN)')
-    if yrs >= 8.0:
-        return (+2, 'History Depth',
-                f'Listed {yrs:.1f}y -- seasoned chart, levels carry years of '
-                f'institutional memory')
     return None
 
 

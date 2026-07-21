@@ -77,18 +77,7 @@ def yf_history(asset, **kwargs):
     """
     asset.history() with global throttling and exponential-backoff retry
     on Yahoo rate limits. Returns the DataFrame or None after retries.
-
-    Price basis is forced to the COURSE standard here, centrally:
-    dividend-UNadjusted, split-adjusted — i.e. TradingView with the ADJ
-    button OFF (Eli Ravid, BEP thread, Jul 2026: an ADJ-on chart is
-    'not accurate' — levels live at the prices people actually traded).
-    Yahoo's raw Close is exactly that basis; auto_adjust=True would
-    replace it with the dividend-adjusted series, silently shifting
-    historical levels on high-dividend names (REITs, utilities, MLPs)
-    away from the community's charts and the market's memory. Any
-    caller-passed auto_adjust is overridden — one basis everywhere.
     """
-    kwargs['auto_adjust'] = False
     for attempt in range(YF_MAX_RETRIES):
         _yf_throttle()
         try:
@@ -315,34 +304,7 @@ def get_monthly_analysis(ticker, asset=None):
         elif last_pct >=  3: candle_q = 'BULL'
         else:                candle_q = 'NEUTRAL'
 
-        # Monthly momentum health (Sagi, ABBV lesson Jun 2026): RSI
-        # divergence + volume character on the MONTHLY chart — 'volume
-        # weakens on rallies and strengthens on declines' = buyers fading.
-        m_rsi_div = 'NONE'
-        m_dirvol  = 1.0
-        try:
-            from ct_indicators import rsi as _rsi_fn
-            _r = _rsi_fn(close).values
-            _p = close.values
-            _n = len(_p)
-            _sl = [i for i in range(3, _n - 1) if _p[i] == min(_p[i-3:i+2])][-3:]
-            _sh = [i for i in range(3, _n - 1) if _p[i] == max(_p[i-3:i+2])][-3:]
-            if (len(_sl) >= 2 and _p[_sl[-1]] < _p[_sl[-2]]
-                    and _r[_sl[-1]] > _r[_sl[-2]]):
-                m_rsi_div = 'BULLISH'
-            elif (len(_sh) >= 2 and _p[_sh[-1]] > _p[_sh[-2]]
-                    and _r[_sh[-1]] < _r[_sh[-2]]):
-                m_rsi_div = 'BEARISH'
-            _vol = mdf['Volume']
-            _chg = close.diff()
-            _dn = float(_vol[_chg < 0].tail(6).mean() or 0)
-            _up = float(_vol[_chg > 0].tail(6).mean() or 0)
-            if _up > 0 and _dn > 0:
-                m_dirvol = round(_dn / _up, 2)
-        except Exception:
-            pass
-        return {'trend': m_trend, 'candle_pct': last_pct, 'candle_q': candle_q,
-                'rsi_div': m_rsi_div, 'dir_vol_ratio': m_dirvol}
+        return {'trend': m_trend, 'candle_pct': last_pct, 'candle_q': candle_q}
     except Exception:
         return None
 
@@ -500,55 +462,6 @@ def get_daily_timing(ticker: str) -> dict:
                     result['ssr'] = ssr
                 except Exception:
                     result['ssr'] = False
-                # Golan lesson (T/AT&T thread, Jun 2026): stocks that move
-                # >10% in a single day are usually <65% institutional and
-                # NOT 'technical' — do not enter. Expose the max abs daily
-                # change over the fetched ~6 months for the traffic light.
-                try:
-                    _chg = ddf['Close'].pct_change().abs()
-                    result['max_daily_move'] = round(float(_chg.max()) * 100, 1)
-                except Exception:
-                    pass
-                # Dual-listing arbitrage profile (David, SBSW lesson,
-                # Nov 2025): ADRs trading on two exchanges gap at the open
-                # almost daily (the other session moved) — daily candles
-                # 'don't look good' mechanically and daily-timeframe signals
-                # mislead; read the weekly. Detect: open gaps >1% on >=25%
-                # of the last ~120 sessions. When detected, the >10%/day
-                # rule switches to INTRADAY range — a mechanical gap is not
-                # 'wild mover' behaviour (Golan's rule targets the latter).
-                try:
-                    _op0 = ddf['Open']
-                    _pc0 = ddf['Close'].shift(1)
-                    _gfrac = float((((_op0 - _pc0).abs() / _pc0) > 0.01)
-                                   .tail(120).mean())
-                    result['arb_gaps'] = bool(_gfrac >= 0.25)
-                    if result['arb_gaps']:
-                        _ir = ((ddf['High'] - ddf['Low']) / _pc0).abs()
-                        result['max_daily_move'] = round(float(_ir.max()) * 100, 1)
-                except Exception:
-                    pass
-                # 'Horseshoe' turn (Golan, PNR case study, Jun 2026): the
-                # last ~10 daily closes carve a U at the level — extreme
-                # 2-7 sessions ago, >=1% fall into it and >=1% rise out of
-                # it = buyers visibly stepping in (mirrored N for shorts).
-                try:
-                    _c10 = ddf['Close'].tail(10)
-                    if len(_c10) == 10:
-                        _lo_i = int(_c10.values.argmin())
-                        _hi_i = int(_c10.values.argmax())
-                        _lo_v = float(_c10.iloc[_lo_i])
-                        _hi_v = float(_c10.iloc[_hi_i])
-                        result['u_turn'] = bool(
-                            2 <= _lo_i <= 7 and _lo_v > 0
-                            and float(_c10.iloc[0])  >= _lo_v * 1.01
-                            and float(_c10.iloc[-1]) >= _lo_v * 1.01)
-                        result['n_turn'] = bool(
-                            2 <= _hi_i <= 7 and _hi_v > 0
-                            and float(_c10.iloc[0])  <= _hi_v * 0.99
-                            and float(_c10.iloc[-1]) <= _hi_v * 0.99)
-                except Exception:
-                    pass
     except Exception:
         result = {}
     _DAILY_TIMING_CACHE[ticker] = result

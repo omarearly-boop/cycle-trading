@@ -101,16 +101,10 @@ def _check_momentum(ticker: str, portfolio_size: float = 25000) -> dict | None:
         if rsi < 55 or rsi > 78:
             return None
 
-        # ── Filter 3: Volume — N.M.S. HARD gate (NVDA Discord lesson,
-        # May 2026): a breakout on below-average volume 'does not meet the
-        # strategy rules' (candle, VOLUME, close) — reject it outright, do
-        # not merely label it LOW. Above-average is required; >=1.2x earns
-        # the bonus, >=1.5x the HIGH label.
+        # ── Filter 3: Volume >= 3-week average ───────────────────
         avg_vol = float(volumes.iloc[-4:-1].mean()) if len(volumes) >= 4 else 0
         cur_vol = float(volumes.iloc[-1])
-        if avg_vol > 0 and cur_vol < avg_vol:
-            return None
-        vol_ok  = cur_vol >= avg_vol * 1.2
+        vol_ok  = cur_vol >= avg_vol * 0.9
 
         # ── Filter 4: Monthly trend (4-week close > 8-week ago) ──
         if len(closes) >= 8:
@@ -147,7 +141,7 @@ def _check_momentum(ticker: str, portfolio_size: float = 25000) -> dict | None:
             return None   # too close to earnings
 
         # ── Volume label ─────────────────────────────────────────
-        vol_label = "HIGH" if cur_vol >= avg_vol * 1.5 else "OK"   # LOW is rejected above
+        vol_label = "HIGH" if cur_vol >= avg_vol * 1.5 else ("OK" if vol_ok else "LOW")
 
         # ── Build result dict (scanner-compatible schema) ─────────
         return {
@@ -182,7 +176,7 @@ def _check_momentum(ticker: str, portfolio_size: float = 25000) -> dict | None:
                 ("RSI",       +10, f"RSI {rsi:.0f} — trending, not exhausted"),
                 ("Above MA20", +10, f"Price ${entry:.2f} > MA20 ${ma20:.2f}"),
                 ("Above MA50", +10, f"Price > MA50 ${ma50:.2f}"),
-                ("Volume",    +5 if vol_ok else 0, f"Vol {vol_label} ({cur_vol/avg_vol:.1f}x avg)" if avg_vol > 0 else "Vol n/a"),
+                ("Volume",    +5 if vol_ok else -5, f"Vol {vol_label}"),
                 ("Monthly",   +10, "Monthly trend BULL"),
             ],
             "IsWatchlist":  False,

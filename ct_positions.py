@@ -142,21 +142,13 @@ def pm_rule1_swing(pos: dict, df: pd.DataFrame) -> dict:
     current_stop = pos['stop']
     direction    = pos['direction']
 
-    # Closed weekly bars only — the open bar must not confirm structure
-    # (baseline-agent bug find, 2026-07-14: the previous inline check used
-    # max(closes[:idx]) — the whole window's peak, demanding a 6-month
-    # closing high to confirm ANY pivot (over-strict) — and let the open
-    # weekly bar confirm. Both paths now share the tested pure function
-    # last_confirmed_swing_low/high (peak BETWEEN pivots; Eli/RKLB rule).
-    from ct_indicators import last_confirmed_swing_low, last_confirmed_swing_high
-    closes_closed = df['Close'].iloc[:-1]
-
     if direction == 'LONG':
-        sw = last_confirmed_swing_low(closes_closed, order=2)
-        if sw is None or sw <= current_stop:
+        pivots = _pm_pivot_lows(df)
+        valid  = [p for (_, p) in pivots if p > current_stop]
+        if not valid:
             return {'advance': False, 'new_stop': None,
-                    'reason': 'Rule 1: no CONFIRMED swing low above stop (peak not broken) — wait'}
-        swing_price = sw
+                    'reason': 'Rule 1: no confirmed swing low above current stop — wait'}
+        swing_price = valid[-1]   # most recent
         new_stop    = round(swing_price * (1 - PM_STOP_BUFFER), 2)
         if new_stop <= current_stop:
             return {'advance': False, 'new_stop': None,
@@ -165,11 +157,12 @@ def pm_rule1_swing(pos: dict, df: pd.DataFrame) -> dict:
                 'reason': f'Rule 1 ✅ swing low {swing_price:.2f} → new stop {new_stop:.2f}'}
 
     else:  # SHORT
-        sw = last_confirmed_swing_high(closes_closed, order=2)
-        if sw is None or sw >= current_stop:
+        pivots = _pm_pivot_highs(df)
+        valid  = [p for (_, p) in pivots if p < current_stop]
+        if not valid:
             return {'advance': False, 'new_stop': None,
-                    'reason': 'Rule 1: no CONFIRMED swing high below stop (trough not broken) — wait'}
-        swing_price = sw
+                    'reason': 'Rule 1: no confirmed swing high below current stop — wait'}
+        swing_price = valid[-1]
         new_stop    = round(swing_price * (1 + PM_STOP_BUFFER), 2)
         if new_stop >= current_stop:
             return {'advance': False, 'new_stop': None,

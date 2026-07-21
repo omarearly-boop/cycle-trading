@@ -325,12 +325,6 @@ def get_traffic_light(prob, r):
     if r.get('SSR_Risk'):
         red_flags.append('SSR likely active (≥10% daily drop) — shorts only on upticks; '
                          'sell-stop orders may be rejected by the broker')
-    # Golan (T/AT&T, Jun 2026): >10%-per-day movers are not 'technical' —
-    # hard rule: do not enter. Usually goes with <65% institutional.
-    _mx_day = (r.get('_daily_timing') or {}).get('max_daily_move')
-    if _mx_day and _mx_day >= 10.0:
-        red_flags.append(f'Moved {_mx_day:.0f}% in a single day (last 6mo) — not a '
-                         f'technical stock (Golan: do not enter)')
     # Mid-week scan = current weekly candle still open (mentor: "השבוע רק החל")
     if PARTIAL_BAR_RED_FLAG and r.get('PartialBar'):
         red_flags.append('Weekly candle still open (mid-week scan) — candle/volume/N.M.S. '
@@ -460,8 +454,6 @@ def _build_setup_dict(direction, ticker, price, rsi_val, support, resistance,
         'HighVol':        high_volatility,
         'LateEntry':      late_pct,
         'MonthlyTrend':   m_analysis['trend']      if m_analysis else None,
-        'MonthlyRSIDiv':  (m_analysis or {}).get('rsi_div', 'NONE'),
-        'MonthlyDirVol':  (m_analysis or {}).get('dir_vol_ratio', 1.0),
         'MonthlyCandle':  m_analysis['candle_q']   if m_analysis else None,
         'MonthlyPct':     m_analysis['candle_pct'] if m_analysis else None,
         'SectorETF':      rs_info['etf']            if rs_info else None,
@@ -673,16 +665,8 @@ def _fetch_market_data(ticker, is_crypto=False, is_commodity=False,
     boll_data = calc_bollinger(df)
 
     trend = get_trend(df)
-    # NO early exit on trend is None (fixed 2026-07-14). The old
-    # `return None` here had two bad effects:
-    # 1. It made the range-regime gate (T/AT&T lesson) and the Dow-
-    #    structure gate in _detect_setup UNREACHABLE — a sideways stock
-    #    died here before the logic built for sideways stocks ever ran.
-    # 2. The watch checker labels a None market as 'Fetch error', so every
-    #    sideways blue-chip (KMB, VZ, PGR, AON...) showed a permanent
-    #    fake fetch failure — the 'persistent core' of error rows for
-    #    four days. Trend gating now happens once, in _detect_setup,
-    #    which knows all three legitimate regimes.
+    if trend is None:
+        _diag('no_trend'); return None
 
     support, resistance = get_levels(df, price, atr_val)
     vol_ok = vol_declining(df)
@@ -797,12 +781,7 @@ def _fetch_market_data(ticker, is_crypto=False, is_commodity=False,
                 # Harami: current body inside prior body (lesson 9 inside bar)
                 elif (max(_o, _c) < max(_po, _pc) and min(_o, _c) > min(_po, _pc)):
                     _ctype = 'HARAMI_BULL' if _po > _pc else 'HARAMI_BEAR'
-        _candle_pattern = {'type': _ctype,
-                           'body_pct': round(_body / _rng, 2) if _rng > 0 else 0,
-                           # last-candle OHLC for Factor 45 (Golan AMZN lesson:
-                           # 'the last weekly candle already tested the support')
-                           'low': round(_l, 4), 'high': round(_h, 4),
-                           'close': round(_c, 4)}
+        _candle_pattern = {'type': _ctype, 'body_pct': round(_body / _rng, 2) if _rng > 0 else 0}
     except Exception:
         _candle_pattern = {'type': 'NEUTRAL', 'body_pct': 0}
 
@@ -989,26 +968,6 @@ def _fetch_market_data(ticker, is_crypto=False, is_commodity=False,
     except Exception:
         _rsi_divergence = 'NONE'
 
-    # CCI divergence — same swing-pair method (Golan, PLXS lesson Jul 2026:
-    # 'negative CCI divergence -> the correction likely is not finished').
-    # Factor-level evidence; RSI divergence remains the red-flag channel.
-    try:
-        from ct_indicators import cci as _cci_fn
-        _cp2 = df['Close'].values
-        _cs2 = _cci_fn(df['High'], df['Low'], df['Close']).values
-        _n2 = len(_cp2)
-        _sl2 = [i for i in range(3, _n2 - 1) if _cp2[i] == min(_cp2[i-3:i+2])][-3:]
-        _sh2 = [i for i in range(3, _n2 - 1) if _cp2[i] == max(_cp2[i-3:i+2])][-3:]
-        _cci_divergence = 'NONE'
-        if (len(_sl2) >= 2 and _cp2[_sl2[-1]] < _cp2[_sl2[-2]]
-                and _cs2[_sl2[-1]] > _cs2[_sl2[-2]]):
-            _cci_divergence = 'BULLISH'
-        elif (len(_sh2) >= 2 and _cp2[_sh2[-1]] > _cp2[_sh2[-2]]
-                and _cs2[_sh2[-1]] < _cs2[_sh2[-2]]):
-            _cci_divergence = 'BEARISH'
-    except Exception:
-        _cci_divergence = 'NONE'
-
     # Bars since breakout — reuse _bk_quality window, store count per direction
     # (used by 5-candle retest window filter in _detect_setup)
     _bars_since_breakout: dict = {}
@@ -1038,7 +997,6 @@ def _fetch_market_data(ticker, is_crypto=False, is_commodity=False,
         '_adx_weekly': _adx_weekly,
         '_cci_val': _cci_val,
         '_rsi_divergence': _rsi_divergence,
-        '_cci_divergence': _cci_divergence,
         '_bars_since_breakout': _bars_since_breakout,
         '_surge_vol': _surge_vol, '_candle_pattern': _candle_pattern,
         '_price_gap': _price_gap, '_secondary_trend': _secondary_trend,
@@ -1077,48 +1035,12 @@ def _detect_setup(ticker, portfolio_size, market, is_crypto, asset_type, max_dis
     macd_data, boll_data        = market['macd_data'], market['boll_data']
     short_pct, inst_pct         = market['short_pct'], market['inst_pct']
 
-    # ── Range regime (דשדוש) detection — T/AT&T Discord lesson (Jul 2026):
-    # a sideways range with a defined floor/ceiling is tradeable (long at
-    # the floor / short at the ceiling) even without a directional trend —
-    # previously the trend gate rejected every sideways stock outright.
-    # Conditions: no weekly trend, range width 8-40%, and the last ~26
-    # weekly closes contained inside the band (±5%).
-    _range_regime = False
-    try:
-        if market['trend'] is None and support > 0 and resistance > support:
-            _rw  = (resistance - support) / support
-            _c26 = df['Close'].tail(26)
-            _inside = bool(((_c26 >= support * 0.95) & (_c26 <= resistance * 1.05)).all())
-            _range_regime = bool(0.08 <= _rw <= 0.40 and _inside and len(_c26) >= 20)
-    except Exception:
-        _range_regime = False
-
-    # ── Dow-structure trend (HCA + SPOT Discord lessons) ─────────
-    # 'One broken support is not a trend change' — the primary trend
-    # stays intact until the SIGNIFICANT swing low breaks (SPOT: 475,
-    # per Sagi; same doctrine in the HCA thread). That significant low
-    # IS the fib anchor (start of the last uncorrected move, MDGL rule),
-    # so structure-intact = price still beyond the anchor, with the
-    # correction not past 78.6% (deeper = possible trend change, and
-    # TOO_DEEP is red-flagged anyway). This lets a with-structure retest
-    # pass even when the SMA proxy has already flipped.
-    fib_zone, fib_pct, fib_sl, fib_sh, fib_lvls = \
-        check_fibonacci_zone(df, direction, price)
-    if is_long:
-        _struct_ok = (fib_zone != 'UNKNOWN' and (fib_sl or 0) > 0
-                      and price > fib_sl and (fib_pct or 0) < 78.6)
-    else:
-        _struct_ok = (fib_zone != 'UNKNOWN' and (fib_sh or 0) > 0
-                      and price < fib_sh and (fib_pct or 0) < 78.6)
-
     # ── Trend + RSI gate ─────────────────────────────────────────
     if is_long:
-        if not ((market['trend'] == 'LONG' or _range_regime or _struct_ok)
-                and rsi_val <= RSI_LONG_MAX):
+        if not (market['trend'] == 'LONG' and rsi_val <= RSI_LONG_MAX):
             _diag('rsi_gate'); return None
     else:
-        if not ((market['trend'] == 'SHORT' or _range_regime or _struct_ok)
-                and rsi_val >= RSI_SHORT_MIN):
+        if not (market['trend'] == 'SHORT' and rsi_val >= RSI_SHORT_MIN):
             _diag('rsi_gate'); return None
 
     # ── Distance to key level ────────────────────────────────────
@@ -1131,53 +1053,13 @@ def _detect_setup(ticker, portfolio_size, market, is_crypto, asset_type, max_dis
     # Stop-candle rule (course; last remaining taxonomy gap): the stop goes
     # below BOTH the support and the entry candle's low (mirrored for SHORT).
     entry  = price
-    # Fibonacci zone already computed pre-gate (structure-trend check);
-    # fib_lvls reused here for the stop tuck (Yosef SOFI lesson) and later
-    # for Factor 20 and the setup dict.
-    # Stop-candle rule + ATR-aware buffer + fib protection — pure functions
-    # in ct_indicators (calc_stop_long/short), pinned by the suite.
-    from ct_indicators import calc_stop_long, calc_stop_short
     if is_long:
-        _fibs = [v for v in (fib_lvls or {}).values()
-                 if isinstance(v, (int, float)) and 0 < v < support]
-        stop = calc_stop_long(support, float(df['Low'].iloc[-1]), atr_val,
-                              fib_levels_below=_fibs)
+        _cand_low = float(df['Low'].iloc[-1])
+        stop = round(min(support * 0.97, _cand_low * 0.99), 4)
     else:
-        _fibs = [v for v in (fib_lvls or {}).values()
-                 if isinstance(v, (int, float)) and v > resistance]
-        stop = calc_stop_short(resistance, float(df['High'].iloc[-1]), atr_val,
-                               fib_levels_above=_fibs)
-    # TP shading (Sagi, HOOD lesson May 2025): 'just as we don't buy
-    # exactly AT the support but slightly above, we don't sell AT the
-    # resistance but slightly below' — the target sits 1% inside the level
-    # so the exit fills ahead of the order wall stacked on the level
-    # (mirrored for SHORT). The raw level stays visible as Resist/Support.
-    target = resistance * 0.99 if is_long else support * 1.01
-    # Range regime TP1 (T/AT&T + SFM Discord lessons): the mid-line caps
-    # the first target ONLY if the stock's own history inside the range
-    # shows pauses/turns there (Gil's empirical test, SFM thread). Clean
-    # edge-to-edge traversals target the far edge — Roy: 'the target is up
-    # to the resistance... the 50% area CAN act as resistance'; David:
-    # ranges tend to make the full move. If the capped reward then fails
-    # MIN_RR, the setup is correctly rejected.
-    if _range_regime and resistance > support > 0:
-        _mid = round((support + resistance) / 2, 4)
-        try:
-            _c26r = [float(v) for v in df['Close'].tail(26)]
-            _band = (resistance - support) * 0.10
-            _mid_pivots = sum(
-                1 for i in range(1, len(_c26r) - 1)
-                if abs(_c26r[i] - _mid) <= _band
-                and ((_c26r[i] >= _c26r[i-1] and _c26r[i] >= _c26r[i+1])
-                     or (_c26r[i] <= _c26r[i-1] and _c26r[i] <= _c26r[i+1])))
-        except Exception:
-            _mid_pivots = 99   # data problem -> stay conservative (mid cap)
-        if _mid_pivots >= 1:
-            if is_long and _mid > entry * 1.02:
-                target = _mid
-            elif (not is_long) and _mid < entry * 0.98:
-                target = _mid
-        # else: no historical mid-pause -> full traverse, far edge stays
+        _cand_high = float(df['High'].iloc[-1])
+        stop = round(max(resistance * 1.03, _cand_high * 1.01), 4)
+    target = resistance if is_long else support
 
     if is_long and target <= entry * 1.02:
         target = round(entry + atr_val * 3, 4)
@@ -1244,8 +1126,9 @@ def _detect_setup(ticker, portfolio_size, market, is_crypto, asset_type, max_dis
     level_amb, level_amb_n, _ = check_level_ambiguity(df, key_level, atr_val)
     tr_conf, tr_conf_lbl, _   = check_swing_broken(df, direction=lvl_dir)
 
-    # Factor 20 — Fibonacci Retracement Zone: computed earlier (before the
-    # stop) — fib_zone/fib_pct/fib_sl/fib_sh/fib_lvls already in scope.
+    # Factor 20 — Fibonacci Retracement Zone
+    fib_zone, fib_pct, fib_sl, fib_sh, fib_lvls = \
+        check_fibonacci_zone(df, direction, price)
 
     _setup = _build_setup_dict(
         direction, ticker, price, rsi_val, support, resistance,
@@ -1260,10 +1143,6 @@ def _detect_setup(ticker, portfolio_size, market, is_crypto, asset_type, max_dis
         fib_zone=fib_zone, fib_ret_pct=fib_pct,
         fib_swing_low=fib_sl, fib_swing_high=fib_sh, fib_levels=fib_lvls,
         monthly_sr=market.get('monthly_sr', {}), gann=market.get('_gann', {}))
-    # Range regime marker (דשדוש strategy — mid-range TP1)
-    _setup['_range_regime']  = _range_regime
-    # Dow-structure trend intact (HCA/SPOT lessons) — for calibration
-    _setup['_struct_trend_ok'] = _struct_ok
     # Pass quantitative volume ratio to factors (Factor 3 enhancement)
     _setup['_vol_ratio']     = market.get('_vol_ratio', 1.0)
     _setup['_dir_vol_ratio'] = market.get('_dir_vol_ratio', 1.0)
@@ -1288,16 +1167,6 @@ def _detect_setup(ticker, portfolio_size, market, is_crypto, asset_type, max_dis
     _setup['_gann']               = market.get('_gann', {})
     _setup['_vwap']               = market.get('_vwap', {})
     _setup['_sweep']              = market.get('_sweep', {})
-    # Factor 49 -- chart seasoning / listing age (Eli, HAFN Jul 2026)
-    try:
-        import time as _t49
-        _fte = (market.get('cached_info') or {}).get('firstTradeDateEpochUtc')
-        if _fte and _fte > 1e11:          # milliseconds variant
-            _fte = _fte / 1000.0
-        _setup['_listing_years'] = (round((_t49.time() - float(_fte)) / 31557600.0, 1)
-                                    if _fte else None)
-    except Exception:
-        _setup['_listing_years'] = None
     _setup['_adx_weekly']         = market.get('_adx_weekly', {})
     _setup['_spy_rs']             = market.get('spy_rs', {})   # fix: key is 'spy_rs' not '_spy_rs'
     _setup['_monthly_sr']         = market.get('monthly_sr', {})

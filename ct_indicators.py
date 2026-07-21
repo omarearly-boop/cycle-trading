@@ -187,92 +187,6 @@ def get_levels(df, price, atr_val):
 
     return round(support, 4), round(resistance, 4)
 
-def last_confirmed_swing_low(series, order=2):
-    """Most recent swing low CONFIRMED by structure (Eli Ravid, RKLB
-    lesson, Jan 2026): 'per the method you do not raise the stop to a
-    swing low until the peak is broken' — a pivot low anchors the trail
-    only after a later close exceeds the peak that preceded it (the
-    higher HIGH validates the higher LOW). Returns float or None.
-    """
-    vals = [float(v) for v in series]
-    n = len(vals)
-    pivots = [i for i in range(order, n - order)
-              if all(vals[i] <= vals[i - j] for j in range(1, order + 1))
-              and all(vals[i] <= vals[i + j] for j in range(1, order + 1))]
-    for k in range(len(pivots) - 1, -1, -1):
-        i = pivots[k]
-        start = pivots[k - 1] if k > 0 else 0
-        peak = max(vals[start:i]) if i > start else None
-        if peak is None:
-            continue
-        if any(v > peak for v in vals[i + 1:]):
-            return vals[i]
-    return None
-
-
-def last_confirmed_swing_high(series, order=2):
-    """Mirror of last_confirmed_swing_low for SHORT trailing: a pivot
-    high anchors only after a later close breaks BELOW the trough that
-    preceded it."""
-    vals = [float(v) for v in series]
-    n = len(vals)
-    pivots = [i for i in range(order, n - order)
-              if all(vals[i] >= vals[i - j] for j in range(1, order + 1))
-              and all(vals[i] >= vals[i + j] for j in range(1, order + 1))]
-    for k in range(len(pivots) - 1, -1, -1):
-        i = pivots[k]
-        start = pivots[k - 1] if k > 0 else 0
-        trough = min(vals[start:i]) if i > start else None
-        if trough is None:
-            continue
-        if any(v < trough for v in vals[i + 1:]):
-            return vals[i]
-    return None
-
-
-def calc_stop_long(support: float, candle_low: float, atr_val: float,
-                   fib_levels_below=None) -> float:
-    """Stop for a LONG retest setup — stop-candle rule + ATR-aware buffer
-    + fib protection.
-
-    Below BOTH the support and the entry candle's wick (stop-candle rule),
-    with a buffer beyond the level of max(3%, 0.5x weekly ATR) — a stop
-    'too short relative to the weekly volatility' sits inside one bar's
-    noise (Raz, BG lesson Jul 2026), while a full-ATR stop is too far and
-    hurts R:R.
-
-    Fib protection (Yosef, SOFI lesson Mar 2026): 'prefer to shelter under
-    as many fib levels as possible — but I will not double the stop for
-    it'. If a fib level sits just below the base stop, tuck the stop 1%
-    under it, capped at a 40% extension of the base stop distance.
-    """
-    _buf = max(support * 0.03, (atr_val or 0) * 0.5)
-    stop = min(support - _buf, candle_low * 0.99)
-    if fib_levels_below:
-        _base = max(support - stop, 1e-9)
-        _cands = [f for f in fib_levels_below
-                  if isinstance(f, (int, float)) and 0 < f < stop
-                  and (stop - f * 0.99) <= _base * 0.4]
-        if _cands:
-            stop = max(_cands) * 0.99
-    return round(stop, 4)
-
-
-def calc_stop_short(resistance: float, candle_high: float, atr_val: float,
-                    fib_levels_above=None) -> float:
-    """Mirror of calc_stop_long for SHORT setups at resistance."""
-    _buf = max(resistance * 0.03, (atr_val or 0) * 0.5)
-    stop = max(resistance + _buf, candle_high * 1.01)
-    if fib_levels_above:
-        _base = max(stop - resistance, 1e-9)
-        _cands = [f for f in fib_levels_above
-                  if isinstance(f, (int, float)) and f > stop
-                  and (f * 1.01 - stop) <= _base * 0.4]
-        if _cands:
-            stop = min(_cands) * 1.01
-    return round(stop, 4)
-
-
 def vol_declining(df, n=3):
     avg    = float(df['Volume'].rolling(20).mean().iloc[-1])
     recent = float(df['Volume'].iloc[-n:].mean())
@@ -328,45 +242,22 @@ def check_level_reliability(df, level, lookback: int = 52, tolerance: float = 0.
         broke_down = False   # was above, then closed below
         broke_up   = False   # was below, then closed above
         full_cycle = False
-        cur_side       = None
-        last_cross_idx = -1   # index of the LAST above<->below flip
 
-        for i, c in enumerate(closes):
+        for c in closes:
             if c > above_thresh:
                 if broke_down:
                     full_cycle = True   # ABOVE→BELOW→ABOVE
                 if saw_below:
                     broke_up = True
                 saw_above = True
-                if cur_side == 'below':
-                    last_cross_idx = i
-                cur_side = 'above'
             elif c < below_thresh:
                 if broke_up:
                     full_cycle = True   # BELOW→ABOVE→BELOW
                 if saw_above:
                     broke_down = True
                 saw_below = True
-                if cur_side == 'above':
-                    last_cross_idx = i
-                cur_side = 'below'
 
         if full_cycle:
-            # Rehabilitation (Sagi Oscar, TDY lesson Dec 2025): a level
-            # broken both ways regains standing once the market has since
-            # PROVEN respect — no re-cross for >=16 bars AND at least one
-            # touch of the band that held (TDY 490: broken in March, then
-            # clean May-June support that launched the rally — 'the level
-            # exists in the market's awareness'). Upgraded only to TESTED,
-            # never CLEAN: the history still counts.
-            _since = closes[last_cross_idx + 1:] if last_cross_idx >= 0 else []
-            if len(_since) >= 16:
-                _touched = any(below_thresh <= c <= above_thresh for c in _since)
-                if _touched:
-                    return ('TESTED',
-                            f'Level {level:.2f} was broken both ways but respected '
-                            f'since ({len(_since)} bars incl. a held retest) — '
-                            f'rehabilitated (TDY lesson)')
             return ('UNRELIABLE',
                     f'Level {level:.2f} broken both directions — '
                     f'market did not respect it as a barrier (N.M.S.)')

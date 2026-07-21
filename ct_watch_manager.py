@@ -24,42 +24,14 @@ WATCH_FILE = BASE_DIR / 'watch_alerts.json'
 
 def load():
     if WATCH_FILE.exists():
-        raw = WATCH_FILE.read_text(encoding='utf-8')
         try:
-            data = json.loads(raw)
-        except Exception as e:
-            # A file that EXISTS but cannot be parsed must NEVER degrade to
-            # an empty list — a subsequent save() persists the emptiness and
-            # destroys the watchlist (happened 2026-07-14: a stale sandbox-
-            # mount read parsed as garbage; two add_ticker calls then wiped
-            # ~290 entries down to 1). Fail loudly instead; recover from
-            # watch_alerts.json.bak.
-            raise RuntimeError(
-                f'watch_alerts.json exists ({len(raw)} chars) but failed to '
-                f'parse: {e}. REFUSING to proceed with an empty watchlist — '
-                f'restore from watch_alerts.json.bak') from e
-        if not isinstance(data.get('tickers'), list):
-            raise RuntimeError('watch_alerts.json parsed without a tickers list — refusing')
-        return data
+            return json.loads(WATCH_FILE.read_text(encoding='utf-8'))
+        except Exception:
+            pass
     return {'email': 'omarearly@gmail.com', 'tickers': []}
 
 
 def save(data):
-    # Shrink guard (2026-07-14): a save that would wipe most of an intact
-    # watchlist is almost certainly a bug upstream, never a real intent —
-    # auto-prune removes a handful of entries at most.
-    try:
-        if WATCH_FILE.exists():
-            _cur = json.loads(WATCH_FILE.read_text(encoding='utf-8'))
-            _n_cur, _n_new = len(_cur.get('tickers', [])), len(data.get('tickers', []))
-            if _n_cur >= 20 and _n_new < _n_cur * 0.3:
-                raise RuntimeError(
-                    f'REFUSING save: would shrink watchlist {_n_cur} -> {_n_new} '
-                    f'entries. If intentional, delete watch_alerts.json first.')
-    except RuntimeError:
-        raise
-    except Exception:
-        pass   # unreadable current file: .bak below still protects
     data['last_updated'] = datetime.datetime.now().isoformat()
     # Backup before every write — protects against truncation on crash
     bak = WATCH_FILE.with_suffix('.json.bak')
@@ -201,14 +173,6 @@ def auto_add_to_watchlist(setup: dict) -> bool:
     """
     tl = _tl_color(setup)
     if tl == 'RED':
-        return False
-
-    # US-listed stocks/ETFs only (user trades US-only; Type mirrors the
-    # Colmex filter). Also fixes a real bug: intl/TASE setups carry a
-    # display ticker WITHOUT the exchange suffix ('FIBI', '0388', '7203'),
-    # so their watchlist entries could never be fetched again — 7 such
-    # entries produced identical FETCH_ERROR rows in every hourly report.
-    if (setup.get('Type') or 'STOCK').upper() != 'STOCK':
         return False
 
     ticker    = setup.get('Ticker', '').upper().strip()

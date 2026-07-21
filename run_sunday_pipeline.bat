@@ -7,12 +7,13 @@ cd /d "%~dp0"
 :: escaping and the task silently never ran.
 
 set CT_PORTFOLIO_SIZE=25000
-set CT_TICKER_INPUT=ALL
+set CT_TICKER_INPUT=
 set PYTHONUNBUFFERED=1
 set PYTHONUTF8=1
 set PYTHONIOENCODING=utf-8
 
 if not exist logs mkdir logs
-for /f %%t in ('python -c "import time;print(int(time.time()))"') do set CT_T0=%%t
-python ct_pipeline.py >> logs\sunday_pipeline.log 2>&1
-python ct_record_run.py pipeline "Sunday Pipeline" %CT_T0% %ERRORLEVEL% >> logs\sunday_pipeline.log 2>&1
+python ct_pipeline.py     >> logs\sunday_pipeline.log 2>&1
+
+:: Colmex demo order sheet — placeable setups from today's scan
+python ct_order_sheet.py  >> logs\sunday_pipeline.log 2>&1

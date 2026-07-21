@@ -49,37 +49,14 @@ _load_env()
 # ---------------------------------------------------------------------------
 def load_watchlist():
     if WATCH_FILE.exists():
-        raw = WATCH_FILE.read_text(encoding='utf-8')
         try:
-            data = json.loads(raw)
-        except Exception as e:
-            # Same guard as ct_watch_manager.load (2026-07-14 wipe incident):
-            # an existing-but-unparseable file must never become an empty
-            # list that save_watchlist() then persists.
-            raise RuntimeError(
-                f'watch_alerts.json exists ({len(raw)} chars) but failed to '
-                f'parse: {e}. REFUSING to run with an empty watchlist — '
-                f'restore from watch_alerts.json.bak') from e
-        if not isinstance(data.get('tickers'), list):
-            raise RuntimeError('watch_alerts.json parsed without a tickers list — refusing')
-        return data
+            return json.loads(WATCH_FILE.read_text(encoding='utf-8'))
+        except Exception:
+            pass
     return {'email': '', 'tickers': []}
 
 
 def save_watchlist(data):
-    # Backup + shrink guard (2026-07-14) — mirrors ct_watch_manager.save
-    try:
-        if WATCH_FILE.exists():
-            _cur = json.loads(WATCH_FILE.read_text(encoding='utf-8'))
-            _n_cur, _n_new = len(_cur.get('tickers', [])), len(data.get('tickers', []))
-            if _n_cur >= 20 and _n_new < _n_cur * 0.3:
-                raise RuntimeError(
-                    f'REFUSING save: would shrink watchlist {_n_cur} -> {_n_new}')
-            WATCH_FILE.with_suffix('.json.bak').write_bytes(WATCH_FILE.read_bytes())
-    except RuntimeError:
-        raise
-    except Exception:
-        pass
     tmp = WATCH_FILE.with_suffix('.tmp')
     tmp.write_text(
         json.dumps(data, ensure_ascii=False, indent=2),
@@ -480,10 +457,6 @@ def generate_watch_html(results: list, today: str) -> str:
     rows_html = ''
     for idx, r in enumerate(sorted(results, key=lambda x: x.get('prob', 0), reverse=True)):
         tl   = r.get('tl')
-        if tl == 'NO_LEVEL':
-            continue   # 'Not in zone' rows hidden (user request 2026-07-13);
-                       # the summary pill still shows their count, and the
-                       # 21-day auto-prune tracking is unaffected.
         bg   = tl_bg.get(tl, '#f8f9fa')
         icon = tl_icon.get(tl, '⚪')
         lbl  = tl_label.get(tl, 'NO DATA')
@@ -573,9 +546,6 @@ def generate_watch_html(results: list, today: str) -> str:
   .flt-btn {{border:2px solid transparent;border-radius:20px;padding:5px 16px;font-size:13px;font-weight:700;cursor:pointer;background:rgba(255,255,255,.15);color:#fff;transition:background .15s,border-color .15s}}
   .flt-btn:hover{{background:rgba(255,255,255,.25)}}
   .flt-btn.active{{background:rgba(255,255,255,.35);border-color:#fff}}
-  .flt-q {{border:2px solid transparent;border-radius:20px;padding:5px 14px;font-size:13px;background:rgba(255,255,255,.15);color:#fff;outline:none;width:170px}}
-  .flt-q::placeholder{{color:rgba(255,255,255,.55)}}
-  .flt-q:focus{{border-color:#fff;background:rgba(255,255,255,.25)}}
   /* fund-box classes (dark theme, sits on #1a1f2e background) */
   .fund-box {{border-radius:8px;padding:12px 16px;margin:0}}
   .fund-header {{display:flex;justify-content:space-between;align-items:center;
@@ -602,28 +572,19 @@ function toggleFund(id) {{
   el.style.display = (el.style.display === 'none') ? 'table-row' : 'none';
 }}
 var _activeFilter = 'ALL';
-var _q = '';
-function applyFilters() {{
+function filterStatus(status, btn) {{
+  _activeFilter = status;
+  document.querySelectorAll('.flt-btn').forEach(function(b){{ b.classList.remove('active'); }});
+  btn.classList.add('active');
   document.querySelectorAll('tbody tr[data-status]').forEach(function(row){{
     var s = row.getAttribute('data-status');
-    var okStatus = (_activeFilter === 'ALL' || s === _activeFilter);
-    var okText = (!_q || row.textContent.toUpperCase().indexOf(_q) >= 0);
-    row.style.display = (okStatus && okText) ? '' : 'none';
+    var show = (status === 'ALL' || s === status);
+    row.style.display = show ? '' : 'none';
     var next = row.nextElementSibling;
     if(next && !next.hasAttribute('data-status')){{
       next.style.display = 'none';
     }}
   }});
-}}
-function filterStatus(status, btn) {{
-  _activeFilter = status;
-  document.querySelectorAll('.flt-btn').forEach(function(b){{ b.classList.remove('active'); }});
-  btn.classList.add('active');
-  applyFilters();
-}}
-function searchRows(v) {{
-  _q = (v || '').trim().toUpperCase();
-  applyFilters();
 }}
 </script>
 </head>
@@ -639,7 +600,6 @@ function searchRows(v) {{
     <span class="pill">📋 Total: {len(results)}</span>
   </div>
   <div class="filter-bar">
-    <input class="flt-q" placeholder="🔍 search ticker / note..." oninput="searchRows(this.value)">
     <button class="flt-btn active" onclick="filterStatus('ALL',this)">❖ All</button>
     <button class="flt-btn" onclick="filterStatus('GREEN',this)">🟢 GO</button>
     <button class="flt-btn" onclick="filterStatus('YELLOW',this)">🟡 Wait</button>
@@ -1038,325 +998,6 @@ def send_partial_exit_alert(to_email: str, entry: dict, cur_price: float,
         return False
 
 
-def send_preearnings_alert(to_email: str, pos: dict, cur_price: float,
-                           r_mult: float, earn_date: str, earn_days,
-                           units_to_sell: int) -> bool:
-    """Pre-earnings de-risk (Discord lesson, ALNY Jul 2026, expert answer):
-    at >=2R unrealized with earnings near, DON'T move the stop — realize 50%
-    of the position (banks half the open R) and let the rest run untouched.
-    """
-    from_email = os.environ.get('ALERT_EMAIL_FROM', '')
-    password   = os.environ.get('ALERT_EMAIL_PASSWORD', '').replace(' ', '')
-    if not from_email or not password:
-        return False
-
-    ticker    = pos['ticker']
-    direction = pos.get('direction', 'LONG')
-    entry_p   = pos.get('entry') or 0
-    stop_p    = pos.get('stop') or 0
-    units     = pos.get('units') or 0
-    pid       = pos.get('id', '')
-    dir_color = '#22c55e' if 'LONG' in direction else '#ef4444'
-
-    subject = (f"[PRE-EARNINGS] {ticker} {direction} +{r_mult:.1f}R "
-               f"-- take 50% before earnings ({earn_days}d)")
-
-    html_body = f"""
-<!DOCTYPE html>
-<html>
-<head><meta charset="UTF-8"></head>
-<body style="background:#0f172a;color:#e2e8f0;font-family:sans-serif;padding:24px;margin:0">
-<div style="max-width:600px;margin:0 auto">
-  <div style="background:#1e293b;border-radius:12px;padding:24px;border-left:4px solid #a855f7">
-    <div style="color:#a855f7;font-size:13px;font-weight:700;letter-spacing:2px;margin-bottom:8px">
-      PRE-EARNINGS DE-RISK
-    </div>
-    <div style="font-size:28px;font-weight:800;color:#f1f5f9">{ticker}</div>
-    <div style="color:{dir_color};font-size:14px;font-weight:700;margin-top:4px">
-      {direction} &nbsp; +{r_mult:.1f}R unrealized</div>
-  </div>
-  <div style="background:#1e293b;border-radius:12px;padding:20px;margin-top:12px">
-    <p style="color:#94a3b8;margin:0 0 12px 0;font-size:14px">
-      Earnings <b style="color:#f1f5f9">{earn_date}</b> ({earn_days}d away) with
-      <b style="color:#a855f7">+{r_mult:.1f}R</b> open profit. Course guidance:
-      <b style="color:#f1f5f9">do NOT move the stop</b> — realize
-      <b style="color:#a855f7">{units_to_sell} of {units} units (50%)</b>,
-      banking about {r_mult/2:.1f}R, and let the rest run without touching
-      the trade.
-    </p>
-    <p style="background:#422006;border:1px solid #f59e0b;border-radius:6px;padding:10px 14px;
-              color:#fde68a;font-size:12px;margin:0 0 12px 0">
-      After selling, UPDATE YOUR STOP ORDER QUANTITY at the broker to the
-      remaining shares, then record it:<br>
-      <code style="color:#fbbf24">python cycles_trading_scanner.py partial {pid} {units_to_sell}</code>
-    </p>
-    <table style="width:100%;border-collapse:collapse">
-      <tr><td style="padding:6px 0;color:#64748b;font-size:13px">Entry</td>
-          <td style="padding:6px 0;color:#e2e8f0;font-size:13px;text-align:right">${entry_p:.2f}</td></tr>
-      <tr><td style="padding:6px 0;color:#64748b;font-size:13px">Current Price</td>
-          <td style="padding:6px 0;color:#a855f7;font-size:15px;font-weight:700;text-align:right">${cur_price:.2f}</td></tr>
-      <tr><td style="padding:6px 0;color:#64748b;font-size:13px">Stop (unchanged!)</td>
-          <td style="padding:6px 0;color:#ef4444;font-size:13px;text-align:right">${stop_p:.2f}</td></tr>
-    </table>
-  </div>
-  <p style="color:#475569;font-size:11px;text-align:center;margin-top:16px">
-    Cycles Trading -- automated signal -- not financial advice
-  </p>
-</div>
-</body>
-</html>"""
-
-    try:
-        msg = MIMEMultipart('alternative')
-        msg['Subject'] = subject
-        msg['From']    = from_email
-        msg['To']      = to_email
-        msg.attach(MIMEText(html_body, 'html', 'utf-8'))
-        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as srv:
-            srv.login(from_email, password)
-            srv.sendmail(from_email, to_email, msg.as_string())
-        return True
-    except Exception as e:
-        print(f"    Pre-earnings email FAILED: {e}")
-        return False
-
-
-def send_preearnings_exit_alert(to_email: str, pos: dict, cur_price: float,
-                                r_mult: float, earn_date: str, earn_days) -> bool:
-    """Pre-earnings EXIT (Discord lesson, EOG Apr 2026): entered before
-    earnings and still near the entry price — close the trade rather than
-    hold through the report. A gap-down 'skips' the stop and ejects at a
-    bigger loss than planned; near entry/stop the gap fear is highest.
-    """
-    from_email = os.environ.get('ALERT_EMAIL_FROM', '')
-    password   = os.environ.get('ALERT_EMAIL_PASSWORD', '').replace(' ', '')
-    if not from_email or not password:
-        return False
-
-    ticker    = pos['ticker']
-    direction = pos.get('direction', 'LONG')
-    entry_p   = pos.get('entry') or 0
-    stop_p    = pos.get('stop') or 0
-    units     = pos.get('units') or 0
-    pid       = pos.get('id', '')
-    dir_color = '#22c55e' if 'LONG' in direction else '#ef4444'
-
-    subject = (f"[PRE-EARNINGS EXIT] {ticker} {direction} {r_mult:+.1f}R "
-               f"-- close before earnings ({earn_days}d)")
-
-    html_body = f"""
-<!DOCTYPE html>
-<html>
-<head><meta charset="UTF-8"></head>
-<body style="background:#0f172a;color:#e2e8f0;font-family:sans-serif;padding:24px;margin:0">
-<div style="max-width:600px;margin:0 auto">
-  <div style="background:#1e293b;border-radius:12px;padding:24px;border-left:4px solid #ef4444">
-    <div style="color:#ef4444;font-size:13px;font-weight:700;letter-spacing:2px;margin-bottom:8px">
-      PRE-EARNINGS EXIT
-    </div>
-    <div style="font-size:28px;font-weight:800;color:#f1f5f9">{ticker}</div>
-    <div style="color:{dir_color};font-size:14px;font-weight:700;margin-top:4px">
-      {direction} &nbsp; {r_mult:+.1f}R (near entry)</div>
-  </div>
-  <div style="background:#1e293b;border-radius:12px;padding:20px;margin-top:12px">
-    <p style="color:#94a3b8;margin:0 0 12px 0;font-size:14px">
-      Earnings <b style="color:#f1f5f9">{earn_date}</b> ({earn_days}d away) and the
-      position is still near the entry price ({r_mult:+.1f}R). Course guidance
-      (EOG lesson): <b style="color:#ef4444">close the full position ({units} units)
-      before the report</b> — an earnings gap can jump straight past the stop
-      and exit you at a much bigger loss than planned. Holding through
-      earnings is only considered when the trade is well in profit.
-    </p>
-    <p style="background:#422006;border:1px solid #f59e0b;border-radius:6px;padding:10px 14px;
-              color:#fde68a;font-size:12px;margin:0 0 12px 0">
-      After closing at the broker (and cancelling the bracket orders), record it:<br>
-      <code style="color:#fbbf24">python cycles_trading_scanner.py close {pid}</code>
-    </p>
-    <table style="width:100%;border-collapse:collapse">
-      <tr><td style="padding:6px 0;color:#64748b;font-size:13px">Entry</td>
-          <td style="padding:6px 0;color:#e2e8f0;font-size:13px;text-align:right">${entry_p:.2f}</td></tr>
-      <tr><td style="padding:6px 0;color:#64748b;font-size:13px">Current Price</td>
-          <td style="padding:6px 0;color:#ef4444;font-size:15px;font-weight:700;text-align:right">${cur_price:.2f}</td></tr>
-      <tr><td style="padding:6px 0;color:#64748b;font-size:13px">Stop (gap can skip it!)</td>
-          <td style="padding:6px 0;color:#ef4444;font-size:13px;text-align:right">${stop_p:.2f}</td></tr>
-    </table>
-  </div>
-  <p style="color:#475569;font-size:11px;text-align:center;margin-top:16px">
-    Cycles Trading -- automated signal -- not financial advice
-  </p>
-</div>
-</body>
-</html>"""
-
-    try:
-        msg = MIMEMultipart('alternative')
-        msg['Subject'] = subject
-        msg['From']    = from_email
-        msg['To']      = to_email
-        msg.attach(MIMEText(html_body, 'html', 'utf-8'))
-        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as srv:
-            srv.login(from_email, password)
-            srv.sendmail(from_email, to_email, msg.as_string())
-        return True
-    except Exception as e:
-        print(f"    Pre-earnings-exit email FAILED: {e}")
-        return False
-
-
-def send_dividend_alert(to_email: str, pos: dict, cur_price: float,
-                        amount: float, yield_pct: float, ex_date: str) -> bool:
-    """Dividend awareness (TMRP Discord lesson, Apr 2026): a meaningful
-    dividend shifts the adjusted chart and drops the market price on the
-    ex-date without being a real loss. Recorded levels are pre-dividend."""
-    from_email = os.environ.get('ALERT_EMAIL_FROM', '')
-    password   = os.environ.get('ALERT_EMAIL_PASSWORD', '').replace(' ', '')
-    if not from_email or not password:
-        return False
-
-    ticker    = pos['ticker']
-    direction = pos.get('direction', 'LONG')
-    stop_p    = pos.get('stop') or 0
-
-    subject = (f"[DIVIDEND] {ticker} paid {amount:.2f}/share ({yield_pct:.1f}%) "
-               f"ex {ex_date} -- check your stop order")
-
-    html_body = f"""
-<!DOCTYPE html>
-<html>
-<head><meta charset="UTF-8"></head>
-<body style="background:#0f172a;color:#e2e8f0;font-family:sans-serif;padding:24px;margin:0">
-<div style="max-width:600px;margin:0 auto">
-  <div style="background:#1e293b;border-radius:12px;padding:24px;border-left:4px solid #38bdf8">
-    <div style="color:#38bdf8;font-size:13px;font-weight:700;letter-spacing:2px;margin-bottom:8px">
-      DIVIDEND ADJUSTMENT
-    </div>
-    <div style="font-size:28px;font-weight:800;color:#f1f5f9">{ticker}</div>
-    <div style="color:#94a3b8;font-size:14px;margin-top:4px">
-      {direction} position &nbsp;|&nbsp; dividend {amount:.2f}/share
-      ({yield_pct:.1f}% of price) &nbsp;|&nbsp; ex-date {ex_date}</div>
-  </div>
-  <div style="background:#1e293b;border-radius:12px;padding:20px;margin-top:12px">
-    <p style="color:#94a3b8;margin:0 0 12px 0;font-size:14px">
-      The price drop on the ex-date is the payout, <b style="color:#f1f5f9">not a real
-      loss</b> — you receive the cash. But three things shifted
-      (course lesson, TMRP Apr 2026):</p>
-    <p style="color:#94a3b8;margin:0 0 12px 0;font-size:14px">
-      1. <b style="color:#f1f5f9">Your broker stop order</b> (${stop_p:.2f}) may now sit
-      inside the post-dividend price range — brokers adjust orders for special
-      dividends but usually NOT for regular ones. Verify it at Colmex.<br>
-      2. <b style="color:#f1f5f9">Recorded entry/stop/TP</b> in the tracker are
-      pre-dividend numbers — P&amp;L shown in alerts is understated by the payout.<br>
-      3. <b style="color:#f1f5f9">Chart levels</b> on dividend-adjusted charts shifted
-      down across all history — re-read S/R before acting on them.
-    </p>
-    <table style="width:100%;border-collapse:collapse">
-      <tr><td style="padding:6px 0;color:#64748b;font-size:13px">Current Price</td>
-          <td style="padding:6px 0;color:#e2e8f0;font-size:13px;text-align:right">${cur_price:.2f}</td></tr>
-      <tr><td style="padding:6px 0;color:#64748b;font-size:13px">Recorded Stop</td>
-          <td style="padding:6px 0;color:#ef4444;font-size:13px;text-align:right">${stop_p:.2f}</td></tr>
-    </table>
-  </div>
-  <p style="color:#475569;font-size:11px;text-align:center;margin-top:16px">
-    Cycles Trading -- automated signal -- not financial advice
-  </p>
-</div>
-</body>
-</html>"""
-
-    try:
-        msg = MIMEMultipart('alternative')
-        msg['Subject'] = subject
-        msg['From']    = from_email
-        msg['To']      = to_email
-        msg.attach(MIMEText(html_body, 'html', 'utf-8'))
-        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as srv:
-            srv.login(from_email, password)
-            srv.sendmail(from_email, to_email, msg.as_string())
-        return True
-    except Exception as e:
-        print(f"    Dividend email FAILED: {e}")
-        return False
-
-
-def send_momentum_exit_alert(to_email: str, pos: dict, cur_price: float,
-                             r_mult: float, bar_date: str) -> bool:
-    """Momentum-exit signal (TKO Discord thread, Jan 2026; lesson 33):
-    first weekly candle closing beyond the prior candle's extreme = the
-    falling side of the momentum principle -> proactive exit consideration."""
-    from_email = os.environ.get('ALERT_EMAIL_FROM', '')
-    password   = os.environ.get('ALERT_EMAIL_PASSWORD', '').replace(' ', '')
-    if not from_email or not password:
-        return False
-
-    ticker    = pos['ticker']
-    direction = pos.get('direction', 'LONG')
-    stop_p    = pos.get('stop') or 0
-    units     = pos.get('units') or 0
-    pid       = pos.get('id', '')
-    is_long   = 'LONG' in direction
-
-    subject = (f"[MOMENTUM EXIT] {ticker} {direction} +{r_mult:.1f}R -- weekly close "
-               f"{'below prior low' if is_long else 'above prior high'}")
-
-    html_body = f"""
-<!DOCTYPE html>
-<html>
-<head><meta charset="UTF-8"></head>
-<body style="background:#0f172a;color:#e2e8f0;font-family:sans-serif;padding:24px;margin:0">
-<div style="max-width:600px;margin:0 auto">
-  <div style="background:#1e293b;border-radius:12px;padding:24px;border-left:4px solid #fb7185">
-    <div style="color:#fb7185;font-size:13px;font-weight:700;letter-spacing:2px;margin-bottom:8px">
-      MOMENTUM EXIT SIGNAL
-    </div>
-    <div style="font-size:28px;font-weight:800;color:#f1f5f9">{ticker}</div>
-    <div style="color:#94a3b8;font-size:14px;margin-top:4px">
-      {direction} &nbsp; +{r_mult:.1f}R unrealized &nbsp;|&nbsp; signal candle: {bar_date}</div>
-  </div>
-  <div style="background:#1e293b;border-radius:12px;padding:20px;margin-top:12px">
-    <p style="color:#94a3b8;margin:0 0 12px 0;font-size:14px">
-      The last closed weekly candle <b style="color:#fb7185">closed
-      {'below the LOW of the previous candle' if is_long else 'above the HIGH of the previous candle'}</b>
-      — the first negative change in the candles. Per the momentum
-      principle's falling side (lesson 33; TKO thread): this is the
-      proactive exit signal for a momentum run — consider closing
-      ({units} units) or at minimum tightening to the signal candle's
-      {'low' if is_long else 'high'} rather than waiting for the stop
-      (${stop_p:.2f}).
-    </p>
-    <p style="background:#0c4a6e;border:1px solid #38bdf8;border-radius:6px;padding:10px 14px;
-              color:#bae6fd;font-size:12px;margin:0 0 12px 0">
-      If you exit, record it: <code style="color:#7dd3fc">python cycles_trading_scanner.py close {pid}</code><br>
-      If you only tighten the stop, UPDATE THE BROKER ORDER first.
-    </p>
-    <table style="width:100%;border-collapse:collapse">
-      <tr><td style="padding:6px 0;color:#64748b;font-size:13px">Current Price</td>
-          <td style="padding:6px 0;color:#e2e8f0;font-size:13px;text-align:right">${cur_price:.2f}</td></tr>
-      <tr><td style="padding:6px 0;color:#64748b;font-size:13px">Current Stop</td>
-          <td style="padding:6px 0;color:#ef4444;font-size:13px;text-align:right">${stop_p:.2f}</td></tr>
-    </table>
-  </div>
-  <p style="color:#475569;font-size:11px;text-align:center;margin-top:16px">
-    Cycles Trading -- automated signal -- not financial advice
-  </p>
-</div>
-</body>
-</html>"""
-
-    try:
-        msg = MIMEMultipart('alternative')
-        msg['Subject'] = subject
-        msg['From']    = from_email
-        msg['To']      = to_email
-        msg.attach(MIMEText(html_body, 'html', 'utf-8'))
-        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as srv:
-            srv.login(from_email, password)
-            srv.sendmail(from_email, to_email, msg.as_string())
-        return True
-    except Exception as e:
-        print(f"    Momentum-exit email FAILED: {e}")
-        return False
-
-
 def send_trail_stop_alert(to_email: str, entry: dict, new_stop: float) -> bool:
     """Send TRAIL STOP UPDATE when a new swing low/high allows tightening the stop."""
     from_email = os.environ.get('ALERT_EMAIL_FROM', '')
@@ -1494,31 +1135,7 @@ def send_reversal_alert(to_email: str, pos: dict, move_pct: float,
 
 
 def run_check():
-    # Slower Yahoo spacing for the checker's bulk loop (2026-07-13): at the
-    # global 0.6s the SAME ~15 requests hit Yahoo's per-minute ceiling every
-    # run (identical order + identical timing -> identical failures; two
-    # consecutive reports had the exact same 22 FETCH_ERROR tickers).
-    # 1.2s x ~184 tickers ~= 3.7 min per hourly run — comfortably inside the
-    # cap, negligible for an hourly job.
-    try:
-        import ct_market_data as _mdt
-        _mdt.YF_THROTTLE_SEC = max(getattr(_mdt, 'YF_THROTTLE_SEC', 0.6), 1.2)
-        # 2026-07-14: retries restored to 2 — the 1-retry cap bounded run
-        # time but tripled the failure rate once the watchlist grew to
-        # ~290 tickers (79 FETCH_ERROR rows in the 11:51 report). Runs of
-        # ~25-35 min are fine for an hourly job; missing 79 names is not.
-    except Exception:
-        pass
     data    = load_watchlist()
-    # Shuffle processing order each run (2026-07-14): fixed order + fixed
-    # request spacing meant the SAME tickers hit Yahoo's rate-window
-    # boundary every run — 16 identical FETCH_ERROR names four days
-    # straight. Random order rotates any throttling so every name gets
-    # fresh data most hours. Report order is unaffected (rendered sorted
-    # by prob); auto-prune tracking is per-entry.
-    import random as _rnd
-    if isinstance(data.get('tickers'), list):
-        _rnd.shuffle(data['tickers'])
     tickers = data.get('tickers', [])
     email   = data.get('email', os.environ.get('ALERT_EMAIL_TO', ''))
     today   = datetime.date.today().isoformat()
@@ -1668,50 +1285,6 @@ def run_check():
             except Exception:
                 continue
 
-            # --- Split auto-adjustment (HDB Discord lesson, Aug 2025) ---
-            # Raz: a split is purely technical and never part of the trade
-            # decision. But recorded entry/stop/TPs/units are PRE-split
-            # numbers — without adjustment every later check sees a fake
-            # crash (2:1 -> price 'halves') and fires false reversal/stop
-            # alerts, and R math breaks. Brokers adjust orders for splits
-            # automatically; the tracker now does the same, once, silently
-            # (deterministic arithmetic — unlike a dividend, nothing to
-            # judge). Checked once per day per position.
-            try:
-                if _pos.get('split_checked') != today:
-                    _pos['split_checked'] = today
-                    _pos_changed = True
-                    _sp = _yf.Ticker(_ticker).splits
-                    if _sp is not None and len(_sp):
-                        _sp_dt  = _sp.index[-1]
-                        _ratio  = float(_sp.iloc[-1])
-                        _sp_iso = str(_sp_dt.date())
-                        _sdays  = (datetime.date.today() - _sp_dt.date()).days
-                        if (0 <= _sdays <= 5 and _ratio > 0 and _ratio != 1.0
-                                and _pos.get('split_adjusted') != _sp_iso):
-                            for _k in ('entry', 'stop', 'tp1', 'tp2', 'tp3'):
-                                if _pos.get(_k):
-                                    _pos[_k] = round(float(_pos[_k]) / _ratio, 4)
-                            if _pos.get('units'):
-                                _pos['units'] = int(round(_pos['units'] * _ratio))
-                            for _h in (_pos.get('stop_history') or []):
-                                for _kk in ('from', 'to'):
-                                    if _h.get(_kk):
-                                        _h[_kk] = round(float(_h[_kk]) / _ratio, 4)
-                            _pos['split_adjusted'] = _sp_iso
-                            _pos['notes'] = (str(_pos.get('notes') or '') +
-                                             f' [split {_ratio:g}:1 auto-adjusted {_sp_iso}'
-                                             f' — verify broker order quantities]')
-                            # refresh this iteration's locals so all checks
-                            # below use post-split numbers
-                            _entry_p  = _pos.get('entry') or 0
-                            _stop_p   = _pos.get('stop') or 0
-                            _target_p = _pos.get('tp1') or 0
-                            print(f"    {_ticker}: split {_ratio:g}:1 ({_sp_iso}) "
-                                  f"-> positions.json auto-adjusted")
-            except Exception:
-                pass
-
             # --- Reversal-day check (Discord lesson: NOW short, +10% day) ---
             try:
                 _dd = _yfh(_yf.Ticker(_ticker), period='5d', interval='1d')
@@ -1751,111 +1324,16 @@ def run_check():
                     _pos_changed = True
                     alerts_sent += 1
 
-            # --- Momentum-exit signal (TKO lesson, Jan 2026 / lesson 33) ---
-            # The momentum principle's FALLING side: the first closed weekly
-            # candle that closes below the prior candle's LOW (LONG; mirror
-            # for SHORT) marks 'a negative change in the candles' ->
-            # proactive exit consideration (Ori/Meni, TKO thread). Gated to
-            # positions in profit >=1R vs original risk — the principle
-            # manages momentum runs, not losing chop (stop handles those).
-            try:
-                _sh0 = _pos.get('stop_history') or []
-                _os0 = _sh0[0].get('from', _stop_p) if _sh0 else _stop_p
-                _rps = (_entry_p - _os0) if _is_long else (_os0 - _entry_p)
-                _rm0 = (((_cur_p - _entry_p) if _is_long else (_entry_p - _cur_p))
-                        / _rps) if _rps > 0 else 0.0
-                if _rm0 >= 1.0 and len(_hist) >= 3:
-                    _lc  = float(_hist['Close'].iloc[-2])   # last CLOSED week
-                    _bar = str(_hist.index[-2].date())
-                    _neg = (_lc < float(_hist['Low'].iloc[-3])) if _is_long                            else (_lc > float(_hist['High'].iloc[-3]))
-                    if _neg and _pos.get('mom_exit_alerted') != _bar:
-                        print(f"    {_ticker}: weekly close beyond prior candle's "
-                              f"{'low' if _is_long else 'high'} at +{_rm0:.1f}R -> MOMENTUM EXIT")
-                        if send_momentum_exit_alert(email, _pos, _cur_p, _rm0, _bar):
-                            _pos['mom_exit_alerted'] = _bar
-                            _pos_changed = True
-                            alerts_sent += 1
-            except Exception:
-                pass
-
-            # --- Dividend awareness (TMRP Discord lesson, Apr 2026) ---
-            # A meaningful dividend (>=2% of price; TMRP's special div was
-            # ~10%) shifts the adjusted chart AND drops the market price on
-            # the ex-date without being a real loss — recorded entry/stop/TP
-            # are pre-dividend numbers and the broker stop can fire on a
-            # 'drop' that is actually the payout. Checked once per day,
-            # alerted once per ex-date.
-            try:
-                if _pos.get('div_checked') != today:
-                    _pos['div_checked'] = today
-                    _pos_changed = True
-                    _dvs = _yf.Ticker(_ticker).dividends
-                    if _dvs is not None and len(_dvs):
-                        _ex_dt  = _dvs.index[-1]
-                        _amt    = float(_dvs.iloc[-1])
-                        _ex_iso = str(_ex_dt.date())
-                        _days_ago = (datetime.date.today() - _ex_dt.date()).days
-                        _yield = (_amt / _cur_p * 100) if _cur_p > 0 else 0
-                        if (0 <= _days_ago <= 3 and _yield >= 2.0
-                                and _pos.get('div_alerted') != _ex_iso):
-                            print(f"    {_ticker}: dividend {_amt:.2f} ({_yield:.1f}%) ex {_ex_iso} -> DIVIDEND ALERT")
-                            if send_dividend_alert(email, _pos, _cur_p, _amt,
-                                                   _yield, _ex_iso):
-                                _pos['div_alerted'] = _ex_iso
-                                alerts_sent += 1
-            except Exception:
-                pass
-
-            # --- Pre-earnings management (ALNY + EOG Discord lessons) ---
-            # R measured vs ORIGINAL risk (first recorded stop, pre-trailing).
-            #   >=2R with earnings <=14d  -> take 50%, DON'T move stop (ALNY)
-            #   < 1R with earnings <=10d  -> CLOSE before earnings (EOG):
-            #     near entry/stop a gap-down 'skips' the stop and ejects at a
-            #     bigger loss than planned; fear shrinks as profit grows.
-            #   1R-2R                     -> no alert (judgment zone).
-            # One-time alert per position.
-            try:
-                _sh = _pos.get('stop_history') or []
-                _orig_stop = _sh[0].get('from', _stop_p) if _sh else _stop_p
-                _risk_ps = (_entry_p - _orig_stop) if _is_long else (_orig_stop - _entry_p)
-                _r_mult  = (((_cur_p - _entry_p) if _is_long else (_entry_p - _cur_p))
-                            / _risk_ps) if _risk_ps > 0 else 0.0
-                if _risk_ps > 0 and not _pos.get('preearn_alerted')                         and (_r_mult >= 2.0 or _r_mult < 1.0):
-                    from ct_market_data import get_earnings as _get_earn
-                    _edate, _edays = _get_earn(_yf.Ticker(_ticker))
-                    if _edays is not None and _r_mult >= 2.0 and 0 <= _edays <= 14:
-                        _half = max(1, int((_pos.get('units') or 2) / 2))
-                        print(f"    {_ticker}: +{_r_mult:.1f}R, earnings in {_edays}d -> PRE-EARNINGS DE-RISK")
-                        if send_preearnings_alert(email, _pos, _cur_p, _r_mult,
-                                                  _edate, _edays, _half):
-                            _pos['preearn_alerted'] = today
-                            _pos_changed = True
-                            alerts_sent += 1
-                    elif _edays is not None and _r_mult < 1.0 and 0 <= _edays <= 10:
-                        print(f"    {_ticker}: {_r_mult:+.1f}R near entry, earnings in {_edays}d -> PRE-EARNINGS EXIT")
-                        if send_preearnings_exit_alert(email, _pos, _cur_p, _r_mult,
-                                                       _edate, _edays):
-                            _pos['preearn_alerted'] = today
-                            _pos_changed = True
-                            alerts_sent += 1
-            except Exception:
-                pass
-
-            # --- Trail Stop check (Rule 1: most recent CONFIRMED swing) ---
-            # Eli (RKLB lesson, Jan 2026): a swing low anchors the trail
-            # only after the preceding peak is BROKEN — the higher high
-            # validates the higher low. Unconfirmed pivots don't trail.
+            # --- Trail Stop check (Rule 1: most recent swing + 1% buffer) ---
             _prev_close = _close_s.iloc[:-1]  # confirmed bars only
-            from ct_indicators import (last_confirmed_swing_low as _conf_low,
-                                       last_confirmed_swing_high as _conf_high)
             if _is_long:
-                _sw = _conf_low(_prev_close, order=2)
-                _new_stop = round(_sw * (1 - _pm_buf), 2) if _sw else None
+                _swings   = _swing_lows(_prev_close, order=2)
+                _new_stop = round(_swings[-1] * (1 - _pm_buf), 2) if _swings else None
                 _better   = (_new_stop is not None
                              and _new_stop > _stop_p and _new_stop < _cur_p)
             else:
-                _sw = _conf_high(_prev_close, order=2)
-                _new_stop = round(_sw * (1 + _pm_buf), 2) if _sw else None
+                _swings   = _swing_highs(_prev_close, order=2)
+                _new_stop = round(_swings[-1] * (1 + _pm_buf), 2) if _swings else None
                 _better   = (_new_stop is not None
                              and _new_stop < _stop_p and _new_stop > _cur_p)
 

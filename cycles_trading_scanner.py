@@ -195,13 +195,6 @@ def main():
         except (EOFError, KeyboardInterrupt):
             ticker_input = ''
 
-    # 'ALL' sentinel == scan everything. Needed because cmd batch files CANNOT
-    # set an empty env var: `set CT_TICKER_INPUT=` DELETES the variable, so the
-    # scheduled runs fell back into the input() prompt and hung (Jul 10 + Jul 14
-    # evening scans). Bats now set CT_TICKER_INPUT=ALL explicitly.
-    if ticker_input == 'ALL':
-        ticker_input = ''
-
     # Interval is always Weekly — Cycles Trading standard
     INTERVAL, PERIOD, IV_LABEL = '1wk', '2y', 'Weekly (1wk)'
     print()
@@ -228,12 +221,11 @@ def main():
             scan_stocks = [ticker_input]; scan_israel = []; scan_intl = []; scan_crypto = []; scan_commodity = []
         print(f"  Scanning: {ticker_input}")
     else:
-        from ct_config import SCAN_INTL, SCAN_CRYPTO, SCAN_COMMODITY
         scan_stocks    = STOCK_WATCHLIST
         scan_israel    = ISRAEL_WATCHLIST
-        scan_intl      = INTL_WATCHLIST      if SCAN_INTL      else []
-        scan_crypto    = CRYPTO_WATCHLIST    if SCAN_CRYPTO    else []
-        scan_commodity = COMMODITY_WATCHLIST if SCAN_COMMODITY else []
+        scan_intl      = INTL_WATCHLIST
+        scan_crypto    = CRYPTO_WATCHLIST
+        scan_commodity = COMMODITY_WATCHLIST
         total_all = len(scan_stocks)+len(scan_israel)+len(scan_intl)+len(scan_crypto)+len(scan_commodity)
         print(f"  Scanning ALL {total_all} assets:")
         print(f"    US Stocks: {len(scan_stocks)}  |  Israeli: {len(scan_israel)}  |  International: {len(scan_intl)}")

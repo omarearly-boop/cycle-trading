@@ -135,6 +135,59 @@ def _fetch_sp400() -> List[str]:
     return _fetch_wikipedia_index("List_of_S%26P_400_companies")
 
 
+def _fetch_nasdaq_liquid(min_cap: float = 2e9,
+                         min_dollar_vol: float = 25e6,
+                         limit: int = 500) -> List[str]:
+    """Liquid NASDAQ names that belong to no S&P index (CRDO, ARM, RDDT...).
+
+    The four index lists miss non-S&P NASDAQ listings entirely — CRDO
+    (~$36B, ~$36M/week dollar volume) was invisible to every scan until
+    a community thread surfaced it (Jul 2026). NASDAQ's own screener API
+    returns market cap and daily volume per symbol, so we keep only names
+    that would survive the scanner's liquidity gate anyway:
+
+        market cap >= min_cap            (default $2B)
+        price x daily volume >= min_dollar_vol  (default $25M/day
+                                          ~= the $125M/week floor)
+
+    Sorted by dollar volume, capped at `limit` so a runaway response can
+    never triple scan time. Returns [] on any failure — the caller treats
+    this as one optional source among several.
+    """
+    url = ("https://api.nasdaq.com/api/screener/stocks"
+           "?tableonly=true&download=true&exchange=NASDAQ")
+    r = requests.get(url, timeout=30, headers={
+        **_HEADERS,
+        'Origin':  'https://www.nasdaq.com',
+        'Referer': 'https://www.nasdaq.com/',
+    })
+    r.raise_for_status()
+    rows = (r.json().get('data') or {}).get('rows') or []
+
+    def _num(val) -> float:
+        """'$1,234.56' / '1,234' / '' -> float (0.0 when unparseable)."""
+        try:
+            return float(re.sub(r'[^0-9.\-]', '', str(val or '')) or 0)
+        except (ValueError, TypeError):
+            return 0.0
+
+    scored = []
+    for row in rows:
+        sym = (row.get('symbol') or '').strip().upper()
+        # Skip warrants/units/rights/preferreds and malformed symbols
+        if not re.fullmatch(r'[A-Z]{1,5}', sym):
+            continue
+        cap   = _num(row.get('marketCap'))
+        price = _num(row.get('lastsale'))
+        vol   = _num(row.get('volume'))
+        dollar_vol = price * vol
+        if cap >= min_cap and dollar_vol >= min_dollar_vol:
+            scored.append((dollar_vol, sym))
+
+    scored.sort(reverse=True)
+    return [s for _, s in scored[:limit]]
+
+
 def _fetch_russell2000_top() -> List[str]:
     """Russell 2000 top 300 by market weight from iShares IWM ETF holdings CSV.
 
@@ -366,6 +419,7 @@ def get_us_universe(use_tv: bool = True) -> List[str]:
         ("NASDAQ 100",       _fetch_nasdaq100),
         ("S&P 400 Mid",      _fetch_sp400),
         ("Russell 2000 Top", _fetch_russell2000_top),
+        ("NASDAQ liquid",    _fetch_nasdaq_liquid),
     ]:
         try:
             result = fn()
@@ -403,7 +457,8 @@ def get_universe(force_refresh: bool = True) -> Dict[str, List[str]]:
         except Exception:
             pass   # fall through to fresh fetch
 
-    print("  Fetching live market universe (S&P 500 + NASDAQ 100 + S&P 400 + Russell 2000 Top + Israel)...")
+    print("  Fetching live market universe (S&P 500 + NASDAQ 100 + S&P 400 + "
+          "Russell 2000 Top + NASDAQ liquid + Israel)...")
     us     = get_us_universe()
     israel = get_israel_universe()
 
@@ -425,6 +480,10 @@ if __name__ == '__main__':
     u = get_universe(force_refresh=True)
     print(f"\nUS universe sample: {u['us'][:10]} ... total {len(u['us'])}")
     print(f"Israel: {u['israel'][:5]} ... total {len(u['israel'])}")
-    for t in ['KLAC', 'NVDA', 'AAPL', 'YELP']:
+    # CRDO/ARM = liquid NASDAQ names in no S&P index (the gap this module's
+    # NASDAQ-liquid source closes). MISS on both means the screener API call
+    # failed or its response shape changed. (Don't add NYSE names like RDDT
+    # here — a NASDAQ screener will never return them.)
+    for t in ['KLAC', 'NVDA', 'AAPL', 'YELP', 'CRDO', 'ARM']:
         found = t in u['us']
         print(f"  {'OK' if found else 'MISS'} {t}")

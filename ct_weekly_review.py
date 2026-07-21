@@ -39,27 +39,7 @@ today = datetime.date.today()
 last_fri = today - datetime.timedelta(days=(today.weekday() - 4) % 7 or 7)
 last_mon = last_fri - datetime.timedelta(days=4)
 period_label = f"{last_mon.strftime('%b %d')} – {last_fri.strftime('%b %d, %Y')}"
-print(f"\n  Week: {period_label}  (last completed trading week)")
-
-def _pick_scan_csv(csv_paths, week_start):
-    """Last scan produced BEFORE the reviewed week began (no look-ahead).
-
-    CAUGHT/MISSED must be judged against what the scanner knew in advance.
-    Filenames: cycles_scan_YYYYMMDD_HHMM.csv. Falls back to the newest
-    file (with a warning) when no pre-week scan exists yet.
-    """
-    import re as _re
-    dated = []
-    for c in sorted(csv_paths):
-        m = _re.search(r'cycles_scan_(\d{8})_(\d{4})', Path(c).stem)
-        if m:
-            d = datetime.datetime.strptime(m.group(1), '%Y%m%d').date()
-            dated.append((d, c))
-    pre = [c for d, c in dated if d < week_start]
-    if pre:
-        return pre[-1], True
-    return (dated[-1][1], False) if dated else (None, False)
-
+print(f"\n  Week: {period_label}")
 
 # ─── Load universe ────────────────────────────────────────────────────────────
 cache_file = BASE_DIR / '.universe_cache.json'
@@ -78,11 +58,8 @@ print(f"  Universe: {len(us_tickers)} tickers")
 # ─── Load latest scan CSV (our setups) ───────────────────────────────────────
 csvs = sorted(glob.glob(str(REPORTS_DIR / 'cycles_scan_*.csv')))
 scan_setups = {}   # ticker -> row dict
-latest_csv, _pre_week = _pick_scan_csv(csvs, last_mon) if csvs else (None, False)
-if latest_csv:
-    if not _pre_week:
-        print('  WARNING: no scan file predates the reviewed week — '
-              'using newest scan (look-ahead!); stats unreliable.')
+if csvs:
+    latest_csv = csvs[-1]
     scan_date  = Path(latest_csv).stem.replace('cycles_scan_', '')
     with open(latest_csv, newline='', encoding='utf-8') as f:
         for row in csv.DictReader(f):
@@ -116,7 +93,7 @@ for i in range(0, len(us_tickers), BATCH):
     try:
         df = yf.download(
             batch, start=start_str, end=end_str,
-            auto_adjust=False, progress=False, threads=True
+            auto_adjust=True, progress=False, threads=True
         )
         closes = df.get('Close')
         if closes is None:
@@ -182,26 +159,20 @@ print(f"  CAUGHT: {len(caught)}  |  MISSED: {len(missed)}")
 def diagnose_missed(ticker, close_px):
     """Return a short reason why the scanner would have skipped this ticker."""
     try:
-        # 1y window: the 52-week check needs it (3mo made rolling(252) all-NaN
-        # so 'Near 52w high' could never fire)
-        df = yf.download(ticker, period='1y', interval='1d',
-                         auto_adjust=False, progress=False)
+        df = yf.download(ticker, period='3mo', interval='1d',
+                         auto_adjust=True, progress=False)
         if df is None or len(df) < 20:
             return 'Not enough history'
-        closes = df['Close'].squeeze().dropna()   # Yahoo re-fetches can be gappy
-        if len(closes) < 20:
-            return 'Not enough clean history'
+        closes = df['Close'].squeeze()
         # RSI
         delta = closes.diff()
         gain  = delta.clip(lower=0).rolling(14).mean()
         loss  = (-delta.clip(upper=0)).rolling(14).mean()
         rs    = gain / loss
         rsi   = float((100 - 100 / (1 + rs)).iloc[-1])
-        if rsi != rsi:   # NaN guard: don't misclassify as 'No S/R cluster'
-            return 'Data gap — RSI unavailable (Yahoo throttling; rerun later)'
-        # 52-week (or as much history as exists) high/low proximity
-        hi52 = float(closes.tail(252).max())
-        lo52 = float(closes.tail(252).min())
+        # 52-week low/high proximity
+        hi52 = float(closes.rolling(252).max().iloc[-1])
+        lo52 = float(closes.rolling(252).min().iloc[-1])
         dist_hi = (hi52 - close_px) / hi52 * 100
         dist_lo = (close_px - lo52) / lo52 * 100
         reasons = []
